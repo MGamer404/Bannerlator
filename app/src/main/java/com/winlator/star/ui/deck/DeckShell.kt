@@ -107,6 +107,9 @@ import com.winlator.star.ui.ComponentReturnBus
 import com.winlator.star.ui.LocalTopBarActions
 import com.winlator.star.ui.LocalTopBarTransparent
 import com.winlator.star.ui.Screen
+import com.winlator.star.ui.deck.settings.BindDeckSettingsBus
+import com.winlator.star.ui.deck.settings.DeckSettingsRoutes
+import com.winlator.star.ui.deck.settings.deckSettingsRoutes
 import com.winlator.star.ui.screens.ContainerDetailViewModel
 import com.winlator.star.ui.screens.GameMenuAction
 import com.winlator.star.ui.screens.GamesScreenRequests
@@ -146,7 +149,7 @@ internal enum class DeckTab(val label: String, val icon: ImageVector, val root: 
     COMPONENTS("Components", Icons.Filled.Extension, DeckRoutes.COMPONENTS),
     CONTROLS("Controls", Icons.Filled.SportsEsports, DeckRoutes.CONTROLS),
     TOOLS("Tools", Icons.Filled.Build, DeckRoutes.TOOLS),
-    SETTINGS("Settings", Icons.Filled.Settings, Screen.Settings.route),
+    SETTINGS("Settings", Icons.Filled.Settings, DeckSettingsRoutes.APP),
 }
 
 /** Phone bottom bar: these five, and "More" for the rest. */
@@ -156,12 +159,12 @@ private val PORTRAIT_MAIN = listOf(DeckTab.HOME, DeckTab.STORES, DeckTab.CONTAIN
 internal fun deckTabOf(route: String?): DeckTab = when {
     route == null -> DeckTab.HOME
     route == DeckRoutes.STORES -> DeckTab.STORES
-    route == Screen.Containers.route || route.startsWith("container_detail") -> DeckTab.CONTAINERS
+    route == Screen.Containers.route || route.startsWith("container_detail") || DeckSettingsRoutes.isContainerEditor(route) -> DeckTab.CONTAINERS
     route == DeckRoutes.COMPONENTS || route == Screen.Contents.route -> DeckTab.COMPONENTS
     route == DeckRoutes.CONTROLS || route == Screen.InputControls.route -> DeckTab.CONTROLS
     route == DeckRoutes.TOOLS || route == Screen.FileManager.route || route == Screen.SaveManager.route ||
         route == Screen.Saves.route || route == Screen.Wrappers.route || route == Screen.AdrenoTools.route -> DeckTab.TOOLS
-    route == Screen.Settings.route || route == Screen.Appearance.route -> DeckTab.SETTINGS
+    route == DeckSettingsRoutes.APP || route == Screen.Settings.route || route == Screen.Appearance.route -> DeckTab.SETTINGS
     else -> DeckTab.HOME
 }
 
@@ -249,6 +252,8 @@ private fun DeckShellContent(
     }
     var searchOpen by remember { mutableStateOf(false) }
     val openSearch: () -> Unit = { searchOpen = true }
+    // Settings from any game menu (Home, game page, All games) opens the Deck editor while the shell is up.
+    BindDeckSettingsBus(navController)
 
     // Same as the classic shell: clear the previous screen's top-bar actions on navigation and re-read the signed-in account.
     // Screens re-set their actions from a LaunchedEffect that runs after this one.
@@ -342,7 +347,7 @@ private fun DeckShellContent(
         val handler: (KeyEvent) -> Boolean = handler@{ ev ->
             val first = ev.action == KeyEvent.ACTION_DOWN && ev.repeatCount == 0
             when (ev.keyCode) {
-                // L1/R1 always move the top-level tabs; L2/R2 move a page's own tab strip, else the top-level tabs.
+                // L1/R1 always move the top-level tabs; L2/R2 move a page's own tabs (a tab strip, the settings editor's categories), else the top-level tabs.
                 KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_LEFT_BRACKET -> { if (first) switchMenu(-1); true }
                 KeyEvent.KEYCODE_BUTTON_R1, KeyEvent.KEYCODE_RIGHT_BRACKET -> { if (first) switchMenu(1); true }
                 KeyEvent.KEYCODE_BUTTON_L2 -> { if (first) deckActions.subTab.value?.invoke(-1) ?: switchMenu(-1); true }
@@ -510,11 +515,12 @@ private fun DeckShellContent(
                                     navController = navController,
                                     startRoute = DeckRoutes.HOME,
                                     modifier = Modifier.fillMaxSize(),
+                                    containerEditorRoute = DeckSettingsRoutes::containerEditorFor,
                                     extraRoutes = {
                                         composable(DeckRoutes.HOME) {
                                             DeckHome(
                                                 onOpenGame = { shortcut -> nav.open(DeckRoutes.game(shortcut.file.path)) },
-                                                onOpenContainer = { id -> nav.open("container_detail?id=$id") },
+                                                onOpenContainer = { id -> nav.open(DeckSettingsRoutes.containerEditorFor(id) ?: "container_detail?id=$id") },
                                                 onAddGame = {
                                                     GamesScreenRequests.pending = GamesScreenRequests.Request(GameMenuAction.ADD_GAME)
                                                     nav.open(Screen.Games.route)
@@ -530,7 +536,7 @@ private fun DeckShellContent(
                                             DeckGamePage(
                                                 shortcutPath = entry.arguments?.getString(DeckRoutes.GAME_ARG).orEmpty(),
                                                 onBack = { nav.back() },
-                                                onOpenContainer = { id -> nav.open("container_detail?id=$id") },
+                                                onOpenContainer = { id -> nav.open(DeckSettingsRoutes.containerEditorFor(id) ?: "container_detail?id=$id") },
                                             )
                                         }
                                         composable(DeckRoutes.STORES) {
@@ -542,6 +548,7 @@ private fun DeckShellContent(
                                         }
                                         composable(DeckRoutes.COMPONENTS) { DeckComponentsPage() }
                                         composable(DeckRoutes.CONTROLS) { DeckControlsPage() }
+                                        deckSettingsRoutes(navController, onAbout)
                                         composable(DeckRoutes.TOOLS) {
                                             DeckToolsPage(
                                                 onNavigate = { route -> nav.open(route) },
@@ -1293,8 +1300,9 @@ private fun DeckPageBar(
         }
         if (settingsSubTabs) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(Screen.Settings.route to "Settings", Screen.Appearance.route to "Appearance").forEach { (route, label) ->
-                    val selected = currentRoute == route
+                // "Settings" is the Deck settings editor; the classic Settings screen it hands off to counts as it.
+                listOf(DeckSettingsRoutes.APP to "Settings", Screen.Appearance.route to "Appearance").forEach { (route, label) ->
+                    val selected = currentRoute == route || (route == DeckSettingsRoutes.APP && currentRoute == Screen.Settings.route)
                     val shape = RoundedCornerShape(12.dp)
                     Text(
                         text = label,
