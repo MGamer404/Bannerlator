@@ -199,7 +199,8 @@ class MainActivity : AppCompatActivity() {
             }
 
         val willInstall = splashViewModel.installIfNeeded(this)
-        deckOnboardingPending.value = com.winlator.star.ui.deck.deckSetupPending(this)
+        // The Deck first-run is for new installs only: an app that already has its base system skips it (Tools can still re-run it).
+        deckOnboardingPending.value = willInstall && com.winlator.star.ui.deck.deckSetupPending(this)
         // The Deck first-run asks for these itself (steps 2 and 3), so they are not fired at it here.
         if (!willInstall && !deckOnboardingPending.value) {
             // Already installed — request permissions immediately
