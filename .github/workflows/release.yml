@@ -78,9 +78,82 @@ jobs:
     with:
       release_number: ${{ inputs.release_number }}
 
+  # Phase 1b — small in-app updates. One job per flavor: a direct patch from each of the last
+  # PATCH_FROM app releases (stable and pre) to the new APK, each one applied back and checked
+  # byte-exact before it is kept. Keyed by the OLD APK's sha256, never by versionCode (dev
+  # builds freeze it). Old releases without this flavor (antutu before 3.1.6-pre1) and
+  # non-app releases (fex-2609-r3) have no matching asset and are skipped. A patch failure
+  # never blocks the release: that flavor just keeps full-size updates. See scripts/apk_delta.py.
+  patches:
+    needs: build
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [standard, ludashi, pubg, antutu]
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      N: ${{ inputs.release_number }}
+      TAG: ${{ inputs.release_tag }}
+      F: ${{ matrix.flavor }}
+      PATCH_FROM: 8
+    steps:
+    - name: Clone repository
+      uses: actions/checkout@v4
+      with:
+        sparse-checkout: scripts
+
+    - name: Download the new ${{ matrix.flavor }} APK
+      uses: actions/download-artifact@v4
+      with:
+        name: Bannerlator-${{ inputs.release_number }}-${{ matrix.flavor }}
+        path: new
+
+    - name: Make and check the patches
+      run: |
+        set -euo pipefail
+        NEW="new/Bannerlator-${N}-${F}.apk"
+        mkdir -p patches old
+        echo '{}' > "patches/patches-${F}.json"
+        gh release list -R "$GITHUB_REPOSITORY" --limit 40 --json tagName -q '.[].tagName' | grep -vxF "$TAG" > tags.txt || true
+        made=0
+        while read -r T && [ "$made" -lt "$PATCH_FROM" ]; do
+          A=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${T}" \
+                -q "[.assets[] | select(.name | test(\"^Bannerlator-.*-${F}\\\\.apk$\")) | .name] | first // empty")
+          [ -n "$A" ] || continue
+          gh release download "$T" -R "$GITHUB_REPOSITORY" -p "$A" -D old --clobber
+          P="Bannerlator-${N}-${F}-from-${T}.bldp"
+          echo "== $T ($A)"
+          python3 -I scripts/apk_delta.py make "old/$A" "$NEW" "patches/$P"
+          if python3 -I scripts/apk_delta.py apply "old/$A" "patches/$P" rebuilt.apk && cmp -s rebuilt.apk "$NEW"; then
+            OLD_SHA=$(sha256sum "old/$A" | cut -d' ' -f1)
+            jq --arg k "$OLD_SHA" --arg file "$P" --arg from "$T" \
+               --arg sha "$(sha256sum "patches/$P" | cut -d' ' -f1)" \
+               --argjson size "$(stat -c %s "patches/$P")" \
+               '.[$k] = {file:$file, from:$from, size:$size, sha256:$sha}' \
+               "patches/patches-${F}.json" > p.tmp && mv p.tmp "patches/patches-${F}.json"
+            made=$((made + 1))
+          else
+            echo "::warning::patch from $T for $F did not rebuild byte-exact, dropped"
+            rm -f "patches/$P"
+          fi
+          rm -f "old/$A" rebuilt.apk
+        done < tags.txt
+        echo "made $made patches for $F"; cat "patches/patches-${F}.json"
+        { echo "### Patches for ${F}"; echo; echo '```json'; cat "patches/patches-${F}.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Keep them for the publish job
+      uses: actions/upload-artifact@v4
+      with:
+        name: patches-${{ matrix.flavor }}
+        path: patches/
+        retention-days: 7
+
   # Phase 2 — collect the built APKs and publish the release + update.json.
   release:
-    needs: [notes, build]
+    needs: [notes, build, patches]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.notes.result == 'success' }}
     runs-on: ubuntu-22.04
     steps:
     - name: Clone repository
@@ -103,6 +176,15 @@ jobs:
       with:
         name: release-notes
         path: notes
+
+    - name: Download the patches
+      # Missing artifacts (a flavor whose patch job failed) are fine: those users get the full APK.
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        pattern: patches-*
+        path: patches
+        merge-multiple: true
 
     - name: Get version info
       run: |
@@ -147,6 +229,18 @@ jobs:
                     "com.tencent.ig":($base+"/"+$pbg),"com.antutu.ABenchMark":($base+"/"+$atu)},
             size:{"com.winlator.banner":$sstd,"com.ludashi.benchmark":$slud,"com.tencent.ig":$spbg,"com.antutu.ABenchMark":$satu}}' \
           > update.json
+        # Small updates (3.1.6 on): patches = {old APK sha256: {file, url, from, size, sha256}} across all
+        # flavors (the sha already says which flavor), apkSha256 = the new APK per package, checked
+        # after the rebuild. Builds that don't know the keys download the full APK as before.
+        mkdir -p patches
+        sha() { sha256sum "dist/Bannerlator-${N}-$1.apk" 2>/dev/null | cut -d' ' -f1; }
+        jq -s 'add // {}' patches/patches-*.json 2>/dev/null > patches.json || echo '{}' > patches.json
+        jq --slurpfile p patches.json \
+           --arg base "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${{ inputs.release_tag }}" \
+           --arg hstd "$(sha standard)" --arg hlud "$(sha ludashi)" --arg hpbg "$(sha pubg)" --arg hatu "$(sha antutu)" \
+           '.apkSha256 = {"com.winlator.banner":$hstd,"com.ludashi.benchmark":$hlud,"com.tencent.ig":$hpbg,"com.antutu.ABenchMark":$hatu}
+            | .patches = ($p[0] | map_values(. + {url: ($base + "/" + .file)}))' \
+           update.json > u.tmp && mv u.tmp update.json
         echo "Generated update.json:"; cat update.json
 
     - name: Create GitHub Release
@@ -163,6 +257,7 @@ jobs:
           dist/Bannerlator-${{ inputs.release_number }}-ludashi.apk
           dist/Bannerlator-${{ inputs.release_number }}-pubg.apk
           dist/Bannerlator-${{ inputs.release_number }}-antutu.apk
+          patches/*.bldp
           update.json
         prerelease: ${{ inputs.make_prerelease == 'true' }}
         # Only a stable cut becomes "latest"; pre-releases never do, so the
