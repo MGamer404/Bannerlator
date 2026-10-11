@@ -197,23 +197,40 @@ private fun DeckGameSettings(path: String, navController: NavHostController) {
 
     val shortcut = shortcutState.value
     val containerName = containerVm.container?.name ?: shortcut.container.name
+    // Only a Wine game follows a Wine container: the Linux Steam client entry and Android games are
+    // never linked to the container editor.
+    val chain = if (env.world != World.WINE) emptyList() else listOf(
+        ChainLink("All containers", Icons.Filled.Layers) { navController.navigate(DeckSettingsRoutes.DEFAULTS) },
+        ChainLink(containerName, Icons.Filled.Inventory2) { navController.navigate(DeckSettingsRoutes.container(containerId)) },
+        ChainLink("This game", Icons.Filled.SportsEsports, null),
+    )
     DeckSettingsEditor(
         header = EditorHeader(
-            overline = "Game settings",
+            overline = when (env.world) {
+                World.LINUX -> "Linux Steam client"
+                World.ANDROID -> "Android game"
+                World.WINE -> "Game settings"
+            },
             title = shortcut.name,
             icon = Icons.Filled.SportsEsports,
-            chain = listOf(
-                ChainLink("All containers", Icons.Filled.Layers) { navController.navigate(DeckSettingsRoutes.DEFAULTS) },
-                ChainLink(containerName, Icons.Filled.Inventory2) { navController.navigate(DeckSettingsRoutes.container(containerId)) },
-                ChainLink("This game", Icons.Filled.SportsEsports, null),
-            ),
+            chain = chain,
         ),
         source = source,
         categories = SettingsRegistry.categories,
         defs = SettingsRegistry.defs,
         handoffs = SettingsRegistry.handoffs(EditorScope.GAME, env),
         onExit = { navController.popBackStack() },
-        onHandoff = { h -> if (h.target == "classic") showClassic = true },
+        onHandoff = { h ->
+            when (h.target) {
+                // The classic game editor is never opened for an Android game (it has none).
+                SettingsRegistry.TARGET_CLASSIC -> { if (env.world != World.ANDROID) showClassic = true }
+                SettingsRegistry.TARGET_DETAILS -> {
+                    GamesScreenRequests.pending = GamesScreenRequests.Request(GameMenuAction.GAME_DETAILS, shortcut.file.path)
+                    navController.navigate(Screen.Games.route)
+                }
+                else -> {}
+            }
+        },
         onChainLink = { link -> link.onClick?.invoke() },
     )
 
@@ -301,7 +318,7 @@ private fun DeckContainerSettings(id: Int, navController: NavHostController) {
         defs = SettingsRegistry.defs,
         handoffs = SettingsRegistry.handoffs(scope, env),
         onExit = { navController.popBackStack() },
-        onHandoff = { h -> if (h.target == "classic") navController.navigate("container_detail?id=$id") },
+        onHandoff = { h -> if (h.target == SettingsRegistry.TARGET_CLASSIC) navController.navigate("container_detail?id=$id") },
         onChainLink = { link -> link.onClick?.invoke() },
         headerExtra = if (!defaultsMode) null else ({
             ArchSwitch(arch) { next ->
