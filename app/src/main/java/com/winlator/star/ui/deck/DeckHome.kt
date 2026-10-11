@@ -78,6 +78,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -119,6 +120,7 @@ import com.winlator.star.ui.screens.ShortcutLaunchDialogs
 import com.winlator.star.ui.screens.ShortcutsViewModel
 import com.winlator.star.ui.screens.rememberShortcutActions
 import com.winlator.star.ui.screens.rememberShortcutLauncher
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -351,7 +353,15 @@ internal fun DeckHome(
                     onOptions = { menuFor = s },
                     // Focus bringing the buttons into view stops at their edge and leaves the hero's top cut off;
                     // the hero is the page's first item, so reaching it means the page is back at the top.
-                    onButtonsFocused = { heroScope.launch { shelfScroll.animateScrollTo(0) } },
+                    // The focused button's own bring-into-view scroll starts after this and would cancel an
+                    // immediate scroll (Options, at the row's clipped end, always triggers one), so wait it out first.
+                    onButtonsFocused = {
+                        heroScope.launch {
+                            withFrameNanos { }
+                            snapshotFlow { shelfScroll.isScrollInProgress }.first { !it }
+                            shelfScroll.animateScrollTo(0)
+                        }
+                    },
                 )
             }
             Spacer(Modifier.height(14.dp))
