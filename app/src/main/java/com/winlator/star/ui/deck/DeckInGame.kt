@@ -973,7 +973,9 @@ private fun SaveNotes(vararg lines: Pair<String, List<SaveScope>>) {
 @Composable
 private fun ScreenPage(state: XServerDrawerState) {
     val backend by state.runtimeBackend.collectAsState()
-    if (backend.isValid) {
+    val kind by DeckInGameState.sessionKind.collectAsState()
+    // The Wine architecture and x86 translator mean nothing to a Linux runtime session.
+    if (backend.isValid && kind.isWine) {
         IgSectionLabel("Running on")
         IgCard {
             val fex = if (backend.showsFexMode) when (backend.fexMode) {

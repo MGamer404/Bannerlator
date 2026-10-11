@@ -1735,12 +1735,15 @@ private fun waylandCompositorEffectsOn(): Boolean {
         brightness != 0f || contrast != 0f || gamma != 1f || saturation != 100f
 }
 
+/** Lets a host that draws these sections on its own surface (the Deck in-game menu) give their helper lines a readable colour. */
+internal val LocalDrawerHelperTextColor = androidx.compose.runtime.compositionLocalOf<Color?> { null }
+
 /** Dim one-line explanation under a control (same style as the Controls tab's Wayland note). */
 @Composable
 private fun HelperText(text: String) {
     Text(
         text,
-        color = LocalAccentDim.current,
+        color = LocalDrawerHelperTextColor.current ?: LocalAccentDim.current,
         fontSize = 11.sp,
         lineHeight = 13.sp,
         modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 2.dp)

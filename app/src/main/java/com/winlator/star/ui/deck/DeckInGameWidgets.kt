@@ -148,7 +148,12 @@ internal fun IgCard(modifier: Modifier = Modifier, content: @Composable ColumnSc
 /** A card that hosts one of the Classic drawer's own sections unchanged, with padding that suits the Deck spacing. */
 @Composable
 internal fun IgHostedCard(content: @Composable ColumnScope.() -> Unit) {
-    IgCard { Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), content = content) }
+    // The drawer's helper lines use its dim accent, which is unreadable on the Deck card.
+    androidx.compose.runtime.CompositionLocalProvider(
+        com.winlator.star.ui.LocalDrawerHelperTextColor provides MaterialTheme.colorScheme.onSurfaceVariant,
+    ) {
+        IgCard { Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), content = content) }
+    }
 }
 
 @Composable
