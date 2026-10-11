@@ -3,10 +3,17 @@ package com.winlator.star.ui.deck.settings
 import android.content.Context
 import android.os.Build
 import android.view.WindowManager
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.winlator.star.androidgames.AndroidGames
 import com.winlator.star.container.Container
 import com.winlator.star.container.Shortcut
+import com.winlator.star.core.FastOpenGL
+import com.winlator.star.core.LinuxVulkanDriver
 import com.winlator.star.ui.screens.ContainerDetailViewModel
+import com.winlator.star.ui.screens.compositorDriverChoices
 import com.winlator.star.ui.screens.isSteamOriginShortcut
 import com.winlator.star.widget.XServerView
 import java.io.File
@@ -21,6 +28,18 @@ internal enum class SettingLevel(val label: String) { SIMPLE("Simple"), ADVANCED
 
 /** What one editor edits. DEFAULTS is "All containers", i.e. the New Container Defaults profile. */
 internal enum class EditorScope { DEFAULTS, CONTAINER, GAME, APP }
+
+/**
+ * Which runtime a game belongs to. The worlds never cross: a Wine row is never offered to the Linux
+ * Steam client entry or an Android game, and a Linux runtime row only to the Linux entry. Containers,
+ * All containers and app settings are always [WINE] here (their rows say otherwise where they must).
+ */
+internal enum class World { WINE, LINUX, ANDROID }
+
+internal val WINE_ONLY: Set<World> = setOf(World.WINE)
+internal val WINE_LINUX: Set<World> = setOf(World.WINE, World.LINUX)
+internal val LINUX_ONLY: Set<World> = setOf(World.LINUX)
+internal val ALL_WORLDS: Set<World> = setOf(World.WINE, World.LINUX, World.ANDROID)
 
 internal class SettingsCategory(val id: String, val label: String, val desc: String, val icon: ImageVector)
 
@@ -56,10 +75,16 @@ internal sealed interface Control {
     data object Cores : Control
 }
 
-/** Read/write access to a game's shortcut extras. [get] returns null when the key is absent; [put] with null removes it. */
+/**
+ * Read/write access to a game's shortcut extras. [get] returns null when the key is absent; [put] with
+ * null removes it. [container] is the game's container as saved, for the settings a game stores as a
+ * whole string (Win Components, the driver config) and edits one part of.
+ */
 internal interface GameExtras {
     fun get(key: String): String?
     fun put(key: String, value: String?)
+    val container: Container
+    val env: SettingsEnv
 }
 
 /** A setting's value on the container form. Used for both a real container and the All-containers profile. */
@@ -85,6 +110,8 @@ internal class GameBinding(
     val inherited: ((SettingsEnv) -> String)? = null,
     /** What counts as "Default" for a container-inherited value that has no container-form binding. */
     val builtIn: String? = null,
+    /** Reset for a setting that is one part of a larger extra; null removes every key in [keys]. */
+    val reset: ((GameExtras) -> Unit)? = null,
 )
 
 /** A global app preference. Written the moment it changes. */
@@ -119,10 +146,14 @@ internal class SettingDef(
     /** Non-null greys the control out and shows the reason under it. */
     val disabled: (SettingsEnv, (String) -> String) -> String? = { _, _ -> null },
     val confirm: ((String) -> Confirm?)? = null,
+    /** The worlds the row belongs to (see [World]). Wine only unless it says otherwise. */
+    val worlds: Set<World> = WINE_ONLY,
+    /** A line under the row that says something about the current value, e.g. a driver warning. */
+    val note: (SettingsEnv, (String) -> String) -> String? = { _, _ -> null },
 )
 
 /** A row that opens the classic editor (or another screen) for what the Deck editor does not edit itself. */
-internal class Handoff(val label: String, val hint: String, val target: String)
+internal class Handoff(val label: String, val hint: String, val target: String, val worlds: Set<World> = WINE_ONLY)
 
 /**
  * Everything a setting may look at to decide its options and whether it applies. Built once per
@@ -136,8 +167,17 @@ internal class SettingsEnv(
     val shortcut: Shortcut?,
 ) {
     val isLinuxEntry: Boolean = shortcut?.let { com.winlator.star.linux.LinuxShortcuts.isLinuxEntry(it) } == true
+    val isAndroid: Boolean = shortcut?.let { AndroidGames.isAndroidEntry(it) } == true
     val isSteam: Boolean = shortcut?.let { s -> runCatching { isSteamOriginShortcut(s) }.getOrDefault(false) } == true
+    val isEpic: Boolean = shortcut?.getExtra("storeSource") == "epic"
+    val world: World = when {
+        isAndroid -> World.ANDROID
+        isLinuxEntry -> World.LINUX
+        else -> World.WINE
+    }
     val arm64ec: Boolean get() = vm?.isArm64EC == true
+    /** A Box64EC component is installed, so the x86-64 translator can be switched off FEXCore. */
+    val box64ECInstalled: Boolean get() = vm?.box64ECVersionEntries?.isNotEmpty() == true
 
     /** Whether the container's Wine layer can drive Wayland. Always true on the defaults profile, which has no layer. */
     val waylandCapable: Boolean
@@ -159,6 +199,34 @@ internal class SettingsEnv(
     }
     val rendererDrivers by lazy {
         runCatching { com.winlator.star.contents.AdrenotoolsManager(context).enumarateInstalledDrivers().toList() }.getOrDefault(emptyList())
+    }
+    /** The Linux runtime's draw drivers, value to label (the runtime's own first). Only read for the Linux entry. */
+    val linuxDrawDrivers: List<Pair<String, String>> by lazy {
+        runCatching { LinuxVulkanDriver.optionValues(context).map { it to LinuxVulkanDriver.optionLabel(context, it) } }
+            .getOrDefault(listOf("" to LinuxVulkanDriver.optionLabel(context, "")))
+    }
+
+    /**
+     * What the Wayland compositor driver picker offers (the same list as the classic editors), or null
+     * while [loadAsync] is still probing the drivers.
+     */
+    var compositorChoices by mutableStateOf<List<String>?>(null)
+        private set
+
+    /** Probes that must run off the main thread. Called once per editor. */
+    suspend fun loadAsync() {
+        if (scope == EditorScope.APP) return
+        compositorChoices = runCatching { compositorDriverChoices(context) }.getOrDefault(emptyList())
+    }
+
+    private val fastGlReasons = HashMap<String, String?>()
+
+    /** Why Fast OpenGL can't run on X11 with this graphics driver, or null when it can. Cached per driver. */
+    fun fastOpenGLReason(driverVersion: String): String? {
+        if (fastGlReasons.containsKey(driverVersion)) return fastGlReasons[driverVersion]
+        val reason = runCatching { FastOpenGL.unavailableReason(context, driverVersion) }.getOrNull()
+        fastGlReasons[driverVersion] = reason
+        return reason
     }
 
     /** The Wayland backend is in effect: a Linux entry always, otherwise the chosen backend on a capable layer. */

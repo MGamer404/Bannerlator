@@ -155,13 +155,18 @@ internal fun DeckSettingsEditor(
 
     val byId = remember(defs) { defs.associateBy { it.id } }
     val values: (String) -> String = { id -> byId[id]?.takeIf { source.shows(it) }?.let { source.value(it) } ?: "" }
-    fun applies(def: SettingDef) = source.shows(def) && def.visible(env, values)
+    // The worlds never cross: a row or hand-off of another world is not offered here at all.
+    fun applies(def: SettingDef) = source.shows(def) && env.world in def.worlds && def.visible(env, values)
+    val worldHandoffs = remember(handoffs, env) {
+        handoffs.mapValues { (_, list) -> list.filter { env.world in it.worlds } }.filterValues { it.isNotEmpty() }
+    }
+    LaunchedEffect(env) { env.loadAsync() }
 
     // Per category: every row that applies in this editor, and the ones shown at the chosen level.
     val rowsByCat = categories.associate { c -> c.id to defs.filter { it.category == c.id && applies(it) } }
     val shownByCat = rowsByCat.mapValues { (_, rows) -> rows.filter { it.level <= level } }
     val visibleCats = categories.filter { c ->
-        shownByCat[c.id].orEmpty().isNotEmpty() || (level != SettingLevel.SIMPLE && handoffs[c.id].orEmpty().isNotEmpty())
+        shownByCat[c.id].orEmpty().isNotEmpty() || (level != SettingLevel.SIMPLE && worldHandoffs[c.id].orEmpty().isNotEmpty())
     }
     val tracksOverrides = env.scope == EditorScope.GAME || env.scope == EditorScope.CONTAINER
     fun overrides(catId: String): List<SettingDef> =
@@ -275,7 +280,7 @@ internal fun DeckSettingsEditor(
                         values = values,
                         categories = categories,
                         defs = defs.filter { applies(it) },
-                        handoffs = handoffs,
+                        handoffs = worldHandoffs,
                         level = level,
                         compact = compact,
                         onPick = { def ->
@@ -292,7 +297,7 @@ internal fun DeckSettingsEditor(
                     CategoryPage(
                         category = current,
                         rows = shownByCat[current.id].orEmpty(),
-                        handoffs = handoffs[current.id].orEmpty(),
+                        handoffs = worldHandoffs[current.id].orEmpty(),
                         source = source,
                         values = values,
                         level = level,
@@ -877,9 +882,10 @@ private fun SettingRow(
             Spacer(Modifier.height(12.dp))
             ControlView(control, value, enabled, alignEnd = false, onPick = onPick, onCustom = onCustom)
         }
-        // Why a choice or the whole control is greyed out.
+        // Why a choice or the whole control is greyed out, and anything worth saying about the value.
         val reasons = buildList {
             disabledReason?.let { add(it) }
+            def.note(env, values)?.let { add(it) }
             if (enabled) optionsOf(control).filter { it.disabledReason != null }.forEach { add("${it.label}: ${it.disabledReason}") }
         }
         reasons.forEach {

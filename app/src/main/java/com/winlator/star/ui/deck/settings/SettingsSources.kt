@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
+import com.winlator.star.container.Container
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.WineThemeManager
 import com.winlator.star.ui.screens.ContainerDetailViewModel
@@ -128,6 +129,8 @@ internal class GameSource(
         override fun put(key: String, value: String?) {
             if (value == stored(key)) draft.remove(key) else draft[key] = value
         }
+        override val container: Container get() = shortcut.container
+        override val env: SettingsEnv get() = this@GameSource.env
     }
 
     private fun inherited(def: SettingDef): String =
@@ -161,7 +164,11 @@ internal class GameSource(
     override fun baseline(def: SettingDef): String? =
         if (def.game == null || def.game.inherit == Inherit.NONE) null else inherited(def)
 
-    override fun reset(def: SettingDef) { def.game?.keys?.forEach { extras.put(it, null) } }
+    override fun reset(def: SettingDef) {
+        val g = def.game ?: return
+        val own = g.reset
+        if (own != null) own(extras) else g.keys.forEach { extras.put(it, null) }
+    }
 
     override val dirty: Boolean get() = draft.isNotEmpty()
 
