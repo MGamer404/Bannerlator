@@ -3,6 +3,8 @@ name: APK delta check
 # Manual check of scripts/apk_delta.py on two published releases: makes the patch from
 # from_tag to to_tag, applies it back with both the Python tool and the app's own
 # core/ApkPatcher.kt (compiled for the JVM), and fails unless both rebuilds are byte-exact.
+# Then publishes that patch to Bannerlator-updates under a throwaway check-<run> tag the way
+# release.yml does, downloads it back without a token (as the app does), and deletes it.
 # Builds and publishes nothing; the patch is kept as a 3-day artifact.
 
 on:
@@ -25,8 +27,8 @@ on:
   # A new workflow can only be dispatched once it is on main, so the branch that adds it
   # runs it on push with the defaults below.
   push:
-    branches: [feat/apk-delta-updates]
-    paths: [scripts/apk_delta.py, .github/workflows/apk-delta-check.yml, tools/apkpatcher-check/**,
+    branches: [feat/apk-delta-updates, feat/apk-patches-repo]
+    paths: [scripts/apk_delta.py, scripts/publish_patches.sh, .github/workflows/apk-delta-check.yml, tools/apkpatcher-check/**,
             app/src/main/java/com/winlator/star/core/ApkPatcher.kt]
 
 jobs:
@@ -65,6 +67,20 @@ jobs:
         cmp rebuilt-kt.apk "$NEW"
         { echo "### ${FROM} → ${TO} (${F})"; echo;
           echo "full APK $(stat -c %s "$NEW") bytes, patch $(stat -c %s out/patch.bldp) bytes, Python and Kotlin rebuilds byte-exact"; } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Publish to Bannerlator-updates and download back
+      env:
+        GH_TOKEN: ${{ secrets.UPDATES_TOKEN }}
+        CHECK_TAG: check-${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        mkdir pub && cp out/patch.bldp "pub/Bannerlator-${TO}-${F}-from-${FROM}.bldp"
+        BASE=$(scripts/publish_patches.sh publish "$CHECK_TAG" pub)
+        echo "published under $BASE"
+        trap 'gh release delete "$CHECK_TAG" -R The412Banner/Bannerlator-updates --yes --cleanup-tag' EXIT
+        curl -fsSL -o back.bldp "$BASE/Bannerlator-${TO}-${F}-from-${FROM}.bldp"
+        cmp back.bldp out/patch.bldp
+        echo "public download of the published patch is byte-exact" | tee -a "$GITHUB_STEP_SUMMARY"
 
     - uses: actions/upload-artifact@v4
       with:

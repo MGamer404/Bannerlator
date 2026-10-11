@@ -186,6 +186,23 @@ jobs:
         path: patches
         merge-multiple: true
 
+    - name: Publish the patches to Bannerlator-updates
+      # The .bldp files go to their own repo (one release there per cut, same tag), so this release
+      # page keeps only the APKs. Needs secret UPDATES_TOKEN (Contents read/write on that repo).
+      # Any failure here only costs this cut its small updates: update.json then lists no patches.
+      id: patchrepo
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ secrets.UPDATES_TOKEN }}
+        TAG: ${{ inputs.release_tag }}
+      run: |
+        set -euo pipefail
+        [ -n "$GH_TOKEN" ] || { echo "::warning::UPDATES_TOKEN is not set, this release has no small updates"; exit 1; }
+        ls patches/*.bldp >/dev/null 2>&1 || { echo "no patches were made"; exit 0; }
+        BASE=$(scripts/publish_patches.sh publish "$TAG" patches)
+        echo "base=$BASE" >> "$GITHUB_OUTPUT"
+        echo "patches published under $BASE"
+
     - name: Get version info
       run: |
         echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
@@ -203,6 +220,7 @@ jobs:
       # older builds ignore them.
       env:
         RELEASE_TITLE: ${{ inputs.release_title }}
+        PATCH_BASE: ${{ steps.patchrepo.outputs.base }}
       run: |
         VERSION_CODE=$(grep versionCode app/build.gradle | head -1 | grep -oE '[0-9]+' | head -1)
         N="${{ inputs.release_number }}"
@@ -235,8 +253,10 @@ jobs:
         mkdir -p patches
         sha() { sha256sum "dist/Bannerlator-${N}-$1.apk" 2>/dev/null | cut -d' ' -f1; }
         jq -s 'add // {}' patches/patches-*.json 2>/dev/null > patches.json || echo '{}' > patches.json
+        # Only patches that actually reached Bannerlator-updates are listed.
+        [ -n "$PATCH_BASE" ] || echo '{}' > patches.json
         jq --slurpfile p patches.json \
-           --arg base "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${{ inputs.release_tag }}" \
+           --arg base "$PATCH_BASE" \
            --arg hstd "$(sha standard)" --arg hlud "$(sha ludashi)" --arg hpbg "$(sha pubg)" --arg hatu "$(sha antutu)" \
            '.apkSha256 = {"com.winlator.banner":$hstd,"com.ludashi.benchmark":$hlud,"com.tencent.ig":$hpbg,"com.antutu.ABenchMark":$hatu}
             | .patches = ($p[0] | map_values(. + {url: ($base + "/" + .file)}))' \
@@ -257,7 +277,6 @@ jobs:
           dist/Bannerlator-${{ inputs.release_number }}-ludashi.apk
           dist/Bannerlator-${{ inputs.release_number }}-pubg.apk
           dist/Bannerlator-${{ inputs.release_number }}-antutu.apk
-          patches/*.bldp
           update.json
         prerelease: ${{ inputs.make_prerelease == 'true' }}
         # Only a stable cut becomes "latest"; pre-releases never do, so the
@@ -297,3 +316,18 @@ jobs:
         git commit -q -m "manifest: ${TAG}" || { echo "manifest unchanged"; exit 0; }
         git push -q origin manifest
         echo "manifest branch updated for ${TAG}"
+
+    - name: Prune old patch releases
+      # Last, so no live manifest ever points at a deleted patch. Keeps this cut's patches and the
+      # current stable's (update.json still names it after a prerelease cut); older ones go.
+      if: ${{ steps.patchrepo.outputs.base != '' }}
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ secrets.UPDATES_TOKEN }}
+        BL_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG: ${{ inputs.release_tag }}
+      run: |
+        set -euo pipefail
+        STABLE=$(GH_TOKEN="$BL_TOKEN" gh release view -R "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+        echo "keeping patch releases $TAG and $STABLE"
+        scripts/publish_patches.sh prune "$TAG" "$STABLE"
