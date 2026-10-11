@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-10-11T14-21-21-9dfb65",
+    "created": "2026-10-11T14:21:21.669Z",
+    "reporter": "",
+    "device": "",
+    "gpu": "Mali-G925-Immortalis MC12",
+    "game": "",
+    "symptom": "Graphical glitches (corruption, flicker, missing textures)",
+    "logs": 0
+  },
+  {
     "id": "2026-10-08T16-38-15-c8aadb",
     "created": "2026-10-08T16:38:15.100Z",
     "reporter": "",
