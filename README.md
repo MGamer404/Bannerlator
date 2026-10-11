@@ -111,8 +111,9 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [🤖 AI Disclaimer](#-ai-disclaimer)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
-- [⚡ Force SSBS, v14 layers & Mali on Wayland (3.1.6-pre3)](#-force-ssbs-v14-layers--mali-on-wayland-316-pre3)
-- [🆕 SteamLite Steam Input & Wayland xdg-shell v3 (3.1.6-pre2)](#-steamlite-steam-input--wayland-xdg-shell-v3-316-pre2)
+- [⬇️ Small updates, Win Components offline & smarter game adding (3.1.6)](#️-small-updates-win-components-offline--smarter-game-adding-316)
+- [⚡ Force SSBS, v14 layers & Mali on Wayland (3.1.6)](#-force-ssbs-v14-layers--mali-on-wayland-316)
+- [🆕 SteamLite Steam Input & Wayland xdg-shell v3 (3.1.6)](#-steamlite-steam-input--wayland-xdg-shell-v3-316)
 - [🎮 Headless Steam & Server Browser (3.1.6)](#-headless-steam--server-browser-316)
 - [🎬 Cutscenes & Codecs (3.1.5)](#-cutscenes--codecs-315)
 - [⚡ Fast OpenGL (3.1.4)](#-fast-opengl-314)
@@ -130,18 +131,28 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 
 ---
 
-## ⚡ Force SSBS, v14 layers & Mali on Wayland (3.1.6-pre3)
+## ⬇️ Small updates, Win Components offline & smarter game adding (3.1.6)
 
-**[3.1.6-pre3](https://github.com/The412Banner/Bannerlator/releases/tag/3.1.6-pre3) adds a CPU speed fix for Wine on ARM, the v14 layers that carry it, and Wayland settings for Mali phones.**
+**[3.1.6](https://github.com/The412Banner/Bannerlator/releases/tag/3.1.6) is the stable release of everything below (Headless Steam, Steam Input, Force SSBS and the v14 layers, Mali on Wayland, Box64EC), plus:**
+
+- **Small updates, from the next release on** — the in-app updater downloads a small patch (usually 5–25 MB instead of 525 MB), rebuilds the new app from the installed one, checks it's an exact copy of the release and installs it as a normal update. No patch for your version, or anything goes wrong → the full download, as before. 3.1.6 itself still downloads in full; first installs and this page always give the full APK.
+- **A new update notice** — a slide-in pill (Dismiss / View), a *What's new* pop-up with highlights and the real download size, and a download card with progress and Cancel. Automatic checks happen at most every six hours.
+- **Win Components install offline** — 113 of the 123 catalog components (VC++, .NET, DirectX, XNA, codecs, fonts…) are laid out straight into the container in seconds, without starting it.
+- **Adding games** — names from the game's own files, Steam's name, art and details found by title, an art picker in *Edit Game*, components suggested per game in folder import, scrolling game and container menus.
+- **`VKD3D_SHADER_MODEL=6_6`** by default on every container, so Unreal Engine 5 games such as *Gothic 1 Remake* no longer refuse DirectX 12.
+
+## ⚡ Force SSBS, v14 layers & Mali on Wayland (3.1.6)
+
+**First in [3.1.6-pre3](https://github.com/The412Banner/Bannerlator/releases/tag/3.1.6-pre3): a CPU speed fix for Wine on ARM, the v14 layers that carry it, and Wayland settings for Mali phones.**
 
 - **Force SSBS** — Wine on ARM kept switching off the CPU's SSBS feature on game threads (the slower, extra-safe way of handling memory). The **v14** layers carry Wine's own fix ([MR 12262](https://gitlab.winehq.org/wine/wine/-/merge_requests/12262)) and the toggle (Advanced tab, container and per game) is **on by default**; older layers get the bit back through a small add-on. Biggest gains expected on Snapdragon 8 Elite (Oryon) in CPU-heavy games.
 - **v14 layers** — all ten Proton layers, both Proton 10 layers included again, in the catalog ([release notes](https://github.com/The412Banner/proton-wine/releases/tag/build-bionic-layers-20261007-v14)).
 - **Mali on Wayland** — a **Mali (PanVK)** section in the Wayland driver settings, and **System** offered as the Wayland driver on Mali (experimental).
 - **Menu button** — Input Controls › Device: pick a controller button that opens the in-game side menu (off by default; B can't be picked). Also a Toy Story 2 window fix.
 
-## 🆕 SteamLite Steam Input & Wayland xdg-shell v3 (3.1.6-pre2)
+## 🆕 SteamLite Steam Input & Wayland xdg-shell v3 (3.1.6)
 
-**[3.1.6-pre2](https://github.com/The412Banner/Bannerlator/releases/tag/3.1.6-pre2) adds Steam Input for SteamLite and xdg-shell version 3 to the Wayland compositor.**
+**First in [3.1.6-pre2](https://github.com/The412Banner/Bannerlator/releases/tag/3.1.6-pre2): Steam Input for SteamLite and xdg-shell version 3 to the Wayland compositor.**
 
 - **SteamLite Steam Input** — a per-game toggle and layout pick in the SteamLite launch options hands the controller to the game through Valve's own Steam Input layer (needs the **SteamLite v8** package, offered by the app). Keep it off for games that already read a controller themselves; the default layout keeps the pad a pad.
 - **Wayland xdg-shell v3** — the compositor now implements real positioners, pop-up windows and `reposition` and advertises version 3, which the Wayland driver of the new **Proton-CachyOS 11.0-20261005** layer requires to open any window. Layers asking for version 1 or 2 are unchanged.
