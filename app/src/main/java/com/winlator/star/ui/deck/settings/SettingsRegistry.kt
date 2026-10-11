@@ -464,7 +464,7 @@ internal object SettingsRegistry {
         // Display
         SettingDef(
             id = "display.resolution", category = "display", group = "Screen", level = SIMPLE,
-            label = "Game resolution", hint = "The size of the Windows desktop the game sees. Lower = faster.", tech = "Screen Size",
+            label = "Game resolution", hint = "The screen size the game sees. Lower = faster.", tech = "Screen Size",
             help = "Games render at this size, then the picture is scaled to your screen. A lower resolution is faster and cooler; a higher one is sharper.",
             control = { env, _ ->
                 Control.Select(
