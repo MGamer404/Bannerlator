@@ -155,7 +155,8 @@ private fun DeckGameSettings(path: String, navController: NavHostController) {
     val loaded = remember(path) {
         runCatching {
             val manager = ContainerManager(context)
-            manager.containers.firstNotNullOfOrNull { c ->
+            // The Linux Steam client and Android games live in their own homes, which are never in the container list.
+            (manager.containers + listOfNotNull(runCatching { manager.linuxContainer }.getOrNull(), runCatching { manager.androidGamesContainer }.getOrNull())).firstNotNullOfOrNull { c ->
                 val file = File(path)
                 if (file.isFile && file.parentFile?.canonicalPath == c.desktopDir.canonicalPath) Shortcut(c, file) else null
             }
