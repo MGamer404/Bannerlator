@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import androidx.core.content.FileProvider
 import androidx.preference.PreferenceManager
 import com.winlator.star.BuildConfig
@@ -47,6 +48,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * }
  */
 object UpdateManager {
+    private const val TAG = "BL_UPDATE"
     private const val REPO = "The412Banner/Bannerlator"
     const val RELEASES_PAGE = "https://github.com/$REPO/releases/latest"
     // The manifests live on the orphan `manifest` branch, served raw: reading them there counts
@@ -457,6 +459,8 @@ object UpdateManager {
         _download.value = DownloadState.Downloading(info, 0L, info.downloadSize, 0L, small = info.patch != null)
         Executors.newSingleThreadExecutor().execute {
             val patch = withPatch(activity, info, hash = true).patch
+            Log.i(TAG, "installed sha256 ${installedSha256(activity, hash = false)}: " +
+                (patch?.let { "small update from ${it.from}, ${it.size} bytes" } ?: "no patch for this install, full APK"))
             if (patch == null || interrupt.get()) {
                 activity.runOnUiThread {
                     if (interrupt.get()) { _download.value = DownloadState.Idle; onDone(false) }
@@ -467,7 +471,9 @@ object UpdateManager {
             val patchFile = File(dir, patch.file.ifBlank { "update.bldp" })
             val smallInfo = info.copy(patch = patch)
             fetch(smallInfo, patch.url, patchFile, patch.size, small = true) { ok ->
+                if (!ok && !interrupt.get()) Log.w(TAG, "patch download failed: ${patch.url}")
                 val rebuilt = ok && rebuild(activity, smallInfo, patch, patchFile, apk)
+                if (ok && !rebuilt && !interrupt.get()) Log.w(TAG, "small update failed, falling back to the full APK")
                 patchFile.delete()
                 activity.runOnUiThread {
                     when {
@@ -484,7 +490,11 @@ object UpdateManager {
     private fun rebuild(ctx: Context, info: UpdateInfo, patch: PatchInfo, patchFile: File, apk: File): Boolean {
         if (interrupt.get()) return false
         _download.value = DownloadState.Rebuilding(info, 0L, info.apkSize)
-        if (ApkPatcher.sha256(patchFile) != patch.sha256) return false
+        val patchSha = ApkPatcher.sha256(patchFile)
+        if (patchSha != patch.sha256) {
+            Log.w(TAG, "patch sha256 $patchSha, manifest says ${patch.sha256}")
+            return false
+        }
         // The patch (now trusted) names the APK it builds; it has to be the one the manifest names.
         // ApkPatcher.apply then only reports success when the rebuilt bytes hash to that sha.
         if (info.apkSha256 != null) {
@@ -493,11 +503,20 @@ object UpdateManager {
             } catch (_: Exception) {
                 return false
             }
-            if (target != info.apkSha256) return false
+            if (target != info.apkSha256) {
+                Log.w(TAG, "patch builds $target, manifest wants ${info.apkSha256}")
+                return false
+            }
         }
-        return ApkPatcher.apply(File(ctx.applicationInfo.sourceDir), patchFile, apk, interrupt) { done, total ->
+        val start = System.currentTimeMillis()
+        val ok = ApkPatcher.apply(
+            File(ctx.applicationInfo.sourceDir), patchFile, apk, interrupt,
+            onError = { Log.w(TAG, "rebuild failed: $it") },
+        ) { done, total ->
             if (_download.value is DownloadState.Rebuilding) _download.value = DownloadState.Rebuilding(info, done, total)
         }
+        if (ok) Log.i(TAG, "rebuilt ${apk.length()} bytes in ${System.currentTimeMillis() - start} ms")
+        return ok
     }
 
     private fun downloadFull(activity: Activity, info: UpdateInfo, url: String, apk: File, onDone: (Boolean) -> Unit) {

@@ -50,9 +50,13 @@ object ApkPatcher {
     /**
      * Writes the rebuilt APK to [out] and returns true only when its sha256 is the one the patch
      * names. [onProgress] gets bytes written so far and the final size. Any failure or a set
-     * [interrupt] deletes [out]; the caller then falls back to the full download.
+     * [interrupt] deletes [out]; the caller then falls back to the full download. [onError] gets
+     * the reason (this file stays free of Android classes so CI can run it on the JVM).
      */
-    fun apply(old: File, patch: File, out: File, interrupt: AtomicBoolean, onProgress: (Long, Long) -> Unit): Boolean {
+    fun apply(
+        old: File, patch: File, out: File, interrupt: AtomicBoolean,
+        onError: (String) -> Unit = {}, onProgress: (Long, Long) -> Unit,
+    ): Boolean {
         var ok = false
         try {
             BufferedInputStream(FileInputStream(patch), 1 shl 16).use { p ->
@@ -91,11 +95,14 @@ object ApkPatcher {
                         }
                     }
                 }
-                ok = written == h.newSize && hex(digest.digest()) == h.newSha256
+                val sha = hex(digest.digest())
+                ok = written == h.newSize && sha == h.newSha256
                 if (ok) onProgress(written, h.newSize)
+                else onError("rebuilt $written bytes, sha256 $sha; patch names ${h.newSize} bytes, ${h.newSha256}")
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             ok = false
+            onError(e.toString())
         }
         if (!ok) out.delete()
         return ok
