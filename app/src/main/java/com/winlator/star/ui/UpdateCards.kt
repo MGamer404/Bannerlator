@@ -83,6 +83,13 @@ private fun fmtSize(bytes: Long): String = when {
     else -> String.format(Locale.ENGLISH, "%.0f KB", bytes / 1024.0)
 }
 
+/** "23.4 MB (small update, full app 551 MB)" when this install gets a patch, else the APK size. */
+private fun sizeLine(info: UpdateInfo): String {
+    val patch = info.patch ?: return fmtSize(info.apkSize)
+    val full = fmtSize(info.apkSize)
+    return fmtSize(patch.size) + if (full.isNotEmpty()) " (small update, full app $full)" else " (small update)"
+}
+
 @Composable
 private fun accentBorder(width: Float = 1f) = BorderStroke(width.dp, MaterialTheme.colorScheme.primary)
 
@@ -126,7 +133,7 @@ fun UpdatePill(
                 }
                 Column {
                     Text("Update available", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                    val size = fmtSize(info.apkSize)
+                    val size = fmtSize(info.downloadSize)
                     Text(
                         "V ${info.versionName}" + (if (size.isNotEmpty()) " · $size" else ""),
                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.5.sp, maxLines = 1,
@@ -166,7 +173,7 @@ fun UpdateHighlightsDialog(info: UpdateInfo, onLater: () -> Unit, onUpdate: () -
                     title = "What's new in ${info.versionName}",
                     subtitle = listOf(
                         "V ${BuildConfig.VERSION_NAME} → V ${info.versionName}",
-                        fmtSize(info.apkSize),
+                        sizeLine(info),
                         info.publishedAt,
                     ).filter { it.isNotEmpty() }.joinToString(" · "),
                 )
@@ -236,6 +243,7 @@ fun UpdateHost() {
     val state by UpdateManager.download.collectAsState()
     when (val s = state) {
         is DownloadState.Downloading -> UpdateDownloadCard(s)
+        is DownloadState.Rebuilding -> UpdateRebuildCard(s)
         is DownloadState.Failed -> UpdateFailedCard(
             s,
             onRetry = {
@@ -260,7 +268,10 @@ private fun UpdateDownloadCard(s: DownloadState.Downloading) {
     ) {
         UpdateCardSurface {
             Column {
-                CardHeader(title = "Updating to V ${s.info.versionName}", subtitle = "Downloading the update…")
+                CardHeader(
+                    title = "Updating to V ${s.info.versionName}",
+                    subtitle = if (s.small) "Downloading a small update…" else "Downloading the update…",
+                )
                 Spacer(Modifier.height(14.dp))
                 val known = s.total > 0
                 if (known) {
@@ -287,6 +298,40 @@ private fun UpdateDownloadCard(s: DownloadState.Downloading) {
                         val remainMs = (s.total - s.bytes) * 1000 / s.bytesPerSec
                         Text("about ${StringUtils.humanDuration(remainMs)} left", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                     }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    CardButton("Cancel", MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurface, { UpdateManager.cancelDownload() })
+                }
+            }
+        }
+    }
+}
+
+/** Second step of a small update: the new APK is built from the installed one, no network. */
+@Composable
+private fun UpdateRebuildCard(s: DownloadState.Rebuilding) {
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+    ) {
+        UpdateCardSurface {
+            Column {
+                CardHeader(title = "Updating to V ${s.info.versionName}", subtitle = "Building the update from the installed app…")
+                Spacer(Modifier.height(14.dp))
+                if (s.total > 0 && s.bytes > 0) {
+                    LinearProgressIndicator(
+                        progress = { (s.bytes.toFloat() / s.total).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().height(6.dp),
+                        color = UpdateGreen,
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().height(6.dp),
+                        color = UpdateGreen,
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    )
                 }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
