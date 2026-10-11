@@ -11095,6 +11095,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // in onCreate) so the drawer can grey Wayland-unsupported controls such as Relative Mouse.
         XServerDrawerState.INSTANCE.setIsWaylandMode(waylandMode);
         if (waylandMode) setupWaylandDrawerGlue();
+        XServerDrawerState.INSTANCE.setLinuxRuntimeSession(gamescopeMode || isLinuxRuntimeSession());
         if (isLinuxSteamSession()) setupLinuxSteamDrawerGlue(rootView);
         xServerView = new XServerView(this, xServer);
         String rendererType = container != null ? resolvedRenderer() : "vulkan";

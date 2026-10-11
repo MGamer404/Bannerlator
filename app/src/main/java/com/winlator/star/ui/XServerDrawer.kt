@@ -164,6 +164,8 @@ fun XServerDrawer() {
     val friendsUnread by com.winlator.star.store.SteamFriendsStore.unread.collectAsState()
     // Components tab: only in a Steam (Linux) session (see LinuxComponentsContent).
     val linuxSteamSession by state.linuxSteamSession.collectAsState()
+    // Wine-only tabs (ReShade, Task Manager) stay out of any Linux-runtime session.
+    val linuxRuntimeSession by state.linuxRuntimeSession.collectAsState()
     // Re-check the friends source on every drawer open (its liveness isn't all flow-driven).
     val menuOpen by XServerDialogState.menuOpen.collectAsState()
     LaunchedEffect(menuOpen) { if (menuOpen) com.winlator.star.store.InGameFriendsSource.poke() }
@@ -215,9 +217,11 @@ fun XServerDrawer() {
                         FpsTabButton(isSelected = selectedTab == TabType.HUD) {
                             handleTabClick(TabType.HUD, state)
                         }
-                        Spacer(Modifier.height(6.dp))
-                        TabIconButton(R.drawable.icon_screen_effect, selectedTab == TabType.RESHADE) {
-                            handleTabClick(TabType.RESHADE, state)
+                        if (!linuxRuntimeSession) {
+                            Spacer(Modifier.height(6.dp))
+                            TabIconButton(R.drawable.icon_screen_effect, selectedTab == TabType.RESHADE) {
+                                handleTabClick(TabType.RESHADE, state)
+                            }
                         }
                         Spacer(Modifier.height(6.dp))
                         TabIconButton(R.drawable.icon_input_controls, selectedTab == TabType.CONTROLS) {
@@ -270,11 +274,13 @@ fun XServerDrawer() {
 
                         Spacer(Modifier.height(10.dp))
 
-                        TabIconButton(R.drawable.icon_task_manager, selectedTab == TabType.TASK_MANAGER) {
-                            state.selectTab(TabType.TASK_MANAGER)
-                            state.onTaskManager?.run()
+                        if (!linuxRuntimeSession) {
+                            TabIconButton(R.drawable.icon_task_manager, selectedTab == TabType.TASK_MANAGER) {
+                                state.selectTab(TabType.TASK_MANAGER)
+                                state.onTaskManager?.run()
+                            }
+                            Spacer(Modifier.height(6.dp))
                         }
-                        Spacer(Modifier.height(6.dp))
                         TabIconButton(pauseIcon, isSelected = false) {
                             state.onPauseResume?.run(); state.onClose?.run()
                         }
@@ -4581,13 +4587,17 @@ private fun setGyroActivationModeLive(mode: Int, reflect: (Int) -> Unit) {
 
 @Composable
 private fun AdvancedContent(state: XServerDrawerState) {
+    val linuxRuntimeSession by state.linuxRuntimeSession.collectAsState()
     SectionHeader("Advanced")
 
     AdvancedActionRow("Magnifier", R.drawable.icon_magnifier) {
         state.onClose?.run(); state.onMagnifier?.run()
     }
-    AdvancedActionRow("Active Windows", R.drawable.icon_active_windows) {
-        state.onClose?.run(); state.onActiveWindows?.run()
+    // Lists Wine's X11 windows; a Linux-runtime session has none.
+    if (!linuxRuntimeSession) {
+        AdvancedActionRow("Active Windows", R.drawable.icon_active_windows) {
+            state.onClose?.run(); state.onActiveWindows?.run()
+        }
     }
     AdvancedActionRow("Debug Logs", R.drawable.icon_debug) {
         state.onClose?.run(); state.onLogs?.run()

@@ -1278,8 +1278,11 @@ private fun GameOptionsSheet(
         // An Android game has no Wine settings, container or community configs — only its cover.
         if (!com.winlator.star.androidgames.AndroidGames.isAndroidEntry(shortcut)) {
             add(BpRow(Icons.Filled.Edit, "Edit shortcut", onEditShortcut))
-            add(BpRow(Icons.Filled.Tune, "Container settings", onContainerSettings))
-            add(BpRow(Icons.Filled.Public, "Community configs", onCommunityConfigs))
+            // The Linux Steam entry has no Wine container or community configs: its own editor only.
+            if (!com.winlator.star.linux.LinuxShortcuts.isLinuxEntry(shortcut)) {
+                add(BpRow(Icons.Filled.Tune, "Container settings", onContainerSettings))
+                add(BpRow(Icons.Filled.Public, "Community configs", onCommunityConfigs))
+            }
         }
         add(BpRow(Icons.Filled.Image, "Change cover art") {
             coverPicker.launch(

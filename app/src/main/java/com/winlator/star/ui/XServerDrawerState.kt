@@ -87,6 +87,10 @@ object XServerDrawerState {
     // settings - a flip here is saved to the entry as well as applied (live where it can be).
     private val _linuxSteamSession        = MutableStateFlow(false)
     val linuxSteamSession: StateFlow<Boolean> = _linuxSteamSession
+    // Any Linux-runtime session (Steam, desktop or run mode): no Wine underneath, so the Wine-only
+    // tools (Task Manager, Active Windows, ReShade) are hidden.
+    private val _linuxRuntimeSession      = MutableStateFlow(false)
+    val linuxRuntimeSession: StateFlow<Boolean> = _linuxRuntimeSession
     private val _linuxOptions             = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     val linuxOptions: StateFlow<Map<String, Boolean>> = _linuxOptions
     // Turnip sysmem: "" automatic, "1" on, "0" off (LinuxTuning.TU_SYSMEM_CHOICES).
@@ -572,6 +576,7 @@ object XServerDrawerState {
     fun setWaylandZeroCopyLive(v: Boolean)      { _waylandZeroCopyLive.value = v }
     fun setWaylandGlSafeMode(v: Boolean)        { _waylandGlSafeMode.value = v }
     fun setLinuxSteamSession(v: Boolean)        { _linuxSteamSession.value = v }
+    fun setLinuxRuntimeSession(v: Boolean)      { _linuxRuntimeSession.value = v }
     fun setLinuxOptions(v: Map<String, Boolean>) { _linuxOptions.value = v }
     fun setLinuxOption(key: String, v: Boolean) { _linuxOptions.value = _linuxOptions.value + (key to v) }
     fun setLinuxTurnipSysmem(v: String)         { _linuxTurnipSysmem.value = v }
@@ -735,6 +740,7 @@ object XServerDrawerState {
         _waylandZeroCopyLive.value = false
         _waylandGlSafeMode.value = true
         _linuxSteamSession.value = false
+        _linuxRuntimeSession.value = false
         _linuxOptions.value = emptyMap()
         _linuxTurnipSysmem.value = ""
         _linuxTouch.value = ""

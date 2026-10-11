@@ -1183,6 +1183,17 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 add(XmbAction("Remove", Icons.Filled.Delete, "Asks to confirm first", danger = true, menu = { xmbRemoveMenu(it, shortcut, xmbHost) }))
                 return@buildList
             }
+            // The Linux Steam entry: its settings are the Linux-side ones only, which the pop-up editor
+            // already knows (the XMB settings columns are Wine rows), and none of the Wine actions apply.
+            if (LinuxShortcuts.isLinuxEntry(shortcut)) {
+                add(XmbAction("Settings", Icons.Filled.Settings, "Steam (Linux) display, driver, controls…") { settingsShortcut = shortcut })
+                add(XmbAction("Game Details", Icons.Filled.Edit, "Name, genres, year, description", menu = { xmbGameDetailsMenu(it, shortcut) }))
+                add(XmbAction("Scrape cover", Icons.Filled.Search, menu = { xmbScrapeCoverMenu(it, shortcut) }))
+                add(XmbAction("Add to home screen", Icons.Filled.AddToHomeScreen, "Android's pin prompt") { addToHomeScreen(context, shortcut) })
+                add(XmbAction("Properties", Icons.Filled.Info, "Times played, playtime", menu = { xmbPropertiesMenu(it, shortcut) }))
+                add(XmbAction("Remove", Icons.Filled.Delete, "Asks to confirm first", danger = true, menu = { xmbRemoveMenu(it, shortcut, xmbHost) }))
+                return@buildList
+            }
             add(XmbAction("Settings", Icons.Filled.Settings, "Display, graphics, controller…", menu = { xmbSettingsMenu(it, shortcut, xmbHost) }))
             add(XmbAction("Game Details", Icons.Filled.Edit, "Name, genres, year, description", menu = { xmbGameDetailsMenu(it, shortcut) }))
             if (isSteamOriginShortcut(shortcut)) {
@@ -1265,6 +1276,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                 // Android games keep only what makes sense outside Wine: no settings, container moves, exe,
                                 // export, community configs, logs or saves.
                                 val wine = remember(shortcut) { !AndroidGames.isAndroidEntry(shortcut) }
+                                val wineOnly = remember(shortcut) { isWineEntry(shortcut) }
                                 ShortcutGridItem(
                                     shortcut = shortcut,
                                     selectionMode = selectionMode,
@@ -1275,17 +1287,17 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     },
                                     onSettings = if (wine) ({ settingsShortcut = shortcut }) else null,
                                     onRemove = { confirmRemove = shortcut },
-                                    onClone = if (wine) ({ cloneTarget = shortcut }) else null,
-                                    onCopyToDriveC = if (wine) ({ copyToDriveCTarget = shortcut }) else null,
-                                    onChangeExe = if (wine) ({ changeExeTarget = shortcut }) else null,
+                                    onClone = if (wineOnly) ({ cloneTarget = shortcut }) else null,
+                                    onCopyToDriveC = if (wineOnly) ({ copyToDriveCTarget = shortcut }) else null,
+                                    onChangeExe = if (wineOnly) ({ changeExeTarget = shortcut }) else null,
                                     onAddToHome = { addToHomeScreen(context, shortcut) },
-                                    onExport = if (wine) ({ exportShortcut(context, shortcut) }) else null,
+                                    onExport = if (wineOnly) ({ exportShortcut(context, shortcut) }) else null,
                                     onProperties = { propertiesShortcut = shortcut },
                                     onScrapeCover = { scrapeCoverFor(shortcut) },
-                                    onCommunityConfigs = if (wine) ({ communityConfigsFor(shortcut) }) else null,
+                                    onCommunityConfigs = if (wineOnly) ({ communityConfigsFor(shortcut) }) else null,
                                     onGameDetails = { gameDetailsShortcut = shortcut },
-                                    onViewLogs = if (wine) ({ logsShortcut = shortcut }) else null,
-                                    onCloudSaves = if (wine && isSteamOriginShortcut(shortcut))
+                                    onViewLogs = if (wineOnly) ({ logsShortcut = shortcut }) else null,
+                                    onCloudSaves = if (wineOnly && isSteamOriginShortcut(shortcut))
                                         ({ launchSaveManager(context, steamAppIdOf(shortcut)) }) else null,
                                     onBackupSaves = if (wine && isCustomShortcut(shortcut))
                                         ({ startSaveBackup(shortcut) }) else null,
@@ -1310,6 +1322,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                 val itemExport = { exportShortcut(context, shortcut) }
                                 val itemProperties = { propertiesShortcut = shortcut }
                                 val wine = remember(shortcut) { !AndroidGames.isAndroidEntry(shortcut) }
+                                val wineOnly = remember(shortcut) { isWineEntry(shortcut) }
                                 ShortcutItemLayoutL(
                                     shortcut = shortcut,
                                     selectionMode = selectionMode,
@@ -1317,17 +1330,17 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onRun = itemRun,
                                     onSettings = if (wine) itemSettings else null,
                                     onRemove = itemRemove,
-                                    onClone = if (wine) itemClone else null,
-                                    onCopyToDriveC = if (wine) itemCopyToDriveC else null,
-                                    onChangeExe = if (wine) itemChangeExe else null,
+                                    onClone = if (wineOnly) itemClone else null,
+                                    onCopyToDriveC = if (wineOnly) itemCopyToDriveC else null,
+                                    onChangeExe = if (wineOnly) itemChangeExe else null,
                                     onAddToHome = itemAddToHome,
-                                    onExport = if (wine) itemExport else null,
+                                    onExport = if (wineOnly) itemExport else null,
                                     onProperties = itemProperties,
                                     onScrapeCover = { scrapeCoverFor(shortcut) },
-                                    onCommunityConfigs = if (wine) ({ communityConfigsFor(shortcut) }) else null,
+                                    onCommunityConfigs = if (wineOnly) ({ communityConfigsFor(shortcut) }) else null,
                                     onGameDetails = { gameDetailsShortcut = shortcut },
-                                    onViewLogs = if (wine) ({ logsShortcut = shortcut }) else null,
-                                    onCloudSaves = if (wine && isSteamOriginShortcut(shortcut))
+                                    onViewLogs = if (wineOnly) ({ logsShortcut = shortcut }) else null,
+                                    onCloudSaves = if (wineOnly && isSteamOriginShortcut(shortcut))
                                         ({ launchSaveManager(context, steamAppIdOf(shortcut)) }) else null,
                                     onBackupSaves = if (wine && isCustomShortcut(shortcut))
                                         ({ startSaveBackup(shortcut) }) else null,
@@ -5332,7 +5345,12 @@ internal fun steamAppIdOf(shortcut: Shortcut): Int =
 // A shortcut is "custom" (exe/folder import) when it is NOT a genuine Steam-library game. Steam games
 // get the "Cloud Saves" item; custom games get the local-only "Back up / Restore saves" items.
 private fun isCustomShortcut(shortcut: Shortcut): Boolean =
-    !isSteamOriginShortcut(shortcut) && !AndroidGames.isAndroidEntry(shortcut)
+    !isSteamOriginShortcut(shortcut) && !AndroidGames.isAndroidEntry(shortcut) && !LinuxShortcuts.isLinuxEntry(shortcut)
+
+// A game that runs in a Wine container. The Linux Steam entry and Android games don't, so they never get
+// the Wine-only actions (clone, Drive C, exe, export, community configs, logs, save backups).
+internal fun isWineEntry(shortcut: Shortcut): Boolean =
+    !AndroidGames.isAndroidEntry(shortcut) && !LinuxShortcuts.isLinuxEntry(shortcut)
 
 private fun launchSaveManager(context: Context, focusAppId: Int) {
     context.startActivity(
