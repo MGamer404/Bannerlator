@@ -1,5 +1,11 @@
 # Star-Compose — Progress Log
 
+## 2026-10-11 — 🐧 Wine-only menus and tools kept away from the Linux Steam entry (merged `9c21311a`)
+- Game ⋮ menu (grid/list): clone, Copy to Drive C, change exe, export, community configs, view logs and save backups are Wine-only now; the Steam (Linux) tile keeps Settings, Remove, Add to home screen, Game Details, Scrape cover, Properties.
+- XMB: the Linux entry gets its own short menu, and its Settings opens the Linux-aware editor. Big Picture / Games Wall: no Container settings or Community configs for it.
+- In-game drawer: ReShade tab, Task Manager and Active Windows hidden in Linux-runtime sessions (`XServerDrawerState.linuxRuntimeSession`); Audio and Debug Logs stay.
+- CI run 38156042144 green; device-proven on pubg (Linux tile menu + Linux drawer trimmed, Windows game menu + drawer intact).
+
 ## 2026-10-11 — 🚀 3.1.6 STABLE released (tag `3.1.6` = `6bd20841`, versionCode 98)
 > Release run 38117569136 green on `6bd20841` (notes, four flavours, four patch jobs, release). `main` fast-forwarded from `907b98ed` (backup `refs/backup/20261011/main-before-3.1.6`). Latest = 3.1.6, not prerelease. Assets: Bannerlator-3.1.6-{standard,pubg,ludashi,antutu}.apk (~551 MB each) + update.json (vc 98, 5 highlights, size, apkSha256, 27 patches). The `manifest` branch now exists: update.json + update-pre.json both vc 98. Notes: `docs/releases/3.1.6.md` (everything since 3.1.5: Headless Steam + server browser, SteamLite Steam Input, Force SSBS + v14 layers, Win Components offline, game adding, update notice, small updates from the next release, VKD3D 6.6 default, xdg-shell v3, Mali PanVK Wayland (EXPERIMENTAL table), Menu button, Box64EC (unofficial), AnTuTu APK); README 3.1.6 section.
 > - **Small updates, first real run:** 27 patches (8 releases back × 3 flavours + antutu from 3.1.6-pre1..pre3) published as release `3.1.6` in The412Banner/Bannerlator-updates (712 MB total; standard: 11.1 MB from pre3, 23.5 MB from 3.1.5, 37.2 MB from 3.1.3); prune ran and kept only `3.1.6`. A listed patch URL downloads with the sha update.json names. Nobody can use these patches yet (installs before 3.1.6 lack the patch updater); 3.1.7 is the first small update.
