@@ -243,6 +243,10 @@ object SaveSyncStore {
         writeHook(ctx, appId) { rec -> rec.put("noSteamCloud", true) }
     }
 
+    /** The cloud file count last observed for [appId] (0 if never observed). Local read, no network. */
+    fun lastKnownCloudFileCount(appId: Int): Int =
+        getRecord(loadRoot(), appId)?.optInt("cloudFileCount", 0) ?: 0
+
     /** True if [appId] has been marked as not retaining Steam Cloud uploads (see [markNoSteamCloud]). */
     fun isMarkedNoSteamCloud(appId: Int): Boolean {
         val rec = getRecord(loadRoot(), appId) ?: return false

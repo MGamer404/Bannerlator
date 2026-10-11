@@ -134,7 +134,7 @@ public class Drawable extends XResource {
         return directScanout;
     }
 
-    private short getStride() {
+    public short getStride() {
         return texture instanceof NativeTexture ? ((NativeTexture)texture).getStride() : width;
     }
 

@@ -239,6 +239,17 @@ internal fun SaveManagerScreen(
     // box on this ROM (targetSDK 28), so route messages through the shared outlined UninstallResultBar
     // (same pattern as the store screens). Hoisted here so the bar floats over whichever tab is shown.
     var resultBarMsg by remember { mutableStateOf<String?>(null) }
+    // The same one-time third-party cloud disclaimer the game detail page asks for (steam_prefs
+    // "cloud_saves_disclaimer_accepted"). The row buttons and "Sync Now" used to skip it, so a user who
+    // only synced from here never set the flag — and the auto-upload on exit, which requires it, never
+    // ran. pendingCloudAction = what to run once the user accepts.
+    var pendingCloudAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    fun cloudConsentGiven(): Boolean =
+        context.getSharedPreferences("steam_prefs", Context.MODE_PRIVATE)
+            .getBoolean("cloud_saves_disclaimer_accepted", false)
+    fun withCloudConsent(action: () -> Unit) {
+        if (cloudConsentGiven()) action() else pendingCloudAction = action
+    }
 
     // Instant load (sidecar + on-disk scan, no network) — off the main thread all the same.
     suspend fun reload() {
@@ -331,7 +342,7 @@ internal fun SaveManagerScreen(
     // Per-row quick button: fire-and-forget a single combo on the composition scope (buttons for
     // NOT_SET_UP rows are disabled up front; the manager also guards not-set-up itself).
     fun runQuickMove(appId: Int, syncFrom: Boolean) {
-        scope.launch { syncOne(appId, syncFrom) }
+        withCloudConsent { scope.launch { syncOne(appId, syncFrom) } }
     }
 
     // Steam-list needs-sync count. Drives BOTH the Steam tab's rail badge and the content-pane
@@ -348,6 +359,7 @@ internal fun SaveManagerScreen(
 
     fun runSyncAll() {
         if (syncAllRunning) return
+        if (!cloudConsentGiven()) { pendingCloudAction = { runSyncAll() }; return }
         // Snapshot the games to sync + their direction NOW (statuses mutate as rows settle). Direction:
         // cloud newer → download; local newer / local-only / never-synced → upload. NOT_SET_UP (and any
         // non-attention state) is skipped — there's no container to sync, so it stays flagged. Skip any
@@ -599,6 +611,32 @@ internal fun SaveManagerScreen(
         // Themed, auto-dismiss status feedback routed here from the cloud/backup tabs (replaces the
         // unreadable system Toast). Floats over the active tab via the root Box.
         resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
+
+        // One-time third-party disclaimer — same text + flag as the game detail page.
+        pendingCloudAction?.let { action ->
+            OutlinedAlertDialog(
+                onDismissRequest = { pendingCloudAction = null },
+                title = { Text("Third-party cloud sync") },
+                text = {
+                    Text(
+                        "Steam Cloud save syncing here is handled by a third-party tool, not " +
+                            "official Steam. Managing game saves this way can corrupt or lose " +
+                            "your saves. Use at your own risk."
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingCloudAction = null
+                        context.getSharedPreferences("steam_prefs", Context.MODE_PRIVATE)
+                            .edit().putBoolean("cloud_saves_disclaimer_accepted", true).apply()
+                        action()
+                    }) { Text("I understand") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingCloudAction = null }) { Text("Cancel") }
+                },
+            )
+        }
     }
 
 }

@@ -50,6 +50,11 @@ object ConfigExporter {
         // Sync selector (esync | ntsync | wineserver); an importing layer that can't run it falls back
         // to its own default at launch (core.SyncSupport).
         "syncMode",
+        // Fast OpenGL ("1" / "0"); an importer whose layer or driver can't do it stays on GLX at
+        // launch (core.FastOpenGL).
+        "fastOpenGL",
+        // Show OpenGL FPS / OpenGL vsync off ("1" / "0"; GALLIUM_HUD=fps / vblank_mode=0 at launch).
+        "glFpsHud", "glVsyncOff",
         // Community-config coverage pass (2026-07): per-game HUD blob + motion/refresh/frame-gen/
         // vibration/upscaler overrides that were previously dropped. Each round-trips as a scalar the
         // import write loop applies verbatim; the launch path in XServerDisplayActivity honors every one
@@ -72,6 +77,8 @@ object ConfigExporter {
         // (debandEnabled/debandStrength) is shared by both renderers. Each round-trips as a scalar.
         "upscaleSharpness", "casEnabled", "casSharpness", "hdrEnabled",
         "sgsrEnabled", "sgsrSharpness", "glUpscaleSharpness", "debandEnabled", "debandStrength",
+        // Force SSBS ("1" / "0"); only acted on for arm64ec Wine at launch, inert anywhere else.
+        "forceSsbs",
     )
 
     /**

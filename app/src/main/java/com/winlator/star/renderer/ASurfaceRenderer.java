@@ -497,7 +497,7 @@ public class ASurfaceRenderer implements HostRenderer,
         synchronized (cd.renderLock) {
             ByteBuffer buf = cd.getBuffer();
             if (buf == null) return;
-            nativeScanoutSetCursorImage(buf, cd.width, cd.height, (short) (buf.capacity() / (cd.height * 4)));
+            nativeScanoutSetCursorImage(buf, cd.width, cd.height, cd.getStride());
         }
     }
 

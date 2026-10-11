@@ -241,6 +241,30 @@ public final class RealSteamLauncher {
                 applyControllerPassthrough(steamDir, repo);
             }
 
+            // ── 3a-bis-1b. Steam Input (per-game toggle, shortcut extra "steamInput"=1; agent p7). Games
+            //    that read the pad through the Steam Input API see nothing under SteamLite until the client's
+            //    controller layer is configured for the app — the agent does that (WN_STEAM_INPUT=1) with the
+            //    layout we pick here (game-shipped, else a Valve template from the package), written into the
+            //    prefix Steam dir. Mutually exclusive with passthrough in the UI; best-effort, never blocks.
+            boolean steamInput = !controllerPassthrough && "1".equals(shortcut.getExtra("steamInput"));
+            String steamInputVdfWin = null;
+            if (steamInput) {
+                String layoutName = "steamlite_controller_" + appId + ".vdf";
+                File layout = new File(steamDir, layoutName);
+                try {
+                    SteamInputLayout.Pick pick = SteamInputLayout.INSTANCE.resolve(ctx, steamLiteInstallDir, appId, hostInstallDir);
+                    if (pick != null && FileUtils.writeString(layout, pick.getVdf())) {
+                        steamInputVdfWin = STEAM_DIR_WIN + "\\" + layoutName;
+                        Log.i(TAG, "prepare: steam input layout = " + pick.getSource() + " (" + pick.getVdf().length() + " chars)");
+                    } else {
+                        if (layout.exists() && !layout.delete()) Log.w(TAG, "prepare: stale layout not removed");
+                        Log.w(TAG, "prepare: steam input ON but no layout available — agent activates the client's own choice");
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "prepare: steam input layout skipped: " + t.getMessage());
+                }
+            }
+
             // ── 3a-bis-2. Overlay injection OFF — every RealSteam launch, not only passthrough. The
             //    genuine client's overlay injection starts the spawned game's thread at an address
             //    taken from the AGENT's kernel32 (assumes a shared base across processes — not true
@@ -347,6 +371,11 @@ public final class RealSteamLauncher {
                 vacSource = "app-info";
             }
             env.put("WN_STEAM_VAC", vacSecure ? "1" : "0");
+            // Steam Input (agent p7): configure the client's controller layer for this app before LaunchApp.
+            if (steamInput) {
+                env.put("WN_STEAM_INPUT", "1");
+                if (steamInputVdfWin != null) env.put("WN_STEAM_INPUT_VDF", steamInputVdfWin);
+            }
             // EA launcher chain (agent p5): without this the agent treats the stub exe's exit during the
             // Link2EA → EADesktop → EASteamProxy hand-off as "game exited" and tears the session down.
             if (eaChain) env.put(EaSupport.CHAIN_ENV, EaSupport.CHAIN_VALUE);
@@ -360,6 +389,7 @@ public final class RealSteamLauncher {
             String specArgWin = "C:\\" + appId + ".spec";
             Log.i(TAG, "prepare: staged appId=" + appId + " canonical=\"" + canonicalName
                     + "\" relExe=\"" + relExe + "\" (LaunchApp SECURE, vac=" + (vacSecure ? 1 : 0)
+                    + ", steamInput=" + (steamInput ? 1 : 0)
                     + " from " + vacSource + ")");
             return new Plan(env, STEAM_DIR_WIN, STEAM_EXE_NAME, specArgWin, canonicalName, appId, eaChain);
         } catch (Throwable t) {

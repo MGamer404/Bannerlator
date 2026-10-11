@@ -26,6 +26,9 @@ public class ContentProfile {
         CONTENT_TYPE_BOX64("Box64"),
         CONTENT_TYPE_WOWBOX64("WOWBox64"),
         CONTENT_TYPE_FEXCORE("FEXCore"),
+        // box64 built as an ARM64EC PE module: the x86-64 translator slot on arm64ec layers
+        // (FEX's libarm64ecfex.dll counterpart). WOWBox64 remains the 32-bit half.
+        CONTENT_TYPE_BOX64EC("Box64EC"),
         CONTENT_TYPE_VEGAS("VEGAS");
 
         final String typeName;

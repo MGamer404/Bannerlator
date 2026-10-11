@@ -10,6 +10,17 @@
 #include <unistd.h>
 #include <android/api-level.h>
 
+// X cursor pixels are 0xAARRGGBB words (B,G,R,A in memory); the cursor buffer is R8G8B8A8, so
+// red and blue swap on the way in. Two-colour core cursors are mostly black/white, which hid this
+// until RENDER brought full-colour cursors.
+static inline void copyCursorRowBgraToRgba(uint32_t* dst, const uint32_t* src, int w) {
+    for (int x = 0; x < w; ++x) {
+        uint32_t p = src[x];
+        dst[x] = (p & 0xff00ff00u) | ((p & 0xffu) << 16) | ((p >> 16) & 0xffu);
+    }
+}
+
+
 // Verbose debug log, gated on the owner-synced verboseLog flag (mirrors the
 // RLOG macro that VulkanRendererContext used for the scanout skip path).
 #define SCO_RLOG(...) do { if (verboseLog) \
@@ -344,9 +355,8 @@ bool ScanoutContext::setCursorImage(void* pixels, short w, short h, short stride
     const uint32_t* src = reinterpret_cast<const uint32_t*>(pixels);
     auto* dstPx = reinterpret_cast<uint32_t*>(dst);
     for (int row = 0; row < h; ++row)
-        memcpy(dstPx + (size_t)row * dstStride,
-               src   + (size_t)row * (uint32_t)stride,
-               (size_t)w * 4);
+        copyCursorRowBgraToRgba(dstPx + (size_t)row * dstStride,
+                                src   + (size_t)row * (uint32_t)stride, w);
     AHardwareBuffer_unlock(*curBuf, nullptr);
 
     { std::lock_guard<std::mutex> lk(scanoutMutex);

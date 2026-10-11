@@ -146,6 +146,7 @@ import com.winlator.star.store.SteamGameUpdater
 import com.winlator.star.store.GoldbergMode
 import com.winlator.star.store.GoldbergPatcher
 import com.winlator.star.store.SteamDatabase
+import com.winlator.star.store.SteamHostComponent
 import com.winlator.star.store.SteamLiteComponent
 import com.winlator.star.store.SteamLoginActivity
 import com.winlator.star.store.SteamPrefs
@@ -256,6 +257,25 @@ fun BigPictureScreen(navController: NavController) {
             componentDownloadLabel = "SteamLite (Real Steam / VAC)"
             componentDownloadProgress = 0f
             SteamLiteComponent.downloadAsync(
+                context,
+                { f -> componentDownloadProgress = f },
+                { ok, msg ->
+                    componentDownloadFor = null
+                    if (ok) preflightFor = s
+                    else Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                },
+            )
+        } else {
+            preflightFor = s
+        }
+    }
+    // App Steam launch (Option B): Valve's client set on demand, then the same pre-flight. Mirrors ShortcutsScreen.
+    fun launchWithAppSteam(s: Shortcut) {
+        if (!SteamHostComponent.isInstalled(context)) {
+            componentDownloadFor = s
+            componentDownloadLabel = "Headless Steam (Valve Steam client)"
+            componentDownloadProgress = 0f
+            SteamHostComponent.downloadAsync(
                 context,
                 { f -> componentDownloadProgress = f },
                 { ok, msg ->
@@ -468,6 +488,8 @@ fun BigPictureScreen(navController: NavController) {
                 // A remembered RealSteam pick still runs the SteamLite pre-flight (session check).
                 remembered && sc.getExtra("launchMode", "") == "RealSteam" && isSteamOriginShortcut(sc) ->
                     launchWithSteamLite(sc)
+                remembered && sc.getExtra("launchMode", "") == "AppSteam" && isSteamOriginShortcut(sc) ->
+                    launchWithAppSteam(sc)
                 remembered -> launchShortcut(activity, sc)
                 else -> launchChoiceFor = sc
             }
@@ -992,19 +1014,22 @@ fun BigPictureScreen(navController: NavController) {
             // dismiss the sheet first (so no dialog is layered behind the ModalBottomSheet's window).
             onUpdateFiles = { launchChoiceFor = null; checkForUpdatesThenOffer(s) },
             onVerifyFiles = { launchChoiceFor = null; runSteamMaintenance(s, verify = true) },
-            onLaunch = { mode, goldbergMode, remember, controllerPassthrough, vacLaunch ->
+            onLaunch = { mode, goldbergMode, remember, controllerPassthrough, vacLaunch, steamInput ->
                 // Persist the choice on the shortcut (contract literals: launchMode ∈ RealSteam/Goldberg/Raw,
                 // launchModeRemembered="1"), then stage the picked component and launch.
                 s.putExtra("launchMode", mode)
                 s.putExtra("launchModeRemembered", if (remember) "1" else "0")
                 // Per-game "Controller passthrough" (read only on RealSteam launches; inert otherwise).
                 s.putExtra("controllerPassthrough", if (controllerPassthrough) "1" else "0")
+                // Per-game "Steam Input" (SteamLite only; the agent configures the client's controller layer).
+                s.putExtra("steamInput", if (steamInput) "1" else "0")
                 // Per-game "Requires secure (VAC) launch" override: "" = follow app-info detection, "1"/"0".
                 s.putExtra("steamVacLaunch", vacLaunch)
                 s.saveData()
                 launchChoiceFor = null
                 when (mode) {
                     "Goldberg" -> launchWithGoldberg(s, goldbergMode ?: GoldbergMode.REGULAR)
+                    "AppSteam" -> launchWithAppSteam(s)
                     "Raw" -> {
                         // Raw: run the game's .exe directly, no Steam layer (Epic/GOG/Custom, or a Steam
                         // game the user chose to run raw). launchMode="Raw" is inert to the launch pipeline
@@ -1036,6 +1061,8 @@ fun BigPictureScreen(navController: NavController) {
                 installDir = installDir,
                 gameName = s.name,
                 pullCloudSaves = savePrefs.getBoolean("auto_download_steam_on_launch", true),
+                clientPackage = if (s.getExtra("launchMode", "") == "AppSteam") SteamSessionManager.ClientPackage.APP_STEAM
+                                else SteamSessionManager.ClientPackage.STEAMLITE,
             ),
             onLaunch = { preflightFor = null; launchShortcut(activity, s, preflightDone = true) },
             onDismiss = { preflightFor = null },
@@ -1257,8 +1284,11 @@ private fun GameOptionsSheet(
         // An Android game has no Wine settings, container or community configs — only its cover.
         if (!com.winlator.star.androidgames.AndroidGames.isAndroidEntry(shortcut)) {
             add(BpRow(Icons.Filled.Edit, "Edit shortcut", onEditShortcut))
-            add(BpRow(Icons.Filled.Tune, "Container settings", onContainerSettings))
-            add(BpRow(Icons.Filled.Public, "Community configs", onCommunityConfigs))
+            // The Linux Steam entry has no Wine container or community configs: its own editor only.
+            if (!com.winlator.star.linux.LinuxShortcuts.isLinuxEntry(shortcut)) {
+                add(BpRow(Icons.Filled.Tune, "Container settings", onContainerSettings))
+                add(BpRow(Icons.Filled.Public, "Community configs", onCommunityConfigs))
+            }
         }
         add(BpRow(Icons.Filled.Image, "Change cover art") {
             coverPicker.launch(

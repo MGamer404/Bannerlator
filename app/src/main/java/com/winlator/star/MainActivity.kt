@@ -492,8 +492,35 @@ class MainActivity : AppCompatActivity() {
         return super.dispatchGenericMotionEvent(event)
     }
 
+    // The menu-button picker takes the next press of any key but volume. The screen's own Back
+    // (nav bar, gesture) cancels it; a Back key on a pad is a candidate like any other button.
+    private var menuCaptureDownKey = 0
+
+    private fun menuButtonCapture(event: android.view.KeyEvent): Boolean {
+        val listener = com.winlator.star.ui.components.MenuButtonCaptureBus.listener ?: run {
+            menuCaptureDownKey = 0
+            return false
+        }
+        val kc = event.keyCode
+        if (kc == android.view.KeyEvent.KEYCODE_VOLUME_UP || kc == android.view.KeyEvent.KEYCODE_VOLUME_DOWN
+            || kc == android.view.KeyEvent.KEYCODE_VOLUME_MUTE || kc == android.view.KeyEvent.KEYCODE_POWER) return false
+        // B is never the menu button: it is swallowed and the picker keeps waiting.
+        if (kc == android.view.KeyEvent.KEYCODE_BUTTON_B) return true
+        val screenBack = kc == android.view.KeyEvent.KEYCODE_BACK &&
+            !com.winlator.star.inputcontrols.ExternalController.isGameController(event.device)
+        if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+            if (event.repeatCount == 0) menuCaptureDownKey = kc
+        } else if (event.action == android.view.KeyEvent.ACTION_UP && kc == menuCaptureDownKey) {
+            // Taken on release, so the dialog closing can't hand a lone release to the screen behind it.
+            menuCaptureDownKey = 0
+            listener(if (screenBack) -1 else kc)
+        }
+        return true
+    }
+
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
         if (isSettingsSteamShadowEvent(event.device)) return true
+        if (menuButtonCapture(event)) return true
         if (settingsTestArmed() &&
             com.winlator.star.inputcontrols.ExternalController.isGameController(event.device)) {
             controllerTestFeedKeyEvent(event)
@@ -698,18 +725,21 @@ private fun ClassicAppShell(
     val isBigPicture = currentRoute == Screen.BigPicture.route
     val isFullBleed = isBigPicture
 
-    // In-app update banner: only when a newer stable exists, notify is on, and
-    // this version wasn't skipped.
-    var bannerUpdate by remember { mutableStateOf<UpdateManager.UpdateInfo?>(null) }
-    var bannerDismissed by remember { mutableStateOf(false) }
+    // In-app update pill: slides in from the right edge when a newer release exists, notify is on,
+    // and the user has not dismissed this version during this session. View slides it out, then the
+    // highlights dialog opens; Update now there (or in Settings / About) runs the download card.
+    var pillUpdate by remember { mutableStateOf<UpdateManager.UpdateInfo?>(null) }
+    var pillVisible by remember { mutableStateOf(false) }
+    var highlightsFor by remember { mutableStateOf<UpdateManager.UpdateInfo?>(null) }
     LaunchedEffect(Unit) {
         UpdateManager.check(context) { info ->
             (context as? MainActivity)?.runOnUiThread {
                 if (info != null && info.isNewer &&
                     UpdateManager.isNotifyEnabled(context) &&
-                    info.versionCode != UpdateManager.skippedVersionCode(context)
+                    info.versionCode != UpdateManager.dismissedThisSession
                 ) {
-                    bannerUpdate = info
+                    pillUpdate = info
+                    pillVisible = true
                 }
             }
         }
@@ -752,10 +782,9 @@ private fun ClassicAppShell(
     }
 
     // The Games tab's XMB view asks for a see-through top bar; the screen is then laid out under the
-    // bar so its backdrop runs to the top. Games route only, and not while the update banner shows
-    // (it sits between the bar and the screen).
-    val barOverlay = currentRoute == Screen.Games.route && topBarTransparentState.value &&
-        !isFullBleed && !(bannerUpdate != null && !bannerDismissed)
+    // bar so its backdrop runs to the top. Games route only. (The update pill floats over the screen
+    // content, so unlike the old banner it never has to switch this off.)
+    val barOverlay = currentRoute == Screen.Games.route && topBarTransparentState.value && !isFullBleed
 
     CompositionLocalProvider(LocalTopBarActions provides topBarActionsState, LocalTopBarTransparent provides topBarTransparentState) {
     ModalNavigationDrawer(
@@ -832,20 +861,8 @@ private fun ClassicAppShell(
                 else -> innerPadding
             }
             CompositionLocalProvider(LocalTopBarOverlayInset provides if (barOverlay) innerPadding.calculateTopPadding() else 0.dp) {
-            Column(modifier = Modifier.padding(contentPadding)) {
-                val upd = bannerUpdate
-                if (upd != null && !bannerDismissed && !isFullBleed) {
-                    UpdateBanner(
-                        versionName = upd.versionName,
-                        onUpdate = {
-                            (context as? MainActivity)?.let { UpdateManager.downloadAndInstall(it, upd) {} }
-                        },
-                        onDismiss = {
-                            bannerDismissed = true
-                            UpdateManager.skipVersion(context, upd.versionCode)
-                        },
-                    )
-                }
+            Box(modifier = Modifier.padding(contentPadding)) {
+            Column(modifier = Modifier.fillMaxSize()) {
                 AppNavGraph(
                     navController = navController,
                     startRoute = startRoute,
@@ -858,6 +875,29 @@ private fun ClassicAppShell(
                     com.winlator.star.ui.UnpackProgressPill()
                 }
             }
+            // Update pill: floats top-end over the screen content, 30dp under the top bar, 10dp
+            // short of the edge it slid in from. Hidden in Big Picture like the rest of the chrome.
+            val upd = pillUpdate
+            if (upd != null && !isFullBleed) {
+                com.winlator.star.ui.UpdatePill(
+                    info = upd,
+                    visible = pillVisible,
+                    onDismiss = {
+                        pillVisible = false
+                        UpdateManager.dismissedThisSession = upd.versionCode
+                    },
+                    onView = {
+                        pillVisible = false
+                        UpdateManager.dismissedThisSession = upd.versionCode
+                        scope.launch {
+                            kotlinx.coroutines.delay(com.winlator.star.ui.UPDATE_PILL_EXIT_MS)
+                            highlightsFor = upd
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 30.dp, end = 10.dp),
+                )
+            }
+            } // end Box
             } // end LocalTopBarOverlayInset
         }
     }
@@ -873,6 +913,19 @@ private fun ClassicAppShell(
     if (showAboutDialog) {
         AboutDialog(onDismiss = onDismissAboutDialog)
     }
+
+    highlightsFor?.let { info ->
+        com.winlator.star.ui.UpdateHighlightsDialog(
+            info = info,
+            onLater = { highlightsFor = null },
+            onUpdate = {
+                highlightsFor = null
+                (context as? MainActivity)?.let { UpdateManager.downloadAndInstall(it, info) {} }
+            },
+        )
+    }
+    // The download card, whichever button started the download (pill, highlights, Settings, About).
+    com.winlator.star.ui.UpdateHost()
 }
 
 @Composable
@@ -889,32 +942,6 @@ private fun AllFilesAccessDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
         confirmButton = { TextButton(onClick = onConfirm) { Text("OK") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
-}
-
-@Composable
-private fun UpdateBanner(versionName: String, onUpdate: () -> Unit, onDismiss: () -> Unit) {
-    val ink = androidx.compose.ui.graphics.Color(0xFF1A1A2E)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(androidx.compose.ui.graphics.Color(0xFFFFC107))
-            .padding(start = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "Update available — V $versionName",
-            color = ink,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 13.sp,
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(onClick = onUpdate) {
-            Text("Update", color = ink, fontWeight = FontWeight.Bold)
-        }
-        TextButton(onClick = onDismiss) {
-            Text("Skip", color = ink)
-        }
-    }
 }
 
 @Composable

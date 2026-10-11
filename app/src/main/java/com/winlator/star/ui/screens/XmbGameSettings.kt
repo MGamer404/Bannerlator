@@ -422,7 +422,8 @@ private fun generalRows(xmb: XmbScope, p: XmbPrefs, host: XmbGameHost): List<Xmb
                 xmb.refresh()
             }
         }
-        val turnips = ((xmbBundledDriverVersions ?: emptyList()) + importedDriverVersions(p.context)).distinct()
+        val turnips = ((if (com.winlator.star.core.MaliPanvk.isMaliGpu()) listOf("System") else emptyList()) +
+            (xmbBundledDriverVersions ?: emptyList()) + importedDriverVersions(p.context)).distinct()
         val turnipsLoaded = xmbBundledDriverVersions != null
         // One driver pick on Wayland: with the game driver on "adapter" it drives the game too.
         val wgdEffective = p.ex("waylandGameDriver", "").ifEmpty { c.waylandGameDriver }
@@ -491,6 +492,41 @@ private fun generalRows(xmb: XmbScope, p: XmbPrefs, host: XmbGameHost): List<Xmb
     } else {
         rows += XmbRow.Choice("gfxDriver", p.str(R.string.graphics_driver), Icons.Filled.Memory, gfxEntries, p.labelFor(gfxEntries, gfxId)) { v ->
             xmb.set(p, "graphicsDriver", StringUtils.parseIdentifier(v))
+        }
+    }
+    // Fast OpenGL (per-game override of the container's fastOpenGL; "" = container default, "1" on,
+    // "0" off) — same extra and rules as the pop-up editor (core.FastOpenGL). Locked on Wayland
+    // (always on there); on X11 greyed with one reason when the driver isn't a Turnip or the APK has
+    // no X11 GL set. Any layer works on X11: the launch picks the EGL or GLX route.
+    if (!com.winlator.star.linux.LinuxShortcuts.isLinuxEntry(s)) {
+        val glDriver = com.winlator.star.contentdialog.GraphicsDriverConfigDialog.getVersion(
+            p.ex("graphicsDriverConfig", c.getGraphicsDriverConfig()))
+        val glLocked = if (waylandGame) com.winlator.star.core.FastOpenGL.WAYLAND_ALWAYS_ON
+            else com.winlator.star.core.FastOpenGL.unavailableReason(
+                com.winlator.star.core.FastOpenGL.driverUsable(p.context, glDriver),
+                com.winlator.star.core.X11Egl.isBundled(p.context))
+        val glValues = listOf("", "1", "0")
+        val glLabels = listOf("Container default (" + (if (c.isFastOpenGL()) "On" else "Off") + ")", "On", "Off")
+        val glOverride = com.winlator.star.core.FastOpenGL.normalize(p.ex(com.winlator.star.core.FastOpenGL.EXTRA, "")) ?: ""
+        rows += XmbRow.Choice(com.winlator.star.core.FastOpenGL.EXTRA, com.winlator.star.core.FastOpenGL.TITLE, Icons.Filled.Speed,
+            glLabels, glLabels[glValues.indexOf(glOverride).coerceAtLeast(0)],
+            subtitle = com.winlator.star.core.FastOpenGL.HINT, disabledReason = glLocked) { v ->
+            xmb.set(p, com.winlator.star.core.FastOpenGL.EXTRA, glValues[glLabels.indexOf(v)].ifEmpty { null })
+        }
+        // Show OpenGL FPS / OpenGL vsync off: the same Container default / On / Off choice, on both
+        // backends, never greyed (core.FastOpenGL.FPS_HUD / VSYNC_OFF).
+        for (sw in listOf(com.winlator.star.core.FastOpenGL.FPS_HUD, com.winlator.star.core.FastOpenGL.VSYNC_OFF)) {
+            val labels = listOf("Container default (" + (if (sw.containerOn(c.getExtra(sw.extra))) "On" else "Off") + ")", "On", "Off")
+            val stored = com.winlator.star.core.FastOpenGL.normalize(p.ex(sw.extra, "")) ?: ""
+            rows += XmbRow.Choice(sw.extra, sw.title, Icons.Filled.Speed, labels,
+                labels[glValues.indexOf(stored).coerceAtLeast(0)], subtitle = sw.hint) { v ->
+                xmb.set(p, sw.extra, glValues[labels.indexOf(v)].ifEmpty { null })
+            }
+        }
+        // The pop-up editors' one "?" for the OpenGL card (help_opengl_settings), as its own column.
+        rows += XmbRow.Link("openglHelp", "What are these?", Icons.Filled.HelpOutline,
+            subtitle = "Fast OpenGL, Show OpenGL FPS and OpenGL vsync off explained") {
+            xmbHelpMenu(p.context, xmb.scope, "OpenGL", R.string.help_opengl_settings)
         }
     }
     // Driver configuration is X11 tuning; on Wayland its only live field (the Turnip version) is

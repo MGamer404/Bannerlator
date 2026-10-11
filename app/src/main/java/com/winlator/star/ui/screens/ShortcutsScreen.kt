@@ -224,6 +224,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import com.winlator.star.container.Container
 import com.winlator.star.container.GameDetails
+import com.winlator.star.components.ComponentCatalog
+import com.winlator.star.components.GameRecommendations
 import com.winlator.star.container.Shortcut
 import com.winlator.star.linux.LinuxRuntimeInstaller
 import com.winlator.star.linux.LinuxRuntimeUpdate
@@ -242,6 +244,7 @@ import com.winlator.star.ui.screens.adrenodownload.RemoteDriverEntry
 import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
 import com.winlator.star.core.CopyGameToDriveC
 import com.winlator.star.core.DefaultVersion
+import com.winlator.star.core.MediaDecoder
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GameFolderScanner
 import com.winlator.star.core.CustomSaveVault
@@ -269,6 +272,7 @@ import com.winlator.star.store.GoldbergMode
 import com.winlator.star.store.GoldbergPatcher
 import com.winlator.star.store.SteamDatabase
 import com.winlator.star.store.SteamGameUpdater
+import com.winlator.star.store.SteamHostComponent
 import com.winlator.star.store.SteamLiteComponent
 import com.winlator.star.store.EaSupport
 import com.winlator.star.store.steamscript.InstallScriptExecutor
@@ -304,6 +308,8 @@ import android.os.Build
 import androidx.documentfile.provider.DocumentFile
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -371,6 +377,9 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // Manual exe override for a scanned game. The scanner keeps every runner-up, so correcting a
     // pick is a choice from a list rather than a rescan.
     var exePickerFor by remember { mutableStateOf<GameFolderScanner.Candidate?>(null) }
+    // Per scanned game: how many components it needs (by exe path), and which rows show them.
+    var scanRecCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var scanRecsOpen by remember { mutableStateOf<Set<String>>(emptySet()) }
     var exeBrowseForPath by remember { mutableStateOf("") }
     // When checked, the shortcut import uses the system SAF picker instead of the in-app File Manager.
     var importUseSystemPicker by remember { mutableStateOf(false) }
@@ -442,6 +451,39 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             // Pre-select everything importable; duplicates stay off and can't be ticked.
             folderScanSelected = found.filter { !it.alreadyAdded }.map { it.exe.absolutePath }.toSet()
             folderScanRunning = false
+            // What each game needs (its redistributables, what Steam installs with it), counted for
+            // the list; a row's components open as chips to install right from the list.
+            scanRecCounts = emptyMap()
+            scanRecsOpen = emptySet()
+            launch {
+                val counts = withContext(Dispatchers.IO) {
+                    val catalog = runCatching { ComponentCatalog.load() }.getOrDefault(emptyList()).map { it.name }.toSet()
+                    found.associate { c ->
+                        c.exe.absolutePath to GameRecommendations.detect(c.exe, null).count { it.componentName in catalog }
+                    }
+                }
+                scanRecCounts = counts.filterValues { it > 0 }
+            }
+            // Games whose files name no Steam app: look each title up on the Steam store (same title
+            // only, remembered per name), so the list shows their art and the import carries the id.
+            // Four at a time, so a big library's list fills in within seconds rather than one by one.
+            launch {
+                found.filter { it.appId == null && !it.alreadyAdded }.chunked(4).forEach { batch ->
+                    batch.map { c ->
+                        async(Dispatchers.IO) {
+                            c to runCatching { SteamStoreSearch.findAppIdByName(context, c.name) }.getOrNull()
+                        }
+                    }.awaitAll().forEach { (c, id) ->
+                        if (id != null) {
+                            folderScanResults = folderScanResults.map {
+                                if (it.exe.absolutePath == c.exe.absolutePath && it.appId == null) {
+                                    it.copy(appId = id, coverUrl = SteamStoreSearch.coverUrl(id))
+                                } else it
+                            }
+                        }
+                    }
+                }
+            }
             if (found.isEmpty()) {
                 Toast.makeText(context, "No games found in that folder", Toast.LENGTH_LONG).show()
                 pendingImportContainerIndex = -1
@@ -630,6 +672,17 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 add(XmbAction("Remove", Icons.Filled.Delete, "Asks to confirm first", danger = true, menu = { xmbRemoveMenu(it, shortcut, xmbHost) }))
                 return@buildList
             }
+            // The Linux Steam entry: its settings are the Linux-side ones only, which the pop-up editor
+            // already knows (the XMB settings columns are Wine rows), and none of the Wine actions apply.
+            if (LinuxShortcuts.isLinuxEntry(shortcut)) {
+                add(XmbAction("Settings", Icons.Filled.Settings, "Steam (Linux) display, driver, controls…") { settingsShortcut = shortcut })
+                add(XmbAction("Game Details", Icons.Filled.Edit, "Name, genres, year, description", menu = { xmbGameDetailsMenu(it, shortcut) }))
+                add(XmbAction("Scrape cover", Icons.Filled.Search, menu = { xmbScrapeCoverMenu(it, shortcut) }))
+                add(XmbAction("Add to home screen", Icons.Filled.AddToHomeScreen, "Android's pin prompt") { addToHomeScreen(context, shortcut) })
+                add(XmbAction("Properties", Icons.Filled.Info, "Times played, playtime", menu = { xmbPropertiesMenu(it, shortcut) }))
+                add(XmbAction("Remove", Icons.Filled.Delete, "Asks to confirm first", danger = true, menu = { xmbRemoveMenu(it, shortcut, xmbHost) }))
+                return@buildList
+            }
             add(XmbAction("Settings", Icons.Filled.Settings, "Display, graphics, controller…", menu = { xmbSettingsMenu(it, shortcut, xmbHost) }))
             add(XmbAction("Game Details", Icons.Filled.Edit, "Name, genres, year, description", menu = { xmbGameDetailsMenu(it, shortcut) }))
             if (isSteamOriginShortcut(shortcut)) {
@@ -712,6 +765,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                 // Android games keep only what makes sense outside Wine: no settings, container moves, exe,
                                 // export, community configs, logs or saves.
                                 val wine = remember(shortcut) { !AndroidGames.isAndroidEntry(shortcut) }
+                                val wineOnly = remember(shortcut) { isWineEntry(shortcut) }
                                 ShortcutGridItem(
                                     shortcut = shortcut,
                                     selectionMode = selectionMode,
@@ -722,17 +776,17 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     },
                                     onSettings = if (wine) ({ settingsShortcut = shortcut }) else null,
                                     onRemove = { confirmRemove = shortcut },
-                                    onClone = if (wine) ({ cloneTarget = shortcut }) else null,
-                                    onCopyToDriveC = if (wine) ({ copyToDriveCTarget = shortcut }) else null,
-                                    onChangeExe = if (wine) ({ changeExeTarget = shortcut }) else null,
+                                    onClone = if (wineOnly) ({ cloneTarget = shortcut }) else null,
+                                    onCopyToDriveC = if (wineOnly) ({ copyToDriveCTarget = shortcut }) else null,
+                                    onChangeExe = if (wineOnly) ({ changeExeTarget = shortcut }) else null,
                                     onAddToHome = { addToHomeScreen(context, shortcut) },
-                                    onExport = if (wine) ({ exportShortcut(context, shortcut) }) else null,
+                                    onExport = if (wineOnly) ({ exportShortcut(context, shortcut) }) else null,
                                     onProperties = { propertiesShortcut = shortcut },
                                     onScrapeCover = { scrapeCoverFor(shortcut) },
-                                    onCommunityConfigs = if (wine) ({ communityConfigsFor(shortcut) }) else null,
+                                    onCommunityConfigs = if (wineOnly) ({ communityConfigsFor(shortcut) }) else null,
                                     onGameDetails = { gameDetailsShortcut = shortcut },
-                                    onViewLogs = if (wine) ({ logsShortcut = shortcut }) else null,
-                                    onCloudSaves = if (wine && isSteamOriginShortcut(shortcut))
+                                    onViewLogs = if (wineOnly) ({ logsShortcut = shortcut }) else null,
+                                    onCloudSaves = if (wineOnly && isSteamOriginShortcut(shortcut))
                                         ({ launchSaveManager(context, steamAppIdOf(shortcut)) }) else null,
                                     onBackupSaves = if (wine && isCustomShortcut(shortcut))
                                         ({ startSaveBackup(shortcut) }) else null,
@@ -757,6 +811,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                 val itemExport = { exportShortcut(context, shortcut) }
                                 val itemProperties = { propertiesShortcut = shortcut }
                                 val wine = remember(shortcut) { !AndroidGames.isAndroidEntry(shortcut) }
+                                val wineOnly = remember(shortcut) { isWineEntry(shortcut) }
                                 ShortcutItemLayoutL(
                                     shortcut = shortcut,
                                     selectionMode = selectionMode,
@@ -764,17 +819,17 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onRun = itemRun,
                                     onSettings = if (wine) itemSettings else null,
                                     onRemove = itemRemove,
-                                    onClone = if (wine) itemClone else null,
-                                    onCopyToDriveC = if (wine) itemCopyToDriveC else null,
-                                    onChangeExe = if (wine) itemChangeExe else null,
+                                    onClone = if (wineOnly) itemClone else null,
+                                    onCopyToDriveC = if (wineOnly) itemCopyToDriveC else null,
+                                    onChangeExe = if (wineOnly) itemChangeExe else null,
                                     onAddToHome = itemAddToHome,
-                                    onExport = if (wine) itemExport else null,
+                                    onExport = if (wineOnly) itemExport else null,
                                     onProperties = itemProperties,
                                     onScrapeCover = { scrapeCoverFor(shortcut) },
-                                    onCommunityConfigs = if (wine) ({ communityConfigsFor(shortcut) }) else null,
+                                    onCommunityConfigs = if (wineOnly) ({ communityConfigsFor(shortcut) }) else null,
                                     onGameDetails = { gameDetailsShortcut = shortcut },
-                                    onViewLogs = if (wine) ({ logsShortcut = shortcut }) else null,
-                                    onCloudSaves = if (wine && isSteamOriginShortcut(shortcut))
+                                    onViewLogs = if (wineOnly) ({ logsShortcut = shortcut }) else null,
+                                    onCloudSaves = if (wineOnly && isSteamOriginShortcut(shortcut))
                                         ({ launchSaveManager(context, steamAppIdOf(shortcut)) }) else null,
                                     onBackupSaves = if (wine && isCustomShortcut(shortcut))
                                         ({ startSaveBackup(shortcut) }) else null,
@@ -1064,20 +1119,47 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             text = {
                 LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
                     items(folderScanResults, key = { it.exe.absolutePath }) { candidate ->
-                        ScannedGameRow(
-                            candidate = candidate,
-                            checked = candidate.exe.absolutePath in folderScanSelected,
-                            enabled = !candidate.alreadyAdded && !folderImportRunning,
-                            onToggle = {
-                                val key = candidate.exe.absolutePath
-                                folderScanSelected = if (key in folderScanSelected) {
-                                    folderScanSelected - key
-                                } else {
-                                    folderScanSelected + key
-                                }
-                            },
-                            onChangeExe = { exePickerFor = candidate },
-                        )
+                        Column(Modifier.fillMaxWidth()) {
+                            ScannedGameRow(
+                                candidate = candidate,
+                                checked = candidate.exe.absolutePath in folderScanSelected,
+                                enabled = !candidate.alreadyAdded && !folderImportRunning,
+                                onToggle = {
+                                    val key = candidate.exe.absolutePath
+                                    folderScanSelected = if (key in folderScanSelected) {
+                                        folderScanSelected - key
+                                    } else {
+                                        folderScanSelected + key
+                                    }
+                                },
+                                onChangeExe = { exePickerFor = candidate },
+                                footer = {
+                                    val recCount = scanRecCounts[candidate.exe.absolutePath] ?: 0
+                                    val scanContainer = vm.containers().getOrNull(pendingImportContainerIndex)
+                                    if (recCount > 0 && scanContainer != null) {
+                                        val key = candidate.exe.absolutePath
+                                        val open = key in scanRecsOpen
+                                        TextButton(
+                                            onClick = { scanRecsOpen = if (open) scanRecsOpen - key else scanRecsOpen + key },
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                            modifier = Modifier.height(32.dp),
+                                        ) {
+                                            Text(
+                                                (if (open) "▾ " else "▸ ") + "Components ($recCount)",
+                                                fontSize = 13.sp,
+                                            )
+                                        }
+                                        if (open) {
+                                            RecommendedComponentsSection(
+                                                container = scanContainer,
+                                                exeFile = candidate.exe,
+                                                modifier = Modifier.padding(start = 12.dp, end = 4.dp, bottom = 8.dp),
+                                            )
+                                        }
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             },
@@ -1189,6 +1271,11 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // shortcuts + wrong cover art). Reuses the existing rename mechanism on Save.
     if (showRenameDialog) {
         val confirmContainer = vm.containers().getOrNull(renameDialogContainerIndex)
+        // The result this game is linked to: the appId it was given, else the one whose title is
+        // the game's (the rule the import's own Steam lookup uses). Save commits it.
+        val linkedHit = confirmAppId ?: steamSearchResults
+            .map { it to SteamStoreSearch.nameMatch(confirmNameField, it.name) }
+            .filter { it.second >= 2 }.maxByOrNull { it.second }?.first?.appId
         OutlinedAlertDialog(
             onDismissRequest = { showRenameDialog = false },
             title = { Text("Confirm game") },
@@ -1200,6 +1287,16 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    // The search runs by itself when the dialog opens, so the game the import matched
+                    // is already listed (and marked) under the name, as if Search Steam had been tapped.
+                    LaunchedEffect(renameDialogName) {
+                        val query = confirmNameField.trim()
+                        if (query.isNotEmpty() && steamSearchResults.isEmpty() && !steamSearching) {
+                            steamSearching = true
+                            steamSearchResults = withContext(Dispatchers.IO) { SteamStoreSearch.searchByName(query) }
+                            steamSearching = false
+                        }
+                    }
                     OutlinedTextField(
                         value = confirmNameField,
                         onValueChange = { confirmNameField = it; confirmNameEdited = true },
@@ -1249,11 +1346,16 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                             color = OnSurfaceVariant,
                             fontSize = 12.sp,
                         )
-                        steamSearchResults.forEach { hit ->
+                        // The linked result first, tinted, so the match is the first thing seen.
+                        steamSearchResults.sortedByDescending { it.appId == linkedHit }.forEach { hit ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (hit.appId == linkedHit) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                        else androidx.compose.ui.graphics.Color.Transparent
+                                    )
                                     .clickable {
                                         // Set name + record appId; edit-guard off so the async
                                         // auto-rename won't clobber the user's explicit pick.
@@ -1274,7 +1376,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                             }
                                         }
                                     }
-                                    .padding(vertical = 6.dp),
+                                    .padding(horizontal = 6.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
@@ -1282,6 +1384,9 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(hit.name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text("App ID: ${hit.appId}", fontSize = 11.sp, color = OnSurfaceVariant)
+                                }
+                                if (hit.appId == linkedHit) {
+                                    Text("✓ Linked", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                                 }
                             }
                         }
@@ -1319,12 +1424,26 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             confirmButton = {
                 TextButton(onClick = {
                     val name = confirmNameField.trim()
-                    // Record the confirmed appId on the current file first, so it rides through the rename.
-                    confirmAppId?.let { id ->
+                    // The linked game (tapped, or the marked match) is committed by Save itself: its id
+                    // goes on the current file first, so it rides through the rename.
+                    val tapped = confirmAppId != null
+                    val linkId = confirmAppId ?: linkedHit
+                    linkId?.let { id ->
                         confirmContainer?.let { c -> recordSteamAppId(c, renameDialogName, id) }
                     }
+                    val oldBase = renameDialogName
                     if (name.isNotEmpty()) {
                         vm.renameImportedShortcut(renameDialogContainerIndex, renameDialogName, name)
+                    }
+                    if (linkId != null && confirmContainer != null) {
+                        val safe = name.replace(Regex("""[\\/:*?"<>|]"""), "_").trim()
+                        val base = if (safe.isNotBlank() && File(confirmContainer.getDesktopDir(), "$safe.desktop").isFile) safe else oldBase
+                        scope.launch(Dispatchers.IO) {
+                            // Its Steam cover (unless one was just applied by tapping) and its details.
+                            if (!tapped) applySteamCover(confirmContainer, base, linkId)
+                            ExeShortcutImporter.linkSteamApp(confirmContainer, base, linkId)
+                            withContext(Dispatchers.Main) { vm.refresh() }
+                        }
                     }
                     showRenameDialog = false
                     Toast.makeText(context, "Shortcut imported.", Toast.LENGTH_SHORT).show()
@@ -4704,7 +4823,12 @@ internal fun steamAppIdOf(shortcut: Shortcut): Int =
 // A shortcut is "custom" (exe/folder import) when it is NOT a genuine Steam-library game. Steam games
 // get the "Cloud Saves" item; custom games get the local-only "Back up / Restore saves" items.
 internal fun isCustomShortcut(shortcut: Shortcut): Boolean =
-    !isSteamOriginShortcut(shortcut) && !AndroidGames.isAndroidEntry(shortcut)
+    !isSteamOriginShortcut(shortcut) && !AndroidGames.isAndroidEntry(shortcut) && !LinuxShortcuts.isLinuxEntry(shortcut)
+
+// A game that runs in a Wine container. The Linux Steam entry and Android games don't, so they never get
+// the Wine-only actions (clone, Drive C, exe, export, community configs, logs, save backups).
+internal fun isWineEntry(shortcut: Shortcut): Boolean =
+    !AndroidGames.isAndroidEntry(shortcut) && !LinuxShortcuts.isLinuxEntry(shortcut)
 
 internal fun launchSaveManager(context: Context, focusAppId: Int) {
     context.startActivity(
@@ -4909,10 +5033,9 @@ private fun ShortcutOverflowButton(
         IconButton(onClick = { menuExpanded = true }) {
             Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = OnSurfaceVariant)
         }
-        DropdownMenu(
+        ScrollingDropdownMenu(
             expanded = menuExpanded,
             onDismissRequest = { menuExpanded = false },
-            modifier = Modifier.outlinedMenuCard(),
         ) {
             if (onSettings != null) {
                 DropdownMenuItem(
@@ -5228,10 +5351,9 @@ private fun ShortcutGridItem(
         }
 
         // Long-press context menu
-        DropdownMenu(
+        ScrollingDropdownMenu(
             expanded = menuExpanded,
             onDismissRequest = { menuExpanded = false },
-            modifier = Modifier.outlinedMenuCard(),
         ) {
             if (onSettings != null) {
                 DropdownMenuItem(text = { Text("Settings") }, leadingIcon = { Icon(Icons.Filled.Settings, null) }, onClick = { menuExpanded = false; onSettings() })
@@ -5326,6 +5448,19 @@ private fun GameDetailsSheet(
     var filling by remember(shortcut) { mutableStateOf(false) }
     var saving by remember(shortcut) { mutableStateOf(false) }
 
+    // Game art: an image the user picked (in-app file manager), or a reset back to Steam's. A picked
+    // image is marked on the shortcut (coverSource=user) so later saves don't swap Steam's art over it.
+    val userArt = remember(shortcut) { shortcut.getExtra("coverSource", "") == "user" }
+    val currentArt = remember(shortcut) { shortcut.customCoverArtPath?.takeIf { File(it).isFile } }
+    var pickedArt by remember(shortcut) { mutableStateOf<String?>(null) }
+    var useSteamArt by remember(shortcut) { mutableStateOf(false) }
+    var showArtPicker by remember(shortcut) { mutableStateOf(false) }
+    val artPicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            InAppFilePicker.pickedPath(result.data)?.let { pickedArt = it; useSteamArt = false }
+        }
+    }
+
     fun doSearch() {
         val query = nameField.trim()
         if (query.isEmpty()) return
@@ -5344,14 +5479,14 @@ private fun GameDetailsSheet(
 
     // Tapping a result auto-fills every field from Steam and links the appId. If the details fetch
     // fails (network), we still link the appId so the cover applies and the user can fill fields by hand.
-    fun fillFromSteam(appId: Int) {
+    fun fillFromSteam(appId: Int, keepName: Boolean = false) {
         filling = true
         searchResults = emptyList()
         scope.launch(Dispatchers.IO) {
             val info = SteamStoreSearch.fetchDetails(appId)
             withContext(Dispatchers.Main) {
                 if (info != null) {
-                    nameField = info.name
+                    if (!keepName) nameField = info.name
                     genresField = info.genres.joinToString(", ")
                     descField = info.shortDescription ?: ""
                     yearField = info.releaseYear ?: ""
@@ -5361,6 +5496,13 @@ private fun GameDetailsSheet(
                 filling = false
             }
         }
+    }
+
+    // A game already linked to a Steam app opens filled in: its empty details come from the store
+    // (the name is left as it is).
+    LaunchedEffect(shortcut) {
+        val id = initial.steamAppId
+        if (id != null && !initial.hasDisplayableDetails()) fillFromSteam(id, keepName = true)
     }
 
     fun save() {
@@ -5392,9 +5534,25 @@ private fun GameDetailsSheet(
                         releaseYear = year,
                         metacritic = metacritic,
                     ).writeTo(Shortcut(container, file))
-                    // 3. Re-apply the Steam cover for the linked appId (re-reads disk, so the detail
-                    //    extras written in step 2 are preserved). No-op / cover untouched when unlinked.
-                    if (appId != null && appId > 0) applySteamCover(container, base, appId)
+                    // 3. Game art: the image the user picked; else the Steam cover for the linked appId
+                    //    (re-reads disk, so the detail extras written in step 2 are preserved) - but
+                    //    not over an image the user picked before, unless they relinked or asked for
+                    //    Steam's art back.
+                    val picked = pickedArt
+                    if (picked != null) {
+                        loadPickedArt(picked)?.let { bmp ->
+                            val sc = Shortcut(container, file)
+                            sc.putExtra("coverSource", "user")
+                            sc.saveCustomCoverArt(bmp)
+                            container.getIconsDir(64)?.let { icons ->
+                                if (!icons.exists()) icons.mkdirs()
+                                FileUtils.saveBitmapToFile(bmp, File(icons, "$base.png"))
+                            }
+                        }
+                    } else if (appId != null && appId > 0 && (!userArt || useSteamArt || appId != initial.steamAppId)) {
+                        Shortcut(container, file).apply { putExtra("coverSource", null); saveData() }
+                        applySteamCover(container, base, appId)
+                    }
                 }
             } catch (_: Exception) {
                 // Best-effort — never crash the shortcuts screen on a save.
@@ -5408,6 +5566,20 @@ private fun GameDetailsSheet(
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        // The art picker opens from inside this dialog's window: a sheet from outside it would sit
+        // under the full-screen dialog, out of sight.
+        if (showArtPicker) {
+            GameArtPickerSheet(
+                steamAppId = linkedAppId,
+                name = nameField.ifBlank { shortcut.name },
+                onPick = { url -> pickedArt = url; useSteamArt = false; showArtPicker = false },
+                onPickFile = {
+                    showArtPicker = false
+                    artPicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.IMAGES, "Select game art"))
+                },
+                onDismiss = { showArtPicker = false },
+            )
+        }
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // Header: Close · title · Save.
@@ -5444,67 +5616,99 @@ private fun GameDetailsSheet(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    // Linked Steam app (cover + appId + Unlink).
-                    linkedAppId?.let { id ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            SteamResultThumbnail(id)
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text("Linked to Steam App ID:", fontSize = 11.sp, color = OnSurfaceVariant)
-                                Text(
-                                    "$id",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.primary,
+                    // Header: the game's art beside its name. Tapping the art picks an image (in-app
+                    // file manager); the name field searches Steam from its trailing icon.
+                    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        val shown = pickedArt ?: currentArt.takeIf { !useSteamArt }
+                        Box(
+                            modifier = Modifier
+                                .size(width = 84.dp, height = 120.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(SurfaceVariant)
+                                .clickable { showArtPicker = true },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val model: Any? = shown?.let { if (it.startsWith("http")) it else File(it) }
+                                ?: linkedAppId?.let { SteamStoreSearch.coverUrl(it) }
+                            if (model != null) {
+                                SubcomposeAsyncImage(
+                                    model = ImageRequest.Builder(context).data(model).memoryCachePolicy(CachePolicy.DISABLED).build(),
+                                    contentDescription = "Game art",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize(),
                                 )
-                                TextButton(
-                                    onClick = { linkedAppId = null },
-                                    contentPadding = PaddingValues(0.dp),
-                                    modifier = Modifier.height(28.dp),
-                                ) { Text("Unlink", fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
+                            } else {
+                                Text("Tap to\nadd art", fontSize = 11.sp, color = OnSurfaceVariant, textAlign = TextAlign.Center)
                             }
                         }
-                        Divider(color = DividerColor)
-                    }
-
-                    // Game name + Search Steam.
-                    Text("Game Name", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = OnSurfaceVariant)
-                    OutlinedTextField(
-                        value = nameField,
-                        onValueChange = { nameField = it; searchResults = emptyList(); searchError = null },
-                        placeholder = { Text("Enter game name") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        trailingIcon = {
-                            if (nameField.isNotBlank()) {
-                                IconButton(onClick = { nameField = ""; searchResults = emptyList() }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(18.dp))
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            OutlinedTextField(
+                                value = nameField,
+                                onValueChange = { nameField = it; searchResults = emptyList(); searchError = null },
+                                label = { Text("Name") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                trailingIcon = {
+                                    if (searching) {
+                                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        IconButton(onClick = { doSearch() }, enabled = nameField.isNotBlank()) {
+                                            Icon(Icons.Default.Search, contentDescription = "Search Steam")
+                                        }
+                                    }
+                                },
+                            )
+                            // Steam link, in one line.
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val id = linkedAppId
+                                if (id != null) {
+                                    Text("Steam app $id", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                                    Text("  ·  ", fontSize = 12.sp, color = OnSurfaceVariant)
+                                    Text(
+                                        "Unlink",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.clickable { linkedAppId = null },
+                                    )
+                                } else {
+                                    Text("Not linked to Steam", fontSize = 12.sp, color = OnSurfaceVariant)
+                                }
+                                if (filling) {
+                                    Spacer(Modifier.width(8.dp))
+                                    CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
                                 }
                             }
-                        },
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilledTonalButton(
-                            onClick = { doSearch() },
-                            enabled = nameField.isNotBlank() && !searching,
-                        ) {
-                            if (searching) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
+                            // Art actions, in one line.
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "Change art",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.clickable { showArtPicker = true },
+                                )
+                                if (linkedAppId != null && (pickedArt != null || (userArt && !useSteamArt))) {
+                                    Text("  ·  ", fontSize = 12.sp, color = OnSurfaceVariant)
+                                    Text(
+                                        "Use Steam art",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.clickable { pickedArt = null; useSteamArt = true },
+                                    )
+                                }
                             }
-                            Spacer(Modifier.width(6.dp))
-                            Text("Search Steam", fontSize = 13.sp)
-                        }
-                        if (filling) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Loading…", fontSize = 12.sp, color = OnSurfaceVariant)
+                            when {
+                                pickedArt != null -> Text(
+                                    if (pickedArt!!.startsWith("http")) "New art is applied on Save" else File(pickedArt!!).name,
+                                    fontSize = 11.sp, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                                useSteamArt -> Text("Steam's art is applied on Save", fontSize = 11.sp, color = OnSurfaceVariant)
+                            }
                         }
                     }
+
                     searchError?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
                     if (searchResults.isNotEmpty()) {
                         Text("Tap a result to auto-fill all fields:", fontSize = 11.sp, color = OnSurfaceVariant)
@@ -5529,56 +5733,47 @@ private fun GameDetailsSheet(
 
                     Divider(color = DividerColor)
 
-                    // Genres.
-                    Text("Genres", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = OnSurfaceVariant)
+                    Text("DETAILS", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, color = OnSurfaceVariant)
                     OutlinedTextField(
                         value = genresField,
                         onValueChange = { genresField = it },
-                        placeholder = { Text("e.g. Action, RPG, Strategy") },
+                        label = { Text("Genres") },
+                        placeholder = { Text("Action, RPG, Strategy") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
-                        supportingText = { Text("Comma-separated", fontSize = 10.sp) },
                     )
-
-                    // Description.
-                    Text("Description", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = OnSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            value = yearField,
+                            onValueChange = { if (it.length <= 4) yearField = it.filter { c -> c.isDigit() } },
+                            label = { Text("Release year") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedTextField(
+                            value = metaField,
+                            onValueChange = { if (it.length <= 3) metaField = it.filter { c -> c.isDigit() } },
+                            label = { Text("Metacritic") },
+                            placeholder = { Text("1–100") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                     OutlinedTextField(
                         value = descField,
                         onValueChange = { descField = it },
-                        placeholder = { Text("Short description shown on the launch screen") },
+                        label = { Text("Description") },
                         minLines = 3,
-                        maxLines = 5,
+                        maxLines = 6,
                         modifier = Modifier.fillMaxWidth(),
                     )
-
-                    // Release year + Metacritic.
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Release Year", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = OnSurfaceVariant)
-                            Spacer(Modifier.height(4.dp))
-                            OutlinedTextField(
-                                value = yearField,
-                                onValueChange = { if (it.length <= 4) yearField = it.filter { c -> c.isDigit() } },
-                                placeholder = { Text("e.g. 2023") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Metacritic", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = OnSurfaceVariant)
-                            Spacer(Modifier.height(4.dp))
-                            OutlinedTextField(
-                                value = metaField,
-                                onValueChange = { if (it.length <= 3) metaField = it.filter { c -> c.isDigit() } },
-                                placeholder = { Text("1–100") },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                supportingText = { Text("Leave blank to hide", fontSize = 10.sp) },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                    }
+                    Text(
+                        "Shown on the game's launch screen. Genres are comma-separated; leave Metacritic blank to hide it.",
+                        fontSize = 11.sp,
+                        color = OnSurfaceVariant,
+                    )
                 }
             }
         }
@@ -5872,10 +6067,13 @@ internal fun ShortcutSettingsDialogScreen(
 
     // Async-loaded state
     var isArm64EC by remember { mutableStateOf(false) }
+    // A Box64EC component is installed, so the per-game "Emulator (64-bit)" override is offered.
+    var box64ECInstalled by remember { mutableStateOf(false) }
     // isArm64EC is resolved asynchronously (WineInfo load below). Until it lands we must not
     // relabel the Emulator field, or an arm64ec container would flash "Box64" on first frame.
     var archLoaded by remember { mutableStateOf(false) }
     var box64Versions by remember { mutableStateOf(listOf<String>()) }
+    var box64ECVersions by remember { mutableStateOf(listOf<String>()) }
     var box64Presets by remember { mutableStateOf(listOf<Box64Preset>()) }
     var fexCoreVersions by remember { mutableStateOf(listOf<String>()) }
     var fexCorePresets by remember { mutableStateOf(listOf<FEXCorePreset>()) }
@@ -6000,6 +6198,32 @@ internal fun ShortcutSettingsDialogScreen(
     val pickSync: (String) -> Unit = { m ->
         if (syncCaps?.isAvailable(m) != false && com.winlator.star.core.SyncMode.normalize(m) != null)
             syncOverride = if (m == containerSyncEffective) null else m
+    }
+
+    // Fast OpenGL per-game override (extra "fastOpenGL"; core.FastOpenGL): "" = follow the container,
+    // "1" / "0" = this game only. Locked with one reason when the effective backend is Wayland (always
+    // on there) or, on X11, when the game's driver isn't a Turnip or the APK has no X11 GL set. Any
+    // layer works on X11: the launch picks the EGL or GLX route.
+    var fastGlOverride by remember {
+        mutableStateOf(com.winlator.star.core.FastOpenGL.normalize(
+            shortcut.getExtra(com.winlator.star.core.FastOpenGL.EXTRA)) ?: "")
+    }
+    val fastGlDriverVersion = GraphicsDriverConfigDialog.getVersion(graphicsDriverConfig) ?: ""
+    val fastGlDriverOk = remember(fastGlDriverVersion) {
+        com.winlator.star.core.FastOpenGL.driverUsable(context, fastGlDriverVersion)
+    }
+    val fastGlBundled = remember { com.winlator.star.core.X11Egl.isBundled(context) }
+    val fastGlLocked = if (effectiveWaylandShortcut) com.winlator.star.core.FastOpenGL.WAYLAND_ALWAYS_ON
+        else com.winlator.star.core.FastOpenGL.unavailableReason(fastGlDriverOk, fastGlBundled)
+    // Show OpenGL FPS / OpenGL vsync off per-game overrides (extras "glFpsHud" / "glVsyncOff"): same
+    // "" / "1" / "0" as Fast OpenGL, on both backends, never locked.
+    var glFpsHudOverride by remember {
+        mutableStateOf(com.winlator.star.core.FastOpenGL.normalize(
+            shortcut.getExtra(com.winlator.star.core.FastOpenGL.FPS_HUD.extra)) ?: "")
+    }
+    var glVsyncOffOverride by remember {
+        mutableStateOf(com.winlator.star.core.FastOpenGL.normalize(
+            shortcut.getExtra(com.winlator.star.core.FastOpenGL.VSYNC_OFF.extra)) ?: "")
     }
 
     // Wayland GAME driver override (per-game, same extra name as the container's): "" = the
@@ -6266,6 +6490,14 @@ internal fun ShortcutSettingsDialogScreen(
         mutableStateOf(emulatorEntries.firstOrNull { StringUtils.parseIdentifier(it) == id }
             ?: emulatorEntries.firstOrNull() ?: id)
     }
+    // x86-64 translator override. Entry 0 = no extra, so the game follows the container
+    // (existing shortcuts never carry the extra and keep doing exactly that).
+    val emulator64Entries = remember { listOf("Container default", "FEXCore", "Box64EC") }
+    var selectedEmulator64 by remember {
+        val id = shortcut.getExtra("emulator64", "") ?: ""
+        mutableStateOf(emulator64Entries.drop(1).firstOrNull { StringUtils.parseIdentifier(it) == id }
+            ?: emulator64Entries.first())
+    }
 
     // MIDI
     var selectedMidi by remember {
@@ -6338,6 +6570,10 @@ internal fun ShortcutSettingsDialogScreen(
     var selectedFexCoreVersion by remember {
         mutableStateOf(shortcut.getExtra("fexcoreVersion", shortcut.container.getFEXCoreVersion()) ?: "")
     }
+    // Box64EC build for this game; "" = no extra = the container's pick (BOX64EC_CONTAINER_DEFAULT shown).
+    var selectedBox64ECVersion by remember { mutableStateOf(shortcut.getExtra("box64ecVersion", "") ?: "") }
+    // Force SSBS override: "" = no extra = the container's switch, "1" = on, "0" = off.
+    var forceSsbs by remember { mutableStateOf(shortcut.getExtra("forceSsbs", "") ?: "") }
     var selectedFexCorePresetIndex by remember { mutableIntStateOf(0) }
     var selectedControlsProfileIndex by remember { mutableIntStateOf(0) }
 
@@ -6447,6 +6683,7 @@ internal fun ShortcutSettingsDialogScreen(
     var glossaryQuery by remember { mutableStateOf<String?>(null) }
     var showBox64DownloadSheet by remember { mutableStateOf(false) }
     var showFexCoreDownloadSheet by remember { mutableStateOf(false) }
+    var showBox64ECDownloadSheet by remember { mutableStateOf(false) }
     var showDxvkDownloadSheet by remember { mutableStateOf(false) }
     var showVegasDownloadSheet by remember { mutableStateOf(false) }
     var showVkd3dDownloadSheet by remember { mutableStateOf(false) }
@@ -6536,6 +6773,12 @@ internal fun ShortcutSettingsDialogScreen(
 
             val b64Presets = Box64PresetManager.getPresets("box64", context)
             val fexPresets = FEXCorePresetManager.getPresets(context)
+            val ecList = mutableListOf<String>()
+            for (p in cm.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_BOX64EC) ?: emptyList()) {
+                val n = ContentsManager.getEntryName(p)
+                ecList.add(n.substring(n.indexOf('-') + 1))
+            }
+            val ecInstalled = ecList.isNotEmpty()
             val profiles = InputControlsManager(context).getProfiles(true)
 
             val midi = mutableListOf("-- ${context.getString(R.string.disabled)} --", MidiManager.DEFAULT_SF2_FILE)
@@ -6544,6 +6787,8 @@ internal fun ShortcutSettingsDialogScreen(
 
             withContext(Dispatchers.Main) {
                 isArm64EC = arm64ec
+                box64ECInstalled = ecInstalled
+                box64ECVersions = ecList
                 archLoaded = true
                 box64Versions = b64Arr
                 fexCoreVersions = fexList
@@ -6673,6 +6918,8 @@ internal fun ShortcutSettingsDialogScreen(
                 if (it == "directaudio" && !directAudioSupported) Container.DEFAULT_AUDIO_DRIVER else it
             })
             putExtra("emulator", StringUtils.parseIdentifier(selectedEmulator))
+            putExtra("emulator64", if (selectedEmulator64 == emulator64Entries.first()) null
+                                   else StringUtils.parseIdentifier(selectedEmulator64))
             putExtra("midiSoundFont", midiVal.ifEmpty { null })
             putExtra("lc_all", lcAll)
             // #71: write the per-game mode override (or null = use container default) and clear the
@@ -6693,6 +6940,8 @@ internal fun ShortcutSettingsDialogScreen(
             putExtra("box64Preset", b64PresetId)
             putExtra("fexcoreVersion", selectedFexCoreVersion)
             putExtra("fexcorePreset", fexPresetId)
+            putExtra("box64ecVersion", selectedBox64ECVersion.ifEmpty { null })
+            putExtra("forceSsbs", forceSsbs.ifEmpty { null })
             putExtra("controlsProfile", if (ctrlProfileId > 0) ctrlProfileId.toString() else null)
             putExtra("startupSelection", startupIdx.toString())
             // Persist the Custom enabled set alongside the selection (launch reads it only when
@@ -6712,6 +6961,11 @@ internal fun ShortcutSettingsDialogScreen(
             if (!isLinuxEntry) {
                 putExtra(com.winlator.star.core.SyncMode.EXTRA,
                     syncOverride?.let { o -> syncCaps?.resolve(o) ?: o }?.takeIf { it != containerSyncEffective })
+                // Fast OpenGL override: "" clears the extra (follow the container). Kept as picked while
+                // it's locked, so a later layer/driver/backend change brings the choice back.
+                putExtra(com.winlator.star.core.FastOpenGL.EXTRA, fastGlOverride.ifEmpty { null })
+                putExtra(com.winlator.star.core.FastOpenGL.FPS_HUD.extra, glFpsHudOverride.ifEmpty { null })
+                putExtra(com.winlator.star.core.FastOpenGL.VSYNC_OFF.extra, glVsyncOffOverride.ifEmpty { null })
             }
             putExtra("cpuList", cpuList)
             // Only a Linux entry draws the two pickers, so only a Linux entry writes their keys — a
@@ -6805,7 +7059,7 @@ internal fun ShortcutSettingsDialogScreen(
                 add("selectIcon")
                 // The Wine/X11 graphics stack is not registered for a Linux entry, so the D-pad
                 // cursor can never land on a row that isn't drawn (see the render conditionals).
-                if (!isLinuxEntry) { add("syncMode"); add("displayBackend") }
+                if (!isLinuxEntry) { add("syncMode"); add("displayBackend"); add("openglHelp"); add("fastOpenGL"); add("glFpsHud"); add("glVsyncOff") }
                 add("gfxDriver")   // the compositor driver: live on the gamescope path too
                 if (effectiveWaylandShortcut && !isLinuxEntry) {
                     add("waylandAdvanced"); add("waylandDriverCfg")
@@ -6846,6 +7100,7 @@ internal fun ShortcutSettingsDialogScreen(
                 add("frameGen"); add("fpsLimiter"); add("audio")
                 if (!isLinuxEntry) {
                     add("emulator")
+                    if (isArm64EC && box64ECInstalled) add("emulator64")
                     if (midiList.isNotEmpty()) add("midi")
                     add("lcAll")
                 }
@@ -7294,6 +7549,73 @@ internal fun ShortcutSettingsDialogScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.error
                                 )
+                            }
+                        }
+                    }
+
+                    // OpenGL card (per-game): Fast / Show FPS / Vsync off, each `Auto | On | Off` (Auto =
+                    // follow the container), under one "?" and a summary of what the game will get. Fast
+                    // is locked to Auto with Wayland (always on there) or with a short X11 reason.
+                    // D-pad: the "?" and each row are stops; Left/Right step the pills, A goes back to Auto.
+                    // Launch-only (EGL vs GLX is fixed when the game starts), so there is no drawer twin.
+                    if (!isLinuxEntry) {
+                        val glOptions = com.winlator.star.ui.components.OPENGL_OVERRIDES
+                        val fpsSw = com.winlator.star.core.FastOpenGL.FPS_HUD
+                        val vsyncSw = com.winlator.star.core.FastOpenGL.VSYNC_OFF
+                        val pickFastGl: (String) -> Unit = { v -> if (fastGlLocked == null || v.isEmpty()) fastGlOverride = v }
+                        val pickFps: (String) -> Unit = { v -> glFpsHudOverride = v }
+                        val pickVsync: (String) -> Unit = { v -> glVsyncOffOverride = v }
+                        val stepActions = { value: String, pick: (String) -> Unit ->
+                            ControlActions(
+                                activate = { pick("") },
+                                onLeft = { glOptions.getOrNull(glOptions.indexOf(value) - 1)?.let(pick) },
+                                onRight = { glOptions.getOrNull(glOptions.indexOf(value) + 1)?.let(pick) },
+                            )
+                        }
+                        SideEffect {
+                            dp.actions["openglHelp"] = ControlActions(activate = { helpRes = R.string.help_opengl_settings })
+                            dp.actions["fastOpenGL"] = stepActions(fastGlOverride, pickFastGl)
+                            dp.actions[fpsSw.extra] = stepActions(glFpsHudOverride, pickFps)
+                            dp.actions[vsyncSw.extra] = stepActions(glVsyncOffOverride, pickVsync)
+                        }
+                        val containerFast = shortcut.container.isFastOpenGL()
+                        val containerFps = fpsSw.containerOn(shortcut.container.getExtra(fpsSw.extra))
+                        val containerVsync = vsyncSw.containerOn(shortcut.container.getExtra(vsyncSw.extra))
+                        val fastEffective = effectiveWaylandShortcut || (fastGlLocked == null &&
+                            com.winlator.star.core.FastOpenGL.requested(if (containerFast) "1" else "0", fastGlOverride))
+                        com.winlator.star.ui.components.OpenGLCard(
+                            onHelp = { helpRes = R.string.help_opengl_settings },
+                            summary = com.winlator.star.ui.components.openGLSummary(
+                                fastEffective,
+                                fpsSw.requested(if (containerFps) "1" else "0", glFpsHudOverride),
+                                vsyncSw.requested(if (containerVsync) "1" else "0", glVsyncOffOverride)),
+                            helpFocused = dp.isFocused("openglHelp"),
+                            modifier = Modifier.dpadBringIntoView(dp, "openglHelp"),
+                        ) {
+                            com.winlator.star.ui.components.OpenGLCardRow(
+                                com.winlator.star.ui.components.OPENGL_FAST_ICON, "Fast",
+                                com.winlator.star.ui.components.openGLFastNote(fastGlLocked),
+                                focused = dp.isFocused("fastOpenGL"),
+                                modifier = Modifier.dpadBringIntoView(dp, "fastOpenGL"),
+                            ) {
+                                com.winlator.star.ui.components.OpenGLPills(fastGlOverride,
+                                    autoOn = containerFast || effectiveWaylandShortcut, locked = fastGlLocked != null, onPick = pickFastGl)
+                            }
+                            com.winlator.star.ui.components.OpenGLCardRow(
+                                com.winlator.star.ui.components.OPENGL_FPS_ICON, "Show FPS", null,
+                                focused = dp.isFocused(fpsSw.extra),
+                                modifier = Modifier.dpadBringIntoView(dp, fpsSw.extra),
+                            ) {
+                                com.winlator.star.ui.components.OpenGLPills(glFpsHudOverride,
+                                    autoOn = containerFps, locked = false, onPick = pickFps)
+                            }
+                            com.winlator.star.ui.components.OpenGLCardRow(
+                                com.winlator.star.ui.components.OPENGL_VSYNC_ICON, "Vsync off", null,
+                                focused = dp.isFocused(vsyncSw.extra),
+                                modifier = Modifier.dpadBringIntoView(dp, vsyncSw.extra),
+                            ) {
+                                com.winlator.star.ui.components.OpenGLPills(glVsyncOffOverride,
+                                    autoOn = containerVsync, locked = false, onPick = pickVsync)
                             }
                         }
                     }
@@ -8302,7 +8624,7 @@ internal fun ShortcutSettingsDialogScreen(
                         else EmulatorLabels.display(selectedEmulator, isArm64EC)
                     DpDrop(
                         dp, "emulator",
-                        label = "Emulator",
+                        label = "Emulator (32-bit)",
                         options = EmulatorLabels.options(emulatorEntries, isArm64EC),
                         selected = emulatorShown,
                         onSelect = {
@@ -8310,6 +8632,19 @@ internal fun ShortcutSettingsDialogScreen(
                         },
                         enabled = isArm64EC
                     )
+
+                    // x86-64 translator override (arm64ec only, once a Box64EC component exists).
+                    // "Container default" stores no extra: the game follows the container's
+                    // Emulator (64-bit) choice, which is what every existing shortcut does.
+                    if (isArm64EC && box64ECInstalled) {
+                        DpDrop(
+                            dp, "emulator64",
+                            label = "Emulator (64-bit)",
+                            options = emulator64Entries,
+                            selected = selectedEmulator64,
+                            onSelect = { selectedEmulator64 = it }
+                        )
+                    }
 
                     // MIDI
                     if (midiList.isNotEmpty()) {
@@ -8635,6 +8970,20 @@ internal fun ShortcutSettingsDialogScreen(
                                 gameDir = gameDir,
                                 shortcutBaseName = shortcut.name,
                             )
+                            // Every component, with what this game needs at the top, installed into
+                            // the game's container (the same list as the container's Win Components tab).
+                            var showAllComponents by remember { mutableStateOf(false) }
+                            OutlinedButton(onClick = { showAllComponents = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text("All components")
+                            }
+                            if (showAllComponents) {
+                                ComponentsSheet(
+                                    container = shortcut.container,
+                                    onDismiss = { showAllComponents = false },
+                                    exeFile = gameExe,
+                                    gameDir = gameDir,
+                                )
+                            }
                             ScWinComponentsTab(winComponents)
                         }
                             2 -> ScEnvVarsTab(envVarsStr, { envVarsStr = it }, gameDir, isLinuxEntry)
@@ -8693,7 +9042,13 @@ internal fun ShortcutSettingsDialogScreen(
             },
             reshadeSupported = StringUtils.parseIdentifier(selectedDxWrapper).let { it.contains("dxvk") || it.contains("vegas") },
             onShowBox64DownloadSheet = { showBox64DownloadSheet = true },
-            onShowFexCoreDownloadSheet = { showFexCoreDownloadSheet = true }
+            onShowFexCoreDownloadSheet = { showFexCoreDownloadSheet = true },
+            box64ECVersions = box64ECVersions,
+            selectedBox64ECVersion = selectedBox64ECVersion,
+            onBox64ECVersionChange = { selectedBox64ECVersion = it },
+            onShowBox64ECDownloadSheet = { showBox64ECDownloadSheet = true },
+            forceSsbs = forceSsbs,
+            onForceSsbsChange = { forceSsbs = it },
         )
                             5 -> ScTvTab(
                                 dp = dp,
@@ -8859,6 +9214,13 @@ internal fun ShortcutSettingsDialogScreen(
         ContentDownloadSheet(
             contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
             onDismiss = { showFexCoreDownloadSheet = false },
+            onContentChanged = {}
+        )
+    }
+    if (showBox64ECDownloadSheet) {
+        ContentDownloadSheet(
+            contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_BOX64EC,
+            onDismiss = { showBox64ECDownloadSheet = false },
             onContentChanged = {}
         )
     }
@@ -9117,7 +9479,9 @@ private fun TvNote(text: String) {
 @Composable
 private fun ScWinComponentsTab(components: androidx.compose.runtime.snapshots.SnapshotStateList<WinComponentEntry>) {
     val directx = components.filter { it.key.startsWith("direct") }
-    val general = components.filterNot { it.key.startsWith("direct") }
+    val general = components.filterNot { it.key.startsWith("direct") || MediaDecoder.isCodecKey(it.key) }
+    // Media backend rows: not DLL overrides, their own option labels (see MediaDecoder).
+    val codecs = components.filter { MediaDecoder.isCodecKey(it.key) }
     val options = listOf("Builtin (Wine)", "Native (Windows)")
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -9148,6 +9512,30 @@ private fun ScWinComponentsTab(components: androidx.compose.runtime.snapshots.Sn
                         onSelect = { opt ->
                             val i = components.indexOfFirst { it.key == comp.key }
                             if (i >= 0) components[i] = components[i].copy(selectedIndex = options.indexOf(opt).coerceAtLeast(0))
+                        }
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        if (codecs.isNotEmpty()) {
+            SectionBox(title = "Codecs") {
+                Text(
+                    "Builtin decoder: which backend Wine's Media Foundation plays cutscenes with — GStreamer (default) or FFmpeg (winedmo; arm64ec layers only — on x86_64 it falls back to GStreamer). Software decoding keeps video frames off the GPU; try it for black video with sound.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                codecs.forEach { comp ->
+                    val codecOptions = MediaDecoder.optionsFor(comp.key).toList()
+                    LabeledDropdown(
+                        label = comp.label,
+                        options = codecOptions,
+                        selectedOption = codecOptions.getOrElse(comp.selectedIndex) { codecOptions[0] },
+                        onSelect = { opt ->
+                            val i = components.indexOfFirst { it.key == comp.key }
+                            if (i >= 0) components[i] = components[i].copy(selectedIndex = codecOptions.indexOf(opt).coerceAtLeast(0))
                         }
                     )
                     Spacer(Modifier.height(4.dp))
@@ -9547,6 +9935,14 @@ private fun ScAdvancedTab(
     reshadeSupported: Boolean = true,
     onShowBox64DownloadSheet: () -> Unit = {},
     onShowFexCoreDownloadSheet: () -> Unit = {},
+    /** Installed Box64EC builds ("verName-verCode"); "" selection = follow the container. */
+    box64ECVersions: List<String> = emptyList(),
+    selectedBox64ECVersion: String = "",
+    onBox64ECVersionChange: (String) -> Unit = {},
+    onShowBox64ECDownloadSheet: () -> Unit = {},
+    /** Force SSBS override: "" = follow the container, "1" = on, "0" = off. */
+    forceSsbs: String = "",
+    onForceSsbsChange: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     // Bumped when a preset's values or the preset list change, so the "customised" badges
@@ -9631,6 +10027,41 @@ private fun ScAdvancedTab(
         }
         }
 
+        // Box64EC — the x86-64 translator alternative to FEXCore on arm64ec (General tab picks which
+        // one runs). Per-game build override; the first entry keeps the container's choice.
+        if (isArm64EC && !isLinuxEntry) {
+            SectionBox(title = "Box64EC") {
+                val containerDefault = "Container default"
+                val ecOptions = listOf(containerDefault) + box64ECVersions
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    LabeledDropdown(
+                        label = "Box64EC Version",
+                        options = ecOptions,
+                        selectedOption = if (selectedBox64ECVersion.isEmpty() || selectedBox64ECVersion !in box64ECVersions)
+                            containerDefault else selectedBox64ECVersion,
+                        onSelect = { onBox64ECVersionChange(if (it == containerDefault) "" else it) },
+                        enabled = box64ECVersions.isNotEmpty(),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedButton(
+                        onClick = onShowBox64ECDownloadSheet,
+                        modifier = Modifier.size(40.dp),
+                        border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
+                        contentPadding = PaddingValues(0.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = "Download Box64EC", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Text(
+                    if (box64ECVersions.isEmpty()) "No Box64EC installed. Import a Box64EC .wcp with the gear button."
+                    else "Runs 64-bit games when Emulator (64-bit) is set to Box64EC. Presets: the WOWBox64 preset's BOX64_* variables apply to Box64EC too.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.5.sp
+                )
+            }
+        }
+
         // A Linux session hands the FEXCore preset to the games the Steam client launches whatever the
         // container's Windows architecture is, so the section is offered there even off arm64ec.
         if (isArm64EC || isLinuxEntry) {
@@ -9694,6 +10125,35 @@ private fun ScAdvancedTab(
                     onListChanged = { onPresetListChanged(); presetRevision++ },
                     onValuesChanged = { presetRevision++ },
                 )
+                // Force SSBS — the Wine launcher's knob, so not offered to a Linux session.
+                if (!isLinuxEntry) {
+                    Spacer(Modifier.height(8.dp))
+                    // Entry 0 names what the container is set to, so "follow the container" is not a guess.
+                    val ssbsOn = stringResource(R.string.force_ssbs_on)
+                    val ssbsOff = stringResource(R.string.force_ssbs_off)
+                    val ssbsOptions = listOf(
+                        stringResource(R.string.force_ssbs_container_default,
+                            if (shortcut.container.isForceSsbs) ssbsOn else ssbsOff),
+                        ssbsOn, ssbsOff
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LabeledDropdown(
+                            label = stringResource(R.string.force_ssbs),
+                            options = ssbsOptions,
+                            selectedOption = when (forceSsbs) { "1" -> ssbsOptions[1]; "0" -> ssbsOptions[2]; else -> ssbsOptions[0] },
+                            onSelect = { onForceSsbsChange(when (it) { ssbsOptions[1] -> "1"; ssbsOptions[2] -> "0"; else -> "" }) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = { helpRes = R.string.help_force_ssbs }) {
+                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.force_ssbs_summary),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.5.sp
+                    )
+                }
             }
         }
 
@@ -9888,7 +10348,11 @@ private fun downloadBitmapOrNull(url: String): Bitmap? = try {
 internal fun applySteamCover(container: Container, base: String, appId: Int): Bitmap? {
     val shortcutFile = File(container.getDesktopDir(), "$base.desktop")
     if (!shortcutFile.isFile) return null
-    val bmp = downloadBitmapOrNull(SteamStoreSearch.coverUrl(appId))
+    // The tall library cover Steam lists for the app (older games name it differently), else the
+    // usual cover file, else the header.
+    val listed = runCatching { SteamStoreSearch.libraryAssets(appId) }.getOrDefault(LinkedHashMap())
+    val bmp = (listed["Cover"] ?: listed["Store cover"])?.let { downloadBitmapOrNull(it) }
+        ?: downloadBitmapOrNull(SteamStoreSearch.coverUrl(appId))
         ?: downloadBitmapOrNull(SteamStoreSearch.headerUrl(appId))
     return try {
         val shortcut = Shortcut(container, shortcutFile)
@@ -10887,6 +11351,7 @@ private fun ScannedGameRow(
     enabled: Boolean,
     onToggle: () -> Unit,
     onChangeExe: () -> Unit,
+    footer: @Composable () -> Unit = {},
 ) {
     val alpha = if (candidate.alreadyAdded) 0.45f else 1f
     Card(
@@ -10984,5 +11449,20 @@ private fun ScannedGameRow(
             TextButton(onClick = onChangeExe, enabled = enabled) { Text("Change") }
         }
     }
+    footer()
     }
+}
+
+/**
+ * A picked image (a file, or an online image the art picker offered), a file scaled down to at most 1200 px on its long side (a phone photo would otherwise be
+ * tens of MB in memory and on disk); null when it cannot be read. Blocking - call off the main thread.
+ */
+private fun loadPickedArt(path: String): Bitmap? = if (path.startsWith("http")) downloadBitmapOrNull(path) else try {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(path, bounds)
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1200) sample *= 2
+    BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+} catch (_: Exception) {
+    null
 }

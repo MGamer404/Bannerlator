@@ -32,7 +32,13 @@ public class Container {
     // opts in. EnvVars keeps "DXVK_HUD=" (index of '=' > 0) with an empty value, and DXVK renders no
     // overlay for an empty element list — so a fresh container starts with the HUD off.
     // No WINEESYNC: sync is the "Sync" setting (extra "syncMode", core.SyncSupport), written at launch.
-    public static final String DEFAULT_ENV_VARS = "WRAPPER_MAX_IMAGE_COUNT=0 ZINK_DESCRIPTORS=lazy ZINK_DEBUG=compact MESA_SHADER_CACHE_DISABLE=false MESA_SHADER_CACHE_MAX_SIZE=512MB mesa_glthread=true TU_DEBUG=noconform,sysmem DXVK_HUD=";
+    // VKD3D_SHADER_MODEL=6_6: VKD3D-Proton only advertises Shader Model 6.6 when the Vulkan driver has
+    // 64-bit buffer atomics + compute derivatives + required-subgroup-size control; Turnip through the
+    // wrapper tops out at 6.5, and Unreal Engine 5.3+ titles built for SM6 refuse anything lower
+    // ("DirectX 12 is not supported on your system"). The variable is a CEILING: a game asking for
+    // 5_1 or 6_0 still gets exactly that, DX11/DX9 never read it, and UE5 (Gothic 1 Remake, Pocket FIT)
+    // plays with it set. See ContainerManager.migrateVkd3dShaderModelDefault for existing containers.
+    public static final String DEFAULT_ENV_VARS = "WRAPPER_MAX_IMAGE_COUNT=0 ZINK_DESCRIPTORS=lazy ZINK_DEBUG=compact MESA_SHADER_CACHE_DISABLE=false MESA_SHADER_CACHE_MAX_SIZE=512MB mesa_glthread=true TU_DEBUG=noconform,sysmem DXVK_HUD= VKD3D_SHADER_MODEL=6_6";
     public static final String DEFAULT_SCREEN_SIZE = "1280x720";
 
     /**
@@ -69,6 +75,10 @@ public class Container {
     public static final String GRAPHICS_DRIVER_GAMENATIVE = "wrapper-gamenative";
     public static final String DEFAULT_AUDIO_DRIVER = "pulseaudio";
     public static final String DEFAULT_EMULATOR = "FEXCore";
+    // x86-64 translator on arm64ec layers ("fexcore" | "box64ec"). Wine picks it from the
+    // HKLM\Software\Microsoft\Wow64\amd64 registry value, written at launch.
+    public static final String DEFAULT_EMULATOR64 = "fexcore";
+    public static final String EMULATOR64_BOX64EC = "box64ec";
     public static final String DEFAULT_DXWRAPPER = "dxvk+vkd3d";
     public static final String DEFAULT_DXWRAPPERCONFIG = "version=" + DefaultVersion.getVegasDefault() + ",framerate=0,async=0,asyncCache=0" + ",vkd3dVersion=2.8" + ",vkd3dLevel=12_1" + ",ddrawrapper=" + Container.DEFAULT_DDRAWRAPPER + ",csmt=3" + ",gpuName=NVIDIA GeForce GTX 480" + ",videoMemorySize=2048" + ",strict_shader_math=1" + ",OffscreenRenderingMode=fbo" + ",renderer=gl";
     public static final String DEFAULT_GRAPHICSDRIVERCONFIG =
@@ -92,8 +102,11 @@ public class Container {
             + ",showFPS=1,showFPSGraph=1,showCPUUsage=1,showCPULoad=1,showGPULoad=1,showRAM=1,showVram=1,showPower=1,showBattery=1"
             + ",showTemp=1,showBatteryTemp=1,showGpuTemp=1,showEngine=1,showRenderer=1,showGpuModel=1,showLow001=1,fpsDecimal=1,showClock=1"
             + ",showPerCore=1,showSwap=1,showNet=1,showResolution=1,showProton=1,showWrapper=1,showDxVer=1,showSession=1";
-    public static final String DEFAULT_WINCOMPONENTS = "direct3d=1,directsound=0,directmusic=0,directshow=0,directplay=0,xaudio=0,vcrun2010=1";
-    public static final String FALLBACK_WINCOMPONENTS = "direct3d=1,directsound=1,directmusic=1,directshow=1,directplay=1,xaudio=1,vcrun2010=1";
+    // The two trailing "codec" entries are not DLL overrides: see MediaDecoder. They ride in the same
+    // string so the container/shortcut/XMB/community-config plumbing carries them for free, and they
+    // stay LAST so the launch loop's lockstep walk over an older saved string isn't disturbed.
+    public static final String DEFAULT_WINCOMPONENTS = "direct3d=1,directsound=0,directmusic=0,directshow=0,directplay=0,xaudio=0,vcrun2010=1,builtinDecoder=0,softwareDecoding=0";
+    public static final String FALLBACK_WINCOMPONENTS = "direct3d=1,directsound=1,directmusic=1,directshow=1,directplay=1,xaudio=1,vcrun2010=1,builtinDecoder=0,softwareDecoding=0";
     public static final String DEFAULT_DRIVES = "F:"+Environment.getExternalStorageDirectory().getAbsolutePath()+"D:"+Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
     public static final byte STARTUP_SELECTION_NORMAL = 0;
     public static final byte STARTUP_SELECTION_ESSENTIAL = 1;
@@ -172,6 +185,11 @@ public class Container {
     private String controllerMapping = new String(new char[XrControllerMapping.values().length]);
     private String box64Version;
     private String emulator;
+    private String emulator64 = DEFAULT_EMULATOR64;
+    private String box64ecVersion = "";
+    // Force SSBS (arm64ec only, on by default): WINE_FORCE_SSBS=1 for rebuilt layers plus libssbs.so preloaded
+    // for the rest, so game threads keep the CPU's speculative-store fast path after signal returns.
+    private boolean forceSsbs = true;
     private String renderer = "vulkan";
     private boolean exclusiveXInput = true;
     private ContainerManager containerManager;
@@ -422,6 +440,34 @@ public class Container {
         return this.emulator;
     }
 
+    public void setEmulator64(String emulator64) {
+        this.emulator64 = emulator64 != null && !emulator64.isEmpty() ? emulator64 : DEFAULT_EMULATOR64;
+    }
+
+    public String getEmulator64() {
+        return this.emulator64;
+    }
+
+    public boolean usesBox64EC() {
+        return EMULATOR64_BOX64EC.equalsIgnoreCase(emulator64);
+    }
+
+    public void setBox64ECVersion(String version) {
+        this.box64ecVersion = version != null ? version : "";
+    }
+
+    public String getBox64ECVersion() {
+        return this.box64ecVersion;
+    }
+
+    public void setForceSsbs(boolean forceSsbs) {
+        this.forceSsbs = forceSsbs;
+    }
+
+    public boolean isForceSsbs() {
+        return this.forceSsbs;
+    }
+
     public File getRootDir() {
         return rootDir;
     }
@@ -528,6 +574,37 @@ public class Container {
 
     public void setWaylandGlSafeMode(boolean enabled) {
         putExtra("waylandGlSafeMode", enabled ? "1" : "0");
+    }
+
+    // --- Fast OpenGL (per-container), stored in extraData. X11 sessions only (Wayland always uses EGL). ---
+    // OpenGL through Wine's EGL backend + Zink instead of XMesa's readback per frame (core.FastOpenGL,
+    // core.X11Egl). Default ON; the launch still checks the layer and driver can do it. A shortcut may
+    // override per game with the same-named extra.
+    public boolean isFastOpenGL() {
+        return com.winlator.star.core.FastOpenGL.containerOn(getExtra(com.winlator.star.core.FastOpenGL.EXTRA));
+    }
+
+    public void setFastOpenGL(boolean enabled) {
+        putExtra(com.winlator.star.core.FastOpenGL.EXTRA, enabled ? "1" : "0");
+    }
+
+    // --- Show OpenGL FPS / OpenGL vsync off (per-container), stored in extraData. Both backends. ---
+    // GALLIUM_HUD=fps and vblank_mode=0 at launch (core.FastOpenGL.FPS_HUD / VSYNC_OFF). Default OFF.
+    // A shortcut may override per game with the same-named extra.
+    public boolean isGlFpsHud() {
+        return com.winlator.star.core.FastOpenGL.FPS_HUD.containerOn(getExtra(com.winlator.star.core.FastOpenGL.FPS_HUD.extra));
+    }
+
+    public void setGlFpsHud(boolean enabled) {
+        putExtra(com.winlator.star.core.FastOpenGL.FPS_HUD.extra, enabled ? "1" : "0");
+    }
+
+    public boolean isGlVsyncOff() {
+        return com.winlator.star.core.FastOpenGL.VSYNC_OFF.containerOn(getExtra(com.winlator.star.core.FastOpenGL.VSYNC_OFF.extra));
+    }
+
+    public void setGlVsyncOff(boolean enabled) {
+        putExtra(com.winlator.star.core.FastOpenGL.VSYNC_OFF.extra, enabled ? "1" : "0");
     }
 
     // --- HDR output (per-container), stored in extraData. Wayland sessions only. ---
@@ -1332,6 +1409,11 @@ public class Container {
             data.put("startupSelection", startupSelection);
             data.put("startupServices", startupServices);
             data.put("box64Version", box64Version);
+            // Only written once set away from the defaults, so untouched containers serialize as before.
+            if (!DEFAULT_EMULATOR64.equals(emulator64)) data.put("emulator64", emulator64);
+            if (!box64ecVersion.isEmpty()) data.put("box64ecVersion", box64ecVersion);
+            // Always written: the default is on, so an "off" must be stored to survive a reload.
+            data.put("forceSsbs", forceSsbs);
             data.put("fexcorePreset", fexcorePreset);
             data.put("fexcoreVersion", fexcoreVersion);
             data.put("box64Preset", box64Preset);
@@ -1445,6 +1527,15 @@ public class Container {
                     break;
                 case "box64Version":
                     setBox64Version(data.getString(key));
+                    break;
+                case "emulator64":
+                    setEmulator64(data.getString(key));
+                    break;
+                case "box64ecVersion":
+                    setBox64ECVersion(data.getString(key));
+                    break;
+                case "forceSsbs":
+                    setForceSsbs(data.getBoolean(key));
                     break;
                 case "fexcoreVersion":
                     setFEXCoreVersion(data.getString(key));

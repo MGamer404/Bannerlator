@@ -2,6 +2,8 @@ package com.winlator.star.xserver;
 
 import android.util.SparseArray;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.IntBuffer;
 
 public class CursorManager extends XResourceManager {
@@ -23,6 +25,48 @@ public class CursorManager extends XResourceManager {
         cursors.put(id, cursor);
         triggerOnCreateResourceListener(cursor);
         return cursor;
+    }
+
+    /** A full-colour cursor (RENDER CreateCursor): {@code argb} is width*height premultiplied
+     *  ARGB32 pixels in X byte order, copied into the cursor's own image. A cursor with no opaque
+     *  pixel is hidden, the same as a core cursor with an empty mask. */
+    public Cursor createArgbCursor(int id, int hotX, int hotY, short width, short height, ByteBuffer argb) {
+        if (cursors.indexOfKey(id) >= 0) return null;
+        Drawable drawable = drawableManager.createDrawable(IDGenerator.generate(), width, height, (byte)32);
+        argb.rewind();
+        drawable.drawImage((short)0, (short)0, (short)0, (short)0, width, height, (byte)32, argb, width, height);
+        Cursor cursor = new Cursor(id, Math.max(0, Math.min(hotX, width - 1)), Math.max(0, Math.min(hotY, height - 1)), drawable, null, null);
+        cursor.setVisible(hasOpaquePixel(argb));
+        cursors.put(id, cursor);
+        triggerOnCreateResourceListener(cursor);
+        return cursor;
+    }
+
+    /** A plain white arrow with a black outline, used when a colour cursor can't be built so the
+     *  client still gets a valid, visible cursor instead of an error. */
+    public Cursor createFallbackArrowCursor(int id) {
+        final String[] rows = {
+            "X          ", "XX         ", "X.X        ", "X..X       ", "X...X      ", "X....X     ",
+            "X.....X    ", "X......X   ", "X.......X  ", "X........X ", "X.....XXXXX", "X..X..X    ",
+            "X.X X..X   ", "XX  X..X   ", "X    X..X  ", "     X..X  ", "      XX   "
+        };
+        short w = 11, h = (short)rows.length;
+        ByteBuffer argb = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.LITTLE_ENDIAN);
+        for (String row : rows) {
+            for (int x = 0; x < w; x++) {
+                char c = x < row.length() ? row.charAt(x) : ' ';
+                argb.putInt(c == 'X' ? 0xff000000 : c == '.' ? 0xffffffff : 0);
+            }
+        }
+        return createArgbCursor(id, 0, 0, w, h, argb);
+    }
+
+    private static boolean hasOpaquePixel(ByteBuffer argb) {
+        IntBuffer pixels = argb.duplicate().order(ByteOrder.LITTLE_ENDIAN).asIntBuffer();
+        for (int i = 0; i < pixels.capacity(); i++) {
+            if ((pixels.get(i) & 0xff000000) != 0) return true;
+        }
+        return false;
     }
 
     public void freeCursor(int id) {

@@ -69,9 +69,16 @@ import androidx.compose.material.icons.filled.SdStorage
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -895,6 +902,25 @@ private fun InstalledTab(vm: ContentsHubViewModel) {
     var confirmRemoveProfile by remember { mutableStateOf<ContentProfile?>(null) }
     val expanded = remember { mutableStateOf(setOf<String>()) }
 
+    // "Set as default…" (graphics drivers + components; never the Linux runtime drivers). The gold
+    // badges re-read the New Container Defaults whenever an apply or undo bumps defaultsKey.
+    var setDefaultItem by remember { mutableStateOf<SetAsDefault.Item?>(null) }
+    var defaultsKey by remember { mutableStateOf(0) }
+    val snackbar = remember { SnackbarHostState() }
+    val profileItems = remember(refreshKey) {
+        val cm = ContentsManager(context)
+        components.flatMap { it.second }.associateWith { SetAsDefault.componentItem(context, cm, it) }
+    }
+    fun defaultArchs(item: SetAsDefault.Item?): List<String> = item?.let { i ->
+        listOf(SetAsDefault.ARM64EC, SetAsDefault.X86_64).filter { a ->
+            a in i.archs && SetAsDefault.currentDefault(context, a, i.kind) == i.value
+        }
+    } ?: emptyList()
+    val driverBadges = remember(refreshKey, defaultsKey) {
+        drivers.associateWith { defaultArchs(SetAsDefault.driverItem(it, manager.getDriverName(it))) }
+    }
+    val profileBadges = remember(refreshKey, defaultsKey) { profileItems.mapValues { defaultArchs(it.value) } }
+
     // Install-from-file — mirrors the My Files tab: the in-app file manager (no system SAF), route by
     // extension (.wcp/.tzst → component pipeline, anything else e.g. a driver .zip → GPU driver).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -944,94 +970,117 @@ private fun InstalledTab(vm: ContentsHubViewModel) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
-        InstalledSectionHeader("GPU Drivers", Icons.Filled.ViewInAr)
-        Spacer(Modifier.height(10.dp))
-        PrimaryButton("Install content from file…", Icons.Filled.FolderOpen, enabled = true,
-            container = cs.onSurface.copy(alpha = 0.06f), content = cs.onSurface, modifier = Modifier.fillMaxWidth()) {
-            filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.WCP, "Select content pack"))
-        }
-        Spacer(Modifier.height(12.dp))
-        if (drivers.isEmpty()) {
-            InstalledEmpty("No GPU drivers installed.")
-        } else {
-            drivers.forEach { id ->
-                InstalledRow(icon = Icons.Filled.ViewInAr, driver = true,
-                    title = manager.getDriverName(id), subtitle = manager.getDriverVersion(id),
-                    onRemove = { confirmRemoveDriver = id })
-                Spacer(Modifier.height(10.dp))
+    Box(Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
+            InstalledSectionHeader("GPU Drivers", Icons.Filled.ViewInAr)
+            Spacer(Modifier.height(10.dp))
+            PrimaryButton("Install content from file…", Icons.Filled.FolderOpen, enabled = true,
+                container = cs.onSurface.copy(alpha = 0.06f), content = cs.onSurface, modifier = Modifier.fillMaxWidth()) {
+                filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.WCP, "Select content pack"))
+            }
+            Spacer(Modifier.height(12.dp))
+            if (drivers.isEmpty()) {
+                InstalledEmpty("No GPU drivers installed.")
+            } else {
+                drivers.forEach { id ->
+                    InstalledRow(icon = Icons.Filled.ViewInAr, driver = true,
+                        title = manager.getDriverName(id), subtitle = manager.getDriverVersion(id),
+                        defaultArchs = driverBadges[id].orEmpty(),
+                        onSetDefault = { setDefaultItem = SetAsDefault.driverItem(id, manager.getDriverName(id)) },
+                        onRemove = { confirmRemoveDriver = id })
+                    Spacer(Modifier.height(10.dp))
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            InstalledSectionHeader("Wayland game drivers (Linux ICD)", Icons.Filled.ViewInAr)
+            Spacer(Modifier.height(6.dp))
+            Text("The Vulkan driver a game renders on under the Wayland display backend. Import a zip with a " +
+                "libvulkan_freedreno*.so built for Wayland/Linux (optional libdrm.so, meta.json). Android Turnip " +
+                "zips (vulkan.adXXXX.so) belong under GPU Drivers above and are rejected here.",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            Spacer(Modifier.height(10.dp))
+            PrimaryButton("Import Wayland game driver (.zip)…", Icons.Filled.FolderOpen, enabled = true,
+                container = cs.onSurface.copy(alpha = 0.06f), content = cs.onSurface, modifier = Modifier.fillMaxWidth()) {
+                waylandDriverPicker.launch(InAppFilePicker.buildIntent(context, arrayOf("zip"), "Select Wayland game driver zip"))
+            }
+            Spacer(Modifier.height(12.dp))
+            if (waylandDrivers.isEmpty()) {
+                InstalledEmpty("No Wayland game drivers imported. Containers on Wayland use the Turnips bundled in the Proton.")
+            } else {
+                waylandDrivers.forEach { id ->
+                    val ver = waylandManager.getDriverVersion(id)
+                    val wsiNote = if (waylandManager.hasWaylandWsi(id)) "" else "  ·  no Wayland WSI detected"
+                    InstalledRow(icon = Icons.Filled.ViewInAr, driver = true,
+                        title = waylandManager.getDriverName(id),
+                        subtitle = (if (ver.isEmpty()) "imported" else ver) + wsiNote,
+                        onRemove = { confirmRemoveWaylandDriver = id })
+                    Spacer(Modifier.height(10.dp))
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            InstalledSectionHeader("Linux runtime drivers (Steam client)", Icons.Filled.ViewInAr)
+            Spacer(Modifier.height(6.dp))
+            Text("The Vulkan driver the Linux runtime draws with: the native Steam client\u2019s interface and every " +
+                "game it launches. Import a \"-Linux\" Turnip zip (glibc). The client and its games are Linux " +
+                "processes, so an Android (vulkan.adXXXX.so) or \"-Wayland\" zip cannot be loaded by them and is " +
+                "rejected here. Frames still reach the screen through the GPU driver above.",
+                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+            Spacer(Modifier.height(10.dp))
+            PrimaryButton("Import Linux runtime driver (.zip)\u2026", Icons.Filled.FolderOpen, enabled = true,
+                container = cs.onSurface.copy(alpha = 0.06f), content = cs.onSurface, modifier = Modifier.fillMaxWidth()) {
+                linuxDriverPicker.launch(InAppFilePicker.buildIntent(context, arrayOf("zip"), "Select Linux runtime driver zip"))
+            }
+            Spacer(Modifier.height(12.dp))
+            if (linuxDrivers.isEmpty()) {
+                InstalledEmpty("No Linux runtime drivers imported. Linux sessions use the Turnip built into the runtime.")
+            } else {
+                linuxDrivers.forEach { id ->
+                    val ver = linuxDriverManager.getDriverVersion(id)
+                    val glibc = linuxDriverManager.getMinGlibc(id)
+                    InstalledRow(icon = Icons.Filled.ViewInAr, driver = true,
+                        title = linuxDriverManager.getDriverName(id),
+                        subtitle = (if (ver.isEmpty()) "imported" else ver) + (if (glibc.isEmpty()) "" else "  \u00b7  glibc $glibc+"),
+                        onRemove = { confirmRemoveLinuxDriver = id })
+                    Spacer(Modifier.height(10.dp))
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            InstalledSectionHeader("Components", Icons.Filled.Extension)
+            Spacer(Modifier.height(10.dp))
+            if (components.isEmpty()) {
+                InstalledEmpty("No components installed.")
+            } else {
+                components.forEach { (type, profiles) ->
+                    val label = type.toString()
+                    InstalledComponentFolder(
+                        type = label, profiles = profiles,
+                        open = label in expanded.value,
+                        onToggle = { expanded.value = if (label in expanded.value) expanded.value - label else expanded.value + label },
+                        defaultArchs = { profileBadges[it].orEmpty() },
+                        onSetDefault = { p -> profileItems[p]?.let { item -> { setDefaultItem = item } } },
+                        onRemove = { confirmRemoveProfile = it })
+                    Spacer(Modifier.height(10.dp))
+                }
             }
         }
+        SnackbarHost(snackbar, modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp))
+    }
 
-        Spacer(Modifier.height(20.dp))
-        InstalledSectionHeader("Wayland game drivers (Linux ICD)", Icons.Filled.ViewInAr)
-        Spacer(Modifier.height(6.dp))
-        Text("The Vulkan driver a game renders on under the Wayland display backend. Import a zip with a " +
-            "libvulkan_freedreno*.so built for Wayland/Linux (optional libdrm.so, meta.json). Android Turnip " +
-            "zips (vulkan.adXXXX.so) belong under GPU Drivers above and are rejected here.",
-            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-        Spacer(Modifier.height(10.dp))
-        PrimaryButton("Import Wayland game driver (.zip)…", Icons.Filled.FolderOpen, enabled = true,
-            container = cs.onSurface.copy(alpha = 0.06f), content = cs.onSurface, modifier = Modifier.fillMaxWidth()) {
-            waylandDriverPicker.launch(InAppFilePicker.buildIntent(context, arrayOf("zip"), "Select Wayland game driver zip"))
-        }
-        Spacer(Modifier.height(12.dp))
-        if (waylandDrivers.isEmpty()) {
-            InstalledEmpty("No Wayland game drivers imported. Containers on Wayland use the Turnips bundled in the Proton.")
-        } else {
-            waylandDrivers.forEach { id ->
-                val ver = waylandManager.getDriverVersion(id)
-                val wsiNote = if (waylandManager.hasWaylandWsi(id)) "" else "  ·  no Wayland WSI detected"
-                InstalledRow(icon = Icons.Filled.ViewInAr, driver = true,
-                    title = waylandManager.getDriverName(id),
-                    subtitle = (if (ver.isEmpty()) "imported" else ver) + wsiNote,
-                    onRemove = { confirmRemoveWaylandDriver = id })
-                Spacer(Modifier.height(10.dp))
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-        InstalledSectionHeader("Linux runtime drivers (Steam client)", Icons.Filled.ViewInAr)
-        Spacer(Modifier.height(6.dp))
-        Text("The Vulkan driver the Linux runtime draws with: the native Steam client\u2019s interface and every " +
-            "game it launches. Import a \"-Linux\" Turnip zip (glibc). The client and its games are Linux " +
-            "processes, so an Android (vulkan.adXXXX.so) or \"-Wayland\" zip cannot be loaded by them and is " +
-            "rejected here. Frames still reach the screen through the GPU driver above.",
-            style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-        Spacer(Modifier.height(10.dp))
-        PrimaryButton("Import Linux runtime driver (.zip)\u2026", Icons.Filled.FolderOpen, enabled = true,
-            container = cs.onSurface.copy(alpha = 0.06f), content = cs.onSurface, modifier = Modifier.fillMaxWidth()) {
-            linuxDriverPicker.launch(InAppFilePicker.buildIntent(context, arrayOf("zip"), "Select Linux runtime driver zip"))
-        }
-        Spacer(Modifier.height(12.dp))
-        if (linuxDrivers.isEmpty()) {
-            InstalledEmpty("No Linux runtime drivers imported. Linux sessions use the Turnip built into the runtime.")
-        } else {
-            linuxDrivers.forEach { id ->
-                val ver = linuxDriverManager.getDriverVersion(id)
-                val glibc = linuxDriverManager.getMinGlibc(id)
-                InstalledRow(icon = Icons.Filled.ViewInAr, driver = true,
-                    title = linuxDriverManager.getDriverName(id),
-                    subtitle = (if (ver.isEmpty()) "imported" else ver) + (if (glibc.isEmpty()) "" else "  \u00b7  glibc $glibc+"),
-                    onRemove = { confirmRemoveLinuxDriver = id })
-                Spacer(Modifier.height(10.dp))
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-        InstalledSectionHeader("Components", Icons.Filled.Extension)
-        Spacer(Modifier.height(10.dp))
-        if (components.isEmpty()) {
-            InstalledEmpty("No components installed.")
-        } else {
-            components.forEach { (type, profiles) ->
-                val label = type.toString()
-                InstalledComponentFolder(
-                    type = label, profiles = profiles,
-                    open = label in expanded.value,
-                    onToggle = { expanded.value = if (label in expanded.value) expanded.value - label else expanded.value + label },
-                    onRemove = { confirmRemoveProfile = it })
-                Spacer(Modifier.height(10.dp))
+    setDefaultItem?.let { item ->
+        SetAsDefaultSheet(item, onDismiss = { setDefaultItem = null }) { outcome ->
+            setDefaultItem = null
+            defaultsKey++
+            scope.launch {
+                val r = snackbar.showSnackbar(outcome.message, actionLabel = if (outcome.canUndo) "Undo" else null,
+                    duration = SnackbarDuration.Long)
+                if (r == SnackbarResult.ActionPerformed) {
+                    val msg = withContext(Dispatchers.IO) { SetAsDefault.undo(context.applicationContext) }
+                    defaultsKey++
+                    snackbar.showSnackbar(msg)
+                }
             }
         }
     }
@@ -1122,7 +1171,10 @@ private fun InstalledEmpty(text: String) {
 }
 
 @Composable
-private fun InstalledRow(icon: ImageVector, driver: Boolean, title: String, subtitle: String, onRemove: () -> Unit) {
+private fun InstalledRow(
+    icon: ImageVector, driver: Boolean, title: String, subtitle: String,
+    defaultArchs: List<String> = emptyList(), onSetDefault: (() -> Unit)? = null, onRemove: () -> Unit,
+) {
     val cs = MaterialTheme.colorScheme
     Row(verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth()
@@ -1140,7 +1192,9 @@ private fun InstalledRow(icon: ImageVector, driver: Boolean, title: String, subt
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
+            DefaultBadges(defaultArchs)
         }
+        onSetDefault?.let { SetDefaultMenuButton(it) }
         IconButton(onClick = onRemove) { Icon(Icons.Filled.DeleteOutline, "Remove", tint = cs.onSurfaceVariant) }
     }
 }
@@ -1148,6 +1202,8 @@ private fun InstalledRow(icon: ImageVector, driver: Boolean, title: String, subt
 @Composable
 private fun InstalledComponentFolder(
     type: String, profiles: List<ContentProfile>, open: Boolean, onToggle: () -> Unit,
+    defaultArchs: (ContentProfile) -> List<String> = { emptyList() },
+    onSetDefault: (ContentProfile) -> (() -> Unit)? = { null },
     onRemove: (ContentProfile) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
@@ -1175,10 +1231,37 @@ private fun InstalledComponentFolder(
                         Text(p.verName, style = MaterialTheme.typography.bodySmall, color = cs.onSurface,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                         Text("Code ${p.verCode}", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                        DefaultBadges(defaultArchs(p))
                     }
+                    onSetDefault(p)?.let { SetDefaultMenuButton(it) }
                     IconButton(onClick = { onRemove(p) }) { Icon(Icons.Filled.DeleteOutline, "Remove", tint = cs.onSurfaceVariant) }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DefaultBadges(archs: List<String>) {
+    if (archs.isEmpty()) return
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 5.dp)) {
+        archs.forEach { DefaultBadge(it) }
+    }
+}
+
+/** The ⋮ beside an installed item's trash: holds "Set as default…". */
+@Composable
+private fun SetDefaultMenuButton(onSetDefault: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, "More options", tint = cs.onSurfaceVariant) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.outlinedMenuCard()) {
+            DropdownMenuItem(
+                text = { Text("Set as default\u2026", color = DefaultGold, fontWeight = FontWeight.Bold) },
+                leadingIcon = { Icon(Icons.Filled.Star, null, tint = DefaultGold) },
+                onClick = { open = false; onSetDefault() },
+            )
         }
     }
 }

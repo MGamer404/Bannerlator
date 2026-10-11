@@ -3,9 +3,9 @@ package com.winlator.star.core;
 import android.opengl.GLES10;
 
 public abstract class DefaultVersion {
-    public static final String BOX64 = "0.3.7";
+    public static final String BOX64 = "0.4.5-gst";
     public static final String WOWBOX64 = "0.3.7";
-    public static final String FEXCORE = "2508";
+    public static final String FEXCORE = "2609-unix";
     public static final String WRAPPER = "System";
     public static final String WRAPPER_ADRENO = "turnip-sdk36";
     /**

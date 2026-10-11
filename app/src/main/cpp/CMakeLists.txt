@@ -17,6 +17,10 @@ add_subdirectory(adrenotools)
 # generation: the Lossless Scaling shader chain is DXBC in every build that is
 # downloadable from Steam, so the precompiled-SPIR-V path alone is not enough.
 add_subdirectory(thirdparty/dxbc)
+
+# bl-steam-host: the app's genuine Steam session host (launchMode=AppSteam) — a standalone
+# arm64 executable packaged as libblsteamhost.so (exec'd from nativeLibraryDir, crash-isolated).
+add_subdirectory(bl-steam-host)
 # lsfg-vk is built separately by build-lsfg.yml (standalone cmake)
 # and its .so is copied to jniLibs. AGP's cmake integration enables
 # clang-tidy which fails on NDK cross-compile of the lsfg-vk headers.
@@ -77,6 +81,19 @@ target_compile_options(fakeinput PRIVATE -Wall -Wextra -fvisibility=hidden)
 
 target_link_libraries(fakeinput
         log
+        dl
+)
+
+# Force SSBS: keeps PSTATE.SSBS set across Wine's signal returns on arm64ec layers that were not
+# rebuilt with WINE_FORCE_SSBS (loaded via LD_PRELOAD when the container/game toggle is on).
+# sigaction/signal/bsd_signal must stay default-visible, so no -fvisibility=hidden here.
+add_library(ssbs SHARED
+        winlator/ssbs_adapter.c
+)
+
+target_compile_options(ssbs PRIVATE -Wall -Wextra)
+
+target_link_libraries(ssbs
         dl
 )
 

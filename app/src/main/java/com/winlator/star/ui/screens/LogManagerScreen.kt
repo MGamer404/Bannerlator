@@ -98,6 +98,7 @@ fun LogManagerScreen(onClose: () -> Unit) {
     var box64Logs by remember { mutableStateOf(prefs.getBoolean("enable_box64_logs", false)) }
     var dxvkLogs by remember { mutableStateOf(prefs.getBoolean("enable_dxvk_logs", true)) }
     var steamLite by remember { mutableStateOf(prefs.getBoolean("enable_steamlite_logs", false)) }
+    var headlessSteam by remember { mutableStateOf(prefs.getBoolean("enable_headless_steam_logs", false)) }
     var logcat by remember { mutableStateOf(prefs.getBoolean("enable_logcat", true)) }
     var crashReports by remember { mutableStateOf(prefs.getBoolean("enable_crash_reports", true)) }
     var exitAutosave by remember { mutableStateOf(prefs.getBoolean(ExitReasonReporter.PREF_AUTOSAVE, false)) }
@@ -272,6 +273,11 @@ fun LogManagerScreen(onClose: () -> Unit) {
                     hint = "Only when a game launches through SteamLite",
                     onInfo = { info = "SteamLite (Steam client)" to LogCopy.STEAMLITE }) {
                     steamLite = it; putBool("enable_steamlite_logs", it)
+                }
+                LogToggle("Headless Steam (app session host)", headlessSteam,
+                    hint = "Only when a game launches through Headless Steam",
+                    onInfo = { info = "Headless Steam (app session host)" to LogCopy.HEADLESS_STEAM }) {
+                    headlessSteam = it; putBool("enable_headless_steam_logs", it)
                 }
                 LogToggle("Android logcat", logcat,
                     hint = "Bannerlator's own output only",
@@ -1230,6 +1236,25 @@ private object LogCopy {
         "Your Steam account name and auth tokens are scrubbed out as it is written, and your Steam ID is " +
         "partially masked — but a masked Steam ID may still remain, which is normal and safe to share."
 
+    const val HEADLESS_STEAM =
+        "Little to no performance cost.\n\n" +
+        "Records a Headless Steam launch end to end — the one where the game runs on the app's own " +
+        "Steam session (Valve's Android Steam client, started by the app) instead of a Steam client " +
+        "inside the container. It gathers what the app set up, the session host's live status events, " +
+        "the host's own log, Valve's client logs for that session (login, game tracking, cloud saves, " +
+        "achievements), the bridge lines from inside the game process, and the app-side Rust engine " +
+        "log. All of it is written once, when the game exits.\n\n" +
+        "It ONLY produces anything when a game is actually launched through Headless Steam. SteamLite, " +
+        "Goldberg and Raw launches write nothing here.\n\n" +
+        "Everything lands in a single \"headless_steam.txt\" next to that game's other logs. It opens " +
+        "with a CHECKLIST — every step of the launch in order, each marked PASS, FAIL or WARN from what " +
+        "actually happened (client set installed, bridge present in the layer, host started, Valve's " +
+        "libraries loaded, logon, ownership ticket, host ready, game attached) — so you can see exactly " +
+        "where a launch stopped without reading the raw logs. The first FAIL is the one that matters; " +
+        "everything after it is a consequence.\n\n" +
+        "Your Steam account name and auth tokens are scrubbed out as it is written, and your Steam ID is " +
+        "partially masked — a masked Steam ID may still remain, which is normal and safe to share."
+
     const val LOGCAT =
         "No performance cost.\n\n" +
         "Android's own system log, as it relates to Bannerlator. It is captured on demand — when you " +
@@ -1294,6 +1319,7 @@ private object LogCopy {
         append("\nSafe to leave on\n\n")
         append("• DXVK & VKD3D\n$DXVK\n\n")
         append("• SteamLite (Steam client)\n$STEAMLITE\n\n")
+        append("• Headless Steam (app session host)\n$HEADLESS_STEAM\n\n")
         append("• Android logcat\n$LOGCAT\n\n")
         append("• Crash reports\n$CRASH\n\n")
         append("\nOrganisation\n\n")

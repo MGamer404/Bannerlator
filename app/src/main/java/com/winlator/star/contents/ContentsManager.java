@@ -34,6 +34,7 @@ public class ContentsManager {
     public static final String[] D7VK_TRUST_FILES = {"${system32}/ddraw.dll", "${syswow64}/ddraw.dll"};
     public static final String[] BOX64_TRUST_FILES = {"${bindir}/box64"};
     public static final String[] WOWBOX64_TRUST_FILES = {"${system32}/wowbox64.dll"};
+    public static final String[] BOX64EC_TRUST_FILES = {"${system32}/box64ec.dll"};
     // The two DLLs (system32) plus, for unixlib FEXCore builds, the native .so in the shared
     // aarch64-unix slot. Tracking the .so here (a) marks it trusted on install and (b) lets
     // removeContent() strip it from the shared slot on uninstall (see below).
@@ -274,6 +275,7 @@ public class ContentsManager {
         // A newly installed layer may be Wayland-capable (or replace one that was): drop cached verdicts.
         com.winlator.star.core.WineWaylandSupport.invalidate();
         com.winlator.star.core.SyncSupport.invalidate();
+        com.winlator.star.core.FastOpenGL.invalidate();
         callback.onSucceed(profile);
     }
 
@@ -386,6 +388,7 @@ public class ContentsManager {
                     case CONTENT_TYPE_VKD3D -> VKD3D_TRUST_FILES;
                     case CONTENT_TYPE_BOX64 -> BOX64_TRUST_FILES;
                     case CONTENT_TYPE_WOWBOX64 -> WOWBOX64_TRUST_FILES;
+                    case CONTENT_TYPE_BOX64EC -> BOX64EC_TRUST_FILES;
                     case CONTENT_TYPE_FEXCORE -> FEXCORE_TRUST_FILES;
                     case CONTENT_TYPE_VEGAS -> VEGAS_TRUST_FILES;
                     default -> new String[0];
@@ -436,6 +439,7 @@ public class ContentsManager {
         syncContents();
         com.winlator.star.core.WineWaylandSupport.invalidate();
         com.winlator.star.core.SyncSupport.invalidate();
+        com.winlator.star.core.FastOpenGL.invalidate();
     }
 
     public static String getEntryName(ContentProfile profile) {

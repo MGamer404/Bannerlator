@@ -8,10 +8,15 @@ import com.winlator.star.winhandler.WinHandler;
 import com.winlator.star.xserver.extensions.BigReqExtension;
 import com.winlator.star.xserver.extensions.DRI3Extension;
 import com.winlator.star.xserver.extensions.Extension;
+import com.winlator.star.xserver.extensions.GLXExtension;
+import com.winlator.star.xserver.extensions.XComposite;
 import com.winlator.star.xserver.extensions.MITSHMExtension;
 import com.winlator.star.xserver.extensions.PresentExtension;
 import com.winlator.star.xserver.extensions.RandrExtension;
+import com.winlator.star.xserver.extensions.RenderExtension;
 import com.winlator.star.xserver.extensions.SyncExtension;
+import com.winlator.star.xserver.extensions.GenericEventExtension;
+import com.winlator.star.xserver.extensions.XInput2Extension;
 
 import java.nio.charset.Charset;
 import java.util.EnumMap;
@@ -181,14 +186,41 @@ public class XServer {
         inputSink = sink;
     }
 
+    /** Any backend: called after the app injects pointer motion or a button (touch, mouse, an
+     *  on-screen or physical stick bound to the mouse) - never for a client's WarpPointer. Drives
+     *  the X11 pointer's idle / controller auto-hide. */
+    private volatile Runnable pointerActivityListener;
+
+    public void setPointerActivityListener(Runnable listener) {
+        pointerActivityListener = listener;
+    }
+
+    /** While set, injected button presses are dropped (a touch that only wakes a hidden pointer must
+     *  not click). Releases still go through for a button that is down, so nothing is left stuck. */
+    private volatile boolean suppressPointerButtons;
+
+    public void setSuppressPointerButtons(boolean suppress) {
+        suppressPointerButtons = suppress;
+    }
+
+    /** A dropped press still counts as the player touching the pointer (it wakes it). */
+    private void notifyPointerActivity() {
+        Runnable activity = pointerActivityListener;
+        if (activity != null) activity.run();
+    }
+
     private void sinkPointerMove() {
         InputSink sink = inputSink;
         if (sink != null) sink.onPointerMove(pointer.getX(), pointer.getY());
+        Runnable activity = pointerActivityListener;
+        if (activity != null) activity.run();
     }
 
     private void sinkPointerButton(Pointer.Button button, boolean pressed) {
         InputSink sink = inputSink;
         if (sink != null) sink.onPointerButton(button, pressed);
+        Runnable activity = pointerActivityListener;
+        if (activity != null) activity.run();
     }
 
     private void sinkKey(XKeycode xKeycode, boolean pressed) {
@@ -199,6 +231,7 @@ public class XServer {
     public void injectPointerMove(int x, int y) {
         try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
             pointer.setPosition(x, y);
+            emitRawFromAbsolute(x, y);
         }
         sinkPointerMove();
     }
@@ -206,28 +239,67 @@ public class XServer {
     public void injectPointerMoveDelta(int dx, int dy) {
         try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
             pointer.setPosition(pointer.getX() + dx, pointer.getY() + dy);
+            XInput2Extension xi = xInput2;
+            if (xi != null) xi.emitRawMotion(dx, dy);
         }
         sinkPointerMove();
     }
 
+    // XInput 2 raw motion for absolute moves (touchscreen mode, a hovering mouse or stylus): the
+    // distance from the last absolute position WE injected, not the pointer's, so a game warping
+    // the pointer to the centre doesn't turn the next finger move into a huge jump. A new touch
+    // lands somewhere else entirely, so the caller marks it (markPointerJump) and that one move
+    // only re-anchors.
+    private volatile XInput2Extension xInput2;
+    private volatile boolean rawFromAbsolute = true;
+    private boolean rawAnchorValid = false;
+    private int rawAnchorX, rawAnchorY;
+
+    /** The next absolute move is a jump (a finger landing), not motion. */
+    public void markPointerJump() {
+        try (XLock lock = lock(Lockable.INPUT_DEVICE)) {
+            rawAnchorValid = false;
+        }
+    }
+
+    private void emitRawFromAbsolute(int x, int y) {
+        XInput2Extension xi = xInput2;
+        if (xi != null && rawFromAbsolute && rawAnchorValid) xi.emitRawMotion(x - rawAnchorX, y - rawAnchorY);
+        rawAnchorX = x;
+        rawAnchorY = y;
+        rawAnchorValid = true;
+    }
+
+    private void emitRawButton(Pointer.Button button, boolean pressed) {
+        XInput2Extension xi = xInput2;
+        if (xi != null) xi.emitRawButton(button.code(), pressed);
+    }
+
     public void injectPointerButtonPress(Pointer.Button buttonCode) {
+        if (suppressPointerButtons) { notifyPointerActivity(); return; }
         try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
             pointer.setButton(buttonCode, true);
+            emitRawButton(buttonCode, true);
         }
         sinkPointerButton(buttonCode, true);
     }
 
     public void injectPointerButtonRelease(Pointer.Button buttonCode) {
+        if (suppressPointerButtons && !pointer.isButtonPressed(buttonCode)) return;
         try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
             pointer.setButton(buttonCode, false);
+            emitRawButton(buttonCode, false);
         }
         sinkPointerButton(buttonCode, false);
     }
 
     public void injectPointerButtonPulse(Pointer.Button buttonCode) {
+        if (suppressPointerButtons) { notifyPointerActivity(); return; }
         try (XLock lock = lock(Lockable.WINDOW_MANAGER, Lockable.INPUT_DEVICE)) {
             pointer.setButton(buttonCode, true);
             pointer.setButton(buttonCode, false);
+            emitRawButton(buttonCode, true);
+            emitRawButton(buttonCode, false);
         }
         sinkPointerButton(buttonCode, true);
         sinkPointerButton(buttonCode, false);
@@ -258,6 +330,56 @@ public class XServer {
         extensions.put(PresentExtension.MAJOR_OPCODE, new PresentExtension());
         extensions.put(SyncExtension.MAJOR_OPCODE, new SyncExtension());
         extensions.put(RandrExtension.MAJOR_OPCODE, new RandrExtension(screenInfo));
+    }
+
+    private volatile boolean serverGlx = false;
+
+    /** Opt-in server-side GLX (BANNER_X11_GLX=1): registers the GLX + Composite extensions and makes
+     *  DRI3/Present report 1.2, so a DRI-mode Mesa libGL (GLX + Zink via kopper) finds its fbconfigs.
+     *  Off by default; when never called the extension list and versions are exactly as before. Must
+     *  run before the first client connects (the extension list is read at QueryExtension time). */
+    public void enableServerGlx() {
+        if (serverGlx) return;
+        extensions.put(GLXExtension.MAJOR_OPCODE, new GLXExtension(this));
+        extensions.put(XComposite.MAJOR_OPCODE, new XComposite(this));
+        serverGlx = true;
+    }
+
+    private volatile boolean renderCursors = false;
+
+    /** Full-colour cursors: registers the cursor subset of RENDER (extensions.RenderExtension) so
+     *  libXcursor hands over ARGB cursors instead of two-colour core ones. Wine sessions only, and
+     *  only once the prefix has "ClientSideWithRender"="N" so winex11 keeps its GDI off RENDER.
+     *  Must run before the first client connects, like enableServerGlx(). */
+    public void enableRenderCursors() {
+        if (renderCursors) return;
+        extensions.put(RenderExtension.MAJOR_OPCODE, new RenderExtension(this));
+        renderCursors = true;
+    }
+
+    public boolean isRenderCursorsEnabled() {
+        return renderCursors;
+    }
+
+    /** Raw mouse: registers XInput 2 (extensions.XInput2Extension) so Wine's winex11 finds XI2 and
+     *  games reading the mouse through raw input get movement. withGenericEvents also advertises
+     *  XGE; fromAbsolute also turns absolute moves (touchscreen mode) into raw motion. Wine on X11
+     *  only. Must run before the first client connects, like enableRenderCursors(). */
+    public void enableXInput2(boolean withGenericEvents, boolean fromAbsolute) {
+        if (xInput2 != null) return;
+        XInput2Extension xi = new XInput2Extension();
+        extensions.put(XInput2Extension.MAJOR_OPCODE, xi);
+        if (withGenericEvents) extensions.put(GenericEventExtension.MAJOR_OPCODE, new GenericEventExtension());
+        rawFromAbsolute = fromAbsolute;
+        xInput2 = xi;
+    }
+
+    public XInput2Extension getXInput2() {
+        return xInput2;
+    }
+
+    public boolean isServerGlxEnabled() {
+        return serverGlx;
     }
 
     public <T extends Extension> T getExtension(int opcode) {

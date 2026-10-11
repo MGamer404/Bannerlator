@@ -70,6 +70,7 @@ import com.winlator.star.contents.WrapperManager
 import com.winlator.star.contents.WrapperSettingsDictionary
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.DefaultVersion
+import com.winlator.star.core.MediaDecoder
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GPUInformation
 import com.winlator.star.core.ImageUtils
@@ -144,6 +145,7 @@ fun ContainerDetailScreen(
     var showWineDownloadSheet    by remember { mutableStateOf(false) }
     var showBox64DownloadSheet   by remember { mutableStateOf(false) }
     var showFexCoreDownloadSheet by remember { mutableStateOf(false) }
+    var showBox64ECDownloadSheet by remember { mutableStateOf(false) }
     var showDxvkDownloadSheet    by remember { mutableStateOf(false) }
     // null = hidden; "" = glossary open unfiltered (the button); "term" = open at a field's term.
     var glossaryQuery            by remember { mutableStateOf<String?>(null) }
@@ -286,6 +288,7 @@ fun ContainerDetailScreen(
                                 cpuListWoW64Ref,
                                 onShowBox64DownloadSheet = { showBox64DownloadSheet = true },
                                 onShowFexCoreDownloadSheet = { showFexCoreDownloadSheet = true },
+                                onShowBox64ECDownloadSheet = { showBox64ECDownloadSheet = true },
                             )
                             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                             XRTab(viewModel)
@@ -459,6 +462,14 @@ fun ContainerDetailScreen(
             onDismiss = { showFexCoreDownloadSheet = false },
             onContentChanged = { viewModel.refreshFEXCoreVersions() },
             inUseKey = viewModel.selectedFEXCoreVersion,
+        )
+    }
+    if (showBox64ECDownloadSheet) {
+        ContentDownloadSheet(
+            contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_BOX64EC,
+            onDismiss = { showBox64ECDownloadSheet = false },
+            onContentChanged = { viewModel.refreshBox64ECVersions() },
+            inUseKey = viewModel.selectedBox64ECVersion,
         )
     }
     if (showDxvkDownloadSheet) {
@@ -1056,6 +1067,11 @@ private fun TopLevelFields(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                compositorDriverMaliSystem(compositorVersion, compositorChoices) -> Text(
+                    MALI_SYSTEM_DRIVER_NOTE,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 compositorDriverUnusable(compositorVersion, compositorChoices, compositorChoicesLoaded) -> {
                     Text(
                         if (viewModel.compositorDriverNoneUsable)
@@ -1200,6 +1216,44 @@ private fun TopLevelFields(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+        // OpenGL card (core.FastOpenGL): Fast / Show FPS / Vsync off as three compact switch rows under
+        // one "?". Fast is locked on with Wayland (winewayland only uses EGL; the stored value is kept)
+        // and on X11 greys with one short reason when the layer's win32u lacks the EGL backend, the
+        // driver isn't a Turnip or the APK has no X11 EGL (layer probe off-main in the view-model).
+        // Show FPS / Vsync off reach Mesa on GLX, EGL and Wayland alike, so they are never greyed.
+        run {
+            Spacer(Modifier.height(8.dp))
+            val fastGlDriverOk = remember(compositorVersion) {
+                com.winlator.star.core.FastOpenGL.driverUsable(context, compositorVersion)
+            }
+            val fastGlBundled = remember { com.winlator.star.core.X11Egl.isBundled(context) }
+            val fastGlReason = when {
+                compositorDriverOnly -> com.winlator.star.core.FastOpenGL.WAYLAND_ALWAYS_ON
+                else -> com.winlator.star.core.FastOpenGL.unavailableReason(fastGlDriverOk, fastGlBundled)
+            }
+            com.winlator.star.ui.components.OpenGLCard(onHelp = { helpRes = R.string.help_opengl_settings }) {
+                com.winlator.star.ui.components.OpenGLCardRow(
+                    com.winlator.star.ui.components.OPENGL_FAST_ICON, "Fast",
+                    com.winlator.star.ui.components.openGLFastNote(fastGlReason)
+                ) {
+                    Switch(
+                        enabled = fastGlReason == null,
+                        checked = if (compositorDriverOnly) true else viewModel.fastOpenGL && fastGlReason == null,
+                        onCheckedChange = { viewModel.fastOpenGL = it }
+                    )
+                }
+                com.winlator.star.ui.components.OpenGLCardRow(
+                    com.winlator.star.ui.components.OPENGL_FPS_ICON, "Show FPS", null
+                ) {
+                    Switch(checked = viewModel.glFpsHud, onCheckedChange = { viewModel.glFpsHud = it })
+                }
+                com.winlator.star.ui.components.OpenGLCardRow(
+                    com.winlator.star.ui.components.OPENGL_VSYNC_ICON, "Vsync off", null
+                ) {
+                    Switch(checked = viewModel.glVsyncOff, onCheckedChange = { viewModel.glVsyncOff = it })
+                }
             }
         }
         // Unreal Engine HDR (both backends; under HDR output on Wayland): Off / DirectX 12 fix /
@@ -1491,7 +1545,7 @@ private fun TopLevelFields(
         // StringUtils.parseIdentifier() persists as "box64". See EmulatorLabels.
         if (viewModel.isArm64EC) {
             LabeledDropdown(
-                label = "Emulator",
+                label = "Emulator (32-bit)",
                 options = EmulatorLabels.options(viewModel.emulatorEntries, true),
                 selectedOption = EmulatorLabels.display(viewModel.selectedEmulator, true),
                 enabled = viewModel.emulatorEnabled,
@@ -1500,6 +1554,26 @@ private fun TopLevelFields(
                         EmulatorLabels.fromDisplay(it, viewModel.emulatorEntries, true)
                 }
             )
+            Spacer(Modifier.height(8.dp))
+
+            // x86-64 translator — FEXCore (libarm64ecfex.dll) or Box64EC (box64ec.dll). Wine reads
+            // the choice from the Wow64\amd64 registry value the launcher writes. Box64EC is only
+            // offered once a Box64EC component is installed (Advanced tab).
+            val box64ECInstalled = viewModel.box64ECVersionEntries.isNotEmpty()
+            LabeledDropdown(
+                label = "Emulator (64-bit)",
+                options = viewModel.emulator64Entries,
+                selectedOption = viewModel.selectedEmulator64,
+                enabled = box64ECInstalled,
+                onSelect = { viewModel.selectedEmulator64 = it }
+            )
+            if (!box64ECInstalled) {
+                Text(
+                    "Install a Box64EC component (Advanced tab) to switch 64-bit games off FEXCore",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.5.sp
+                )
+            }
             Spacer(Modifier.height(8.dp))
         }
 
@@ -2098,7 +2172,11 @@ private fun WinComponentsTab(viewModel: ContainerDetailViewModel) {
         derivedStateOf { viewModel.winComponents.filter { it.key.startsWith("direct") } }
     }
     val generalItems by remember {
-        derivedStateOf { viewModel.winComponents.filterNot { it.key.startsWith("direct") } }
+        derivedStateOf { viewModel.winComponents.filterNot { it.key.startsWith("direct") || MediaDecoder.isCodecKey(it.key) } }
+    }
+    // Media backend rows: not DLL overrides, their own option labels (see MediaDecoder).
+    val codecItems by remember {
+        derivedStateOf { viewModel.winComponents.filter { MediaDecoder.isCodecKey(it.key) } }
     }
     var showComponentsSheet by remember { mutableStateOf(false) }
 
@@ -2139,6 +2217,22 @@ private fun WinComponentsTab(viewModel: ContainerDetailViewModel) {
                 }
             }
         }
+        if (codecItems.isNotEmpty()) {
+            SectionBox(title = "Codecs") {
+                Text(
+                    "Builtin decoder: which backend Wine's Media Foundation plays cutscenes with — GStreamer (default) or FFmpeg (winedmo; arm64ec layers only — on x86_64 it falls back to GStreamer). Software decoding keeps video frames off the GPU; try it for black video with sound.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                codecItems.forEach { comp ->
+                    WinComponentRow(comp, MediaDecoder.optionsFor(comp.key).toList()) { idx ->
+                        val i = viewModel.winComponents.indexOfFirst { it.key == comp.key }
+                        if (i >= 0) viewModel.winComponents[i] = viewModel.winComponents[i].copy(selectedIndex = idx)
+                    }
+                }
+            }
+        }
     }
 
     if (showComponentsSheet) {
@@ -2149,8 +2243,11 @@ private fun WinComponentsTab(viewModel: ContainerDetailViewModel) {
 }
 
 @Composable
-private fun WinComponentRow(comp: WinComponentEntry, onSelect: (Int) -> Unit) {
-    val options = listOf("Builtin (Wine)", "Native (Windows)")
+private fun WinComponentRow(
+    comp: WinComponentEntry,
+    options: List<String> = listOf("Builtin (Wine)", "Native (Windows)"),
+    onSelect: (Int) -> Unit,
+) {
     LabeledDropdown(
         label = comp.label,
         options = options,
@@ -2290,6 +2387,7 @@ private fun AdvancedTab(
     cpuListWoW64Ref: MutableState<CPUListView?>,
     onShowBox64DownloadSheet: () -> Unit = {},
     onShowFexCoreDownloadSheet: () -> Unit = {},
+    onShowBox64ECDownloadSheet: () -> Unit = {},
 ) {
     val context = LocalContext.current
     // Per-field "?" help — centered scrollable Compose dialog (same as the General tab).
@@ -2327,6 +2425,31 @@ private fun AdvancedTab(
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
+        // Box64EC — the x86-64 translator alternative to FEXCore on arm64ec. Installed components
+        // only (nothing is bundled); the General tab's "Emulator (64-bit)" picks between them.
+        if (viewModel.isArm64EC) {
+            SectionBox(title = "Box64EC") {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    LabeledDropdown(
+                        label = "Box64EC Version",
+                        options = viewModel.box64ECVersionEntries,
+                        selectedOption = viewModel.selectedBox64ECVersion,
+                        enabled = viewModel.box64ECVersionEntries.isNotEmpty(),
+                        onSelect = { viewModel.selectedBox64ECVersion = it },
+                        modifier = Modifier.weight(1f)
+                    )
+                    ContentInstallGear(onDownloadFile = onShowBox64ECDownloadSheet)
+                }
+                if (viewModel.box64ECVersionEntries.isEmpty()) {
+                    Text(
+                        "No Box64EC installed. Import a Box64EC .wcp with the gear button.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.5.sp
+                    )
+                }
+            }
+        }
 
         // Box64 / WOWBox64 section — arm64ec wrappers use WOWBox64, everything else Box64.
         val emulatorLabel = if (viewModel.isArm64EC) "WOWBox64" else "Box64"
@@ -2406,6 +2529,26 @@ private fun AdvancedTab(
                     onListChanged = { viewModel.reloadPresetLists(context); presetRevision++ },
                     onValuesChanged = { presetRevision++ },
                 )
+                Spacer(Modifier.height(8.dp))
+                // Force SSBS — WINE_FORCE_SSBS for rebuilt layers, libssbs.so preloaded for the rest.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(
+                        checked = viewModel.forceSsbs,
+                        onCheckedChange = { viewModel.forceSsbs = it }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.force_ssbs))
+                        Text(
+                            stringResource(R.string.force_ssbs_summary),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.5.sp
+                        )
+                    }
+                    IconButton(onClick = { helpRes = R.string.help_force_ssbs }) {
+                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                    }
+                }
             }
         }
 
@@ -3007,7 +3150,8 @@ internal const val WAYLAND_DRIVER_SETTINGS_HELP =
  * (FD_DEV_FEATURES for the game's Turnip). Same keys as GraphicsDriverConfigDialog, so a choice
  * survives switching backends; OK writes only these back (withGraphicsDriverKeys). The X11 wrapper
  * plumbing (extensions, BCn, resource type, sync/present-wait) and Vulkan version are left out: nothing
- * on the Wayland path reads them, and the Wayland Turnips ignore MESA_VK_VERSION_OVERRIDE.
+ * on the Wayland path reads them, and the Wayland Turnips ignore MESA_VK_VERSION_OVERRIDE. On an Arm
+ * Mali GPU only, a "Mali (PanVK)" section adds maliMode, bcnEmulation and the panvk* keys (MaliPanvk).
  */
 @Composable
 internal fun WaylandDriverSettingsDialog(
@@ -3042,6 +3186,9 @@ internal fun WaylandDriverSettingsDialog(
     // A stored X11-only mode (immediate / relaxed) stays listed, labelled, so OK keeps it for X11.
     val presentValues = WAYLAND_PRESENT_MODES + (if (storedPresent in WAYLAND_PRESENT_MODES) emptyList() else listOf(storedPresent))
     val presentLabels = presentValues.map { if (it in WAYLAND_PRESENT_MODES) it else "$it (X11 only, not used here)" }
+    // Mali (PanVK) section: Arm Mali GPUs only (vendor 0x13B5); every other GPU sees and writes nothing new.
+    val isMali = remember { com.winlator.star.core.MaliPanvk.isMaliGpu() }
+    val mali = remember(initialConfig) { if (isMali) MaliPanvkSettingsState(context, cfg) else null }
 
     var helpRes by remember { mutableStateOf<Int?>(null) }
     helpRes?.let { HelpDialog(it) { helpRes = null } }
@@ -3121,6 +3268,7 @@ internal fun WaylandDriverSettingsDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                mali?.let { MaliPanvkSection(it) { res -> helpRes = res } }
             }
         },
         confirmButton = {
@@ -3133,7 +3281,7 @@ internal fun WaylandDriverSettingsDialog(
                             "maxDeviceMemory" to StringUtils.parseNumber(memoryEntry),
                             "presentMode" to presentMode,
                             "fdDevFeatures" to if (fdDevFeatures) "1" else "0",
-                        )
+                        ) + (mali?.keys() ?: emptyMap())
                     )
                 )
             }) { Text(stringResource(android.R.string.ok)) }
@@ -3216,7 +3364,16 @@ internal fun importedDriverVersions(context: Context): List<String> =
  * agree.
  */
 internal suspend fun compositorDriverChoices(context: Context): List<String> =
-    (supportedBundledDriverVersions(context) + importedDriverVersions(context)).distinct()
+    (maliSystemChoice() + supportedBundledDriverVersions(context) + importedDriverVersions(context)).distinct()
+
+/**
+ * On an Arm Mali GPU the picker also offers "System" (the phone's own Mali Vulkan driver): no
+ * bundled Turnip runs there, and with the Mali (PanVK) adapter switches some vendor drivers may
+ * import the game's frames. Picked explicitly, it is kept as-is (never refilled, and the launch
+ * does not swap in a bundled Turnip for it). Everywhere else "System" stays out of the list.
+ */
+internal suspend fun maliSystemChoice(): List<String> =
+    if (withContext(Dispatchers.IO) { com.winlator.star.core.MaliPanvk.isMaliGpu() }) listOf("System") else emptyList()
 
 /**
  * What the Wayland "Compositor driver" field shows for the stored `version`. The picker leaves
@@ -3233,9 +3390,21 @@ internal fun compositorDriverLabel(version: String, choices: List<String>, choic
     else -> version
 }
 
-/** True when [version] cannot drive the Wayland compositor: "System"/empty, or an id the picker doesn't offer. */
+/**
+ * True when [version] cannot drive the Wayland compositor: empty, "System" where the picker does
+ * not offer it (it does only on Mali, see [maliSystemChoice]), or an id the picker doesn't offer.
+ */
 internal fun compositorDriverUnusable(version: String, choices: List<String>, choicesLoaded: Boolean): Boolean =
-    version.isEmpty() || version == "System" || (choicesLoaded && version !in choices)
+    version.isEmpty() || (version == "System" && "System" !in choices) || (choicesLoaded && version !in choices)
+
+/** "System" picked on a Mali GPU, where the picker offers it: experimental, so the form says so. */
+internal fun compositorDriverMaliSystem(version: String, choices: List<String>): Boolean =
+    version == "System" && "System" in choices
+
+internal const val MALI_SYSTEM_DRIVER_NOTE =
+    "\"System\" uses your phone's own Mali Vulkan driver. Experimental on Wayland: it may show a black " +
+        "screen. Try it with the Mali (PanVK) switches in the driver gear; if it stays black, pick a PanVK driver or use X11."
+
 
 /**
  * The dmabuf-import device extensions the Wayland compositor enables at vkCreateDevice
@@ -3276,7 +3445,8 @@ internal suspend fun defaultCompositorDriver(context: Context, preferred: String
         val mgr = AdrenotoolsManager(context)
         val imported = importedDriverVersions(context).toSet()
         graphicsProbeMutex.withLock {
-            val usable = choices.map { it to compositorDriverVerdict(context, mgr, it, it in imported) }
+            // "System" (offered on Mali only) is never auto-picked: it has to be the user's choice.
+            val usable = choices.filter { it != "System" }.map { it to compositorDriverVerdict(context, mgr, it, it in imported) }
                 .filter { it.second.usable }
             val newest = usable
                 .maxWithOrNull(Comparator { a, b -> compareVulkanVersions(a.second.vulkanVersion, b.second.vulkanVersion) })
@@ -4115,7 +4285,9 @@ internal fun GraphicsDriverConfigDialog(
                     val v = (detectedValues[key] ?: "").replace(";", "").replace("=", "")
                     ";$key=$v"
                 }
-                onConfirm(config + detectedPart)
+                // The Wayland gear's Mali (PanVK) keys have no control here: carry them through as stored.
+                val maliPart = com.winlator.star.core.MaliPanvk.KEYS.filter { it in cfg }.joinToString("") { ";$it=${cfg[it]}" }
+                onConfirm(config + detectedPart + maliPart)
             }) { Text(stringResource(android.R.string.ok)) }
         },
         dismissButton = {

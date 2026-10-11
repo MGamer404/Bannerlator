@@ -1,5 +1,6 @@
 package com.winlator.star.store
 
+import android.content.Context
 import android.util.Log
 import com.winlator.star.store.download.MediaImage
 import com.winlator.star.store.download.MediaVideo
@@ -60,6 +61,89 @@ object SteamStoreSearch {
         } catch (e: Exception) {
             Log.w(TAG, "searchByName failed for \"$term\": ${e.message}")
             emptyList()
+        }
+    }
+
+    private const val LOOKUP_PREFS = "steam_appid_by_name_v2"
+    private const val RETRY_AFTER_MS = 7L * 24 * 60 * 60 * 1000
+    /** Edition words a title can carry or drop. Not "Remastered": a remaster is a different game on the store. */
+    private val EDITION = Regex("(?i)\\b(complete|definitive|legendary|goty|game of the year|deluxe|ultimate)( edition)?\\b")
+
+    private fun normalize(s: String) = s.lowercase().replace(Regex("[^a-z0-9]"), "")
+
+    /**
+     * How well a store result's name [got] matches a game's [name] (DroidDeck's rule): 3 the same,
+     * 2 the same once edition words are dropped from either ("Tomb Raider" is Steam's "Tomb Raider
+     * Game of the Year"), 1 one starts with the other; 0 no match.
+     */
+    internal fun nameMatch(name: String, got: String): Int {
+        val want = normalize(name)
+        val wantShort = normalize(name.replace(EDITION, " ").trim().ifEmpty { name })
+        val have = normalize(got)
+        val haveShort = normalize(got.replace(EDITION, " ").trim().ifEmpty { got })
+        if (have.isEmpty() || wantShort.isEmpty()) return 0
+        return when {
+            have == want -> 3
+            have == wantShort || haveShort == wantShort -> 2
+            have.startsWith(wantShort) || wantShort.startsWith(have) -> 1
+            else -> 0
+        }
+    }
+
+    /**
+     * The Steam appId of the game called [name], for a game whose files name none: the store result
+     * whose title is the same (edition words aside) - never one taken just for being first, and not
+     * a mere prefix ("Hades" is not "Hades II"). Remembered per name; a miss is retried after a
+     * week. BLOCKING - call off the main thread.
+     */
+    fun findAppIdByName(context: Context, name: String): Int? {
+        val key = normalize(name).ifEmpty { return null }
+        val prefs = context.getSharedPreferences(LOOKUP_PREFS, Context.MODE_PRIVATE)
+        prefs.getString(key, null)?.let { saved ->
+            saved.toIntOrNull()?.let { return it }
+            val since = saved.removePrefix("none:").toLongOrNull() ?: 0L
+            if (System.currentTimeMillis() - since < RETRY_AFTER_MS) return null
+        }
+        // Steam's search finds nothing for "Serious Sam - Shatterverse": punctuation goes before searching.
+        val term = name.replace(EDITION, " ").replace(Regex("[^\\p{L}\\p{N}' ]+"), " ")
+            .replace(Regex("\\s+"), " ").trim().ifEmpty { name }
+        val found = searchByName(term)
+            .map { it to nameMatch(name, it.name) }
+            .filter { it.second >= 2 }
+            .maxByOrNull { it.second }?.first?.appId
+        prefs.edit().putString(key, found?.toString() ?: "none:${System.currentTimeMillis()}").apply()
+        if (found != null) Log.i(TAG, "\"$name\": Steam app $found (by name)")
+        return found
+    }
+
+    /**
+     * The art Steam lists for [appId] (IStoreBrowseService assets), as label -> URL in display order:
+     * the library cover (whatever its file is called - older games have "portrait.png" rather than
+     * library_600x900.jpg), its 2x, the store's tall capsule, header, main capsule, library hero.
+     * Only files Steam names, so nothing that 404s. Empty on failure. BLOCKING - call off the main thread.
+     */
+    fun libraryAssets(appId: Int): LinkedHashMap<String, String> {
+        val out = LinkedHashMap<String, String>()
+        if (appId <= 0) return out
+        val input = "{\"ids\":[{\"appid\":$appId}],\"context\":{\"language\":\"english\",\"country_code\":\"US\"}," +
+            "\"data_request\":{\"include_assets\":true}}"
+        val body = httpGet("https://api.steampowered.com/IStoreBrowseService/GetItems/v1?input_json=" + URLEncoder.encode(input, "UTF-8"))
+            ?: return out
+        return try {
+            val item = JSONObject(body).optJSONObject("response")?.optJSONArray("store_items")?.optJSONObject(0) ?: return out
+            val assets = item.optJSONObject("assets") ?: return out
+            val format = assets.optString("asset_url_format").takeIf { it.contains("\${FILENAME}") } ?: return out
+            for ((key, label) in listOf(
+                "library_capsule" to "Cover", "library_capsule_2x" to "Cover 2x", "hero_capsule" to "Store cover",
+                "header" to "Header", "main_capsule" to "Capsule", "library_hero" to "Hero", "library_hero_2x" to "Hero 2x",
+            )) {
+                val file = assets.optString(key).takeIf { it.isNotBlank() } ?: continue
+                out[label] = "https://shared.steamstatic.com/store_item_assets/" + format.replace("\${FILENAME}", file)
+            }
+            out
+        } catch (e: Exception) {
+            Log.w(TAG, "libraryAssets failed for $appId: ${e.message}")
+            out
         }
     }
 

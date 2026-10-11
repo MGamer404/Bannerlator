@@ -121,7 +121,7 @@ th.num{text-align:right}
 
 <div class="deck">
 <nav class="rail" aria-label="Slides">
-  <a href="#s1" data-i="1">1</a><a href="#s2" data-i="2">2</a><a href="#s3" data-i="3">3</a><a href="#s3b" data-i="3b">3b</a><a href="#s4" data-i="4">4</a><a href="#s5" data-i="5">5</a><a href="#s6" data-i="6">6</a><a href="#s7" data-i="7">7</a><a href="#s8" data-i="8">8</a><a href="#s9" data-i="9">9</a><a href="#s10" data-i="10">10</a><a href="#s11" data-i="11">11</a><a href="#s12" data-i="12">12</a>
+  <a href="#s1" data-i="1">1</a><a href="#s2" data-i="2">2</a><a href="#s3" data-i="3">3</a><a href="#s3b" data-i="3b">3b</a><a href="#s3c" data-i="3c">3c</a><a href="#s4" data-i="4">4</a><a href="#s5" data-i="5">5</a><a href="#s6" data-i="6">6</a><a href="#s7" data-i="7">7</a><a href="#s8" data-i="8">8</a><a href="#s9" data-i="9">9</a><a href="#s10" data-i="10">10</a><a href="#s11" data-i="11">11</a><a href="#s12" data-i="12">12</a>
 </nav>
 <main class="slides">
 
@@ -154,6 +154,7 @@ th.num{text-align:right}
 <section class="slide" id="s3">
   <div class="eyebrow">Slide 3 · Measured, same container, same Proton, only the backend switched</div>
   <h2>Frame rate today</h2>
+  <p class="callout"><strong>Measured with the old AIO sweep.</strong> That sweep copies every API except D3D11 back to the processor, which hid Wayland&rsquo;s real speed. The honest numbers are on <a href="#s3c">slide 3c</a>.</p>
   <figure>
     <svg class="chart" viewBox="0 0 900 420" role="img" aria-label="AIO Graphics Test frames per second, X11 versus Wayland, eight APIs">
       <g font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor" style="color:var(--muted)">
@@ -210,6 +211,7 @@ th.num{text-align:right}
 <section class="slide" id="s3b">
   <div class="eyebrow">Slide 3b · 28 September 2026 · uncapped, all eight APIs, one driver pick</div>
   <h2>Frame rate after the adapter, and the zero-copy ceiling fixed</h2>
+  <p class="callout"><strong>Measured with the old AIO sweep.</strong> That sweep copies every API except D3D11 back to the processor, which hid Wayland&rsquo;s real speed. The honest numbers are on <a href="#s3c">slide 3c</a>.</p>
   <p class="lede">The Wayland wrapper (the bionic Vulkan wrapper X11 already uses, rebuilt with the Wayland window system) lets a normal Android Turnip, picked once, drive both the compositor and the game. Measured against the original numbers from slide 3, with the drivers Wayland ships today.</p>
   <div class="tablewrap"><table>
     <thead><tr><th>API (AIO average, fps)</th><th class="num">X11<br>15 Sep</th><th class="num">Wayland copy<br>15 Sep</th><th class="num">Adapter<br>zero-copy</th><th class="num">Adapter<br>copy</th><th class="num">Bundled Turnip<br>zero-copy</th><th class="num">Bundled Turnip<br>zero-copy off</th><th class="num">Combined Turnip<br>zero-copy</th><th class="num">Wayland Turnip<br>zero-copy <strong>fixed</strong></th></tr></thead>
@@ -230,7 +232,43 @@ th.num{text-align:right}
     <li><span><strong>Zero-copy had a ceiling of about 270 to 300 fps, now fixed.</strong> Current Mesa handed the game back the buffer the display had just released, so the GPU waited for the screen every refresh (27 percent busy), and five images were too few for the display layer. The fix picks buffers the display has let go of first and gives zero-copy mailbox swapchains two extra images, still waiting on every fence: D3D11 274 to 3,658, Vulkan 295 to 541, zero-copy still presenting. Banners-Turnip branch fix/wayland-zero-copy-ceiling, commits a21b38c and f7ac07e; not in the shipped layer yet.</span></li>
     <li><span><strong>Real games don't hit it yet.</strong> DiRT Showdown on the adapter ran its menu at the 144 Hz cap with zero-copy, and at about 100 to 120 fps uncapped in the game world, the same as the combined driver.</span></li>
   </ol>
-  <p class="note">Not the same conditions as slide 3, so compare trends rather than single cells. Slide 3: AIO 2.0.1 in a maximized window (960 x 586 render), copy path, 15 s per API, one launch. 28 September: the AIO fullscreen build (--sweep 15, true fullscreen 1280 x 720, vsync off, mailbox), 15 s per API, one launch per driver, container 3, Proton 11.0-2.1-arm64ec-16, compositor driver r4. Adapter and combined columns are the mean of three runs, the bundled and fixed columns one run each, runs alternated with a cooldown. OpenGL, D3D9, D3D8 and DirectDraw land at 230 to 270 on every driver, so something other than the driver limits them. Pocket FIT, Adreno 750.</p>
+  <p class="note">Not the same conditions as slide 3, so compare trends rather than single cells. Slide 3: AIO 2.0.1 in a maximized window (960 x 586 render), copy path, 15 s per API, one launch. 28 September: the AIO fullscreen build (--sweep 15, true fullscreen 1280 x 720, vsync off, mailbox), 15 s per API, one launch per driver, container 3, Proton 11.0-2.1-arm64ec-16, compositor driver r4. Adapter and combined columns are the mean of three runs, the bundled and fixed columns one run each, runs alternated with a cooldown. OpenGL, D3D9, D3D8 and DirectDraw land at 230 to 270 on every driver, so something other than the driver limits them (it turned out to be the sweep itself, see slide 3c). Pocket FIT, Adreno 750.</p>
+</section>
+
+<section class="slide" id="s3c">
+  <div class="eyebrow">Slide 3c &middot; 1 October 2026 &middot; each API in its own window, measured honestly</div>
+  <h2>Frame rate, measured honestly: Wayland is ahead on every API</h2>
+  <p class="lede">Slides 3 and 3b used the AIO Graphics Test's sweep, which turned out to copy every API except D3D11 back to the processor to show it inside its own window. That capped those rows at about twice the screen's refresh rate on both backends. Here each API runs on its own and presents for real.</p>
+  <figure>
+    <svg class="chart" viewBox="0 0 900 360" role="img" aria-label="AIO Graphics Test, each API in its own window, frames per second, X11 versus Wayland, seven APIs">
+      <g font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor" style="color:var(--muted)">
+        <line x1="150" y1="20" x2="150" y2="318" stroke="currentColor" stroke-opacity=".35"/>
+        <g stroke="currentColor" stroke-opacity=".18">
+          <line x1="300" y1="20" x2="300" y2="318"/><line x1="450" y1="20" x2="450" y2="318"/><line x1="600" y1="20" x2="600" y2="318"/><line x1="750" y1="20" x2="750" y2="318"/>
+        </g>
+        <text x="150" y="338" text-anchor="middle">0</text><text x="300" y="338" text-anchor="middle">900</text><text x="450" y="338" text-anchor="middle">1,800</text><text x="600" y="338" text-anchor="middle">2,700</text><text x="750" y="338" text-anchor="middle">3,600 fps</text>
+      </g>
+      <g font-family="IBM Plex Sans, sans-serif" font-size="13" fill="currentColor" style="color:var(--ink)">
+        <text x="140" y="44" text-anchor="end">Vulkan</text><text x="140" y="86" text-anchor="end">OpenGL</text><text x="140" y="128" text-anchor="end">D3D12</text><text x="140" y="170" text-anchor="end">D3D10</text><text x="140" y="212" text-anchor="end">D3D9</text><text x="140" y="254" text-anchor="end">D3D8</text><text x="140" y="296" text-anchor="end">DirectDraw</text>
+      </g>
+      <g style="color:var(--x11)" fill="currentColor"><rect x="150" y="30" width="250.7" height="8"/><rect x="150" y="72" width="208.3" height="8"/><rect x="150" y="114" width="225.8" height="8"/><rect x="150" y="156" width="221.0" height="8"/><rect x="150" y="198" width="279.2" height="8"/><rect x="150" y="240" width="282.2" height="8"/><rect x="150" y="282" width="181.0" height="8"/></g>
+      <g style="color:var(--way)" fill="currentColor"><rect x="150" y="40" width="377.2" height="8"/><rect x="150" y="82" width="337.2" height="8"/><rect x="150" y="124" width="595.3" height="8"/><rect x="150" y="166" width="425.7" height="8"/><rect x="150" y="208" width="591.3" height="8"/><rect x="150" y="250" width="583.2" height="8"/><rect x="150" y="292" width="411.7" height="8"/></g>
+      <g font-family="IBM Plex Mono, monospace" font-size="11" fill="currentColor" style="color:var(--muted)">
+        <text x="407" y="38">1,504</text><text x="533" y="48">2,263</text><text x="364" y="80">1,250</text><text x="493" y="90">2,023</text><text x="382" y="122">1,355</text><text x="751" y="132">3,572</text><text x="377" y="164">1,326</text><text x="582" y="174">2,554</text><text x="435" y="206">1,675</text><text x="747" y="216">3,548</text><text x="438" y="248">1,693</text><text x="739" y="258">3,499</text><text x="337" y="290">1,086</text><text x="568" y="300">2,470</text>
+      </g>
+    </svg>
+  </figure>
+  <div class="legend"><span><i class="x"></i>X11 (OpenGL and DirectDraw with Fast OpenGL, 3.1.4)</span><span><i class="w"></i>Wayland, zero-copy, adapter</span><span class="mono">AIO Graphics Test --cube &lt;api&gt;, Adreno 750</span></div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>API (15 s average, fps)</th><th class="num">X11</th><th class="num">X11 with<br>Fast OpenGL</th><th class="num">Wayland<br>zero-copy</th><th class="num">Wayland<br>vs best X11</th></tr></thead>
+    <tbody><tr><td>Vulkan</td><td class="num">1,504</td><td class="num">&mdash;</td><td class="num"><strong>2,263</strong></td><td class="num">&times;1.5</td></tr><tr><td>OpenGL</td><td class="num">224</td><td class="num">1,250</td><td class="num"><strong>2,023</strong></td><td class="num">&times;1.6</td></tr><tr><td>D3D12</td><td class="num">1,355</td><td class="num">&mdash;</td><td class="num"><strong>3,572</strong></td><td class="num">&times;2.6</td></tr><tr><td>D3D10</td><td class="num">1,326</td><td class="num">&mdash;</td><td class="num"><strong>2,554</strong></td><td class="num">&times;1.9</td></tr><tr><td>D3D9</td><td class="num">1,675</td><td class="num">&mdash;</td><td class="num"><strong>3,548</strong></td><td class="num">&times;2.1</td></tr><tr><td>D3D8</td><td class="num">1,693</td><td class="num">&mdash;</td><td class="num"><strong>3,499</strong></td><td class="num">&times;2.1</td></tr><tr><td>DirectDraw</td><td class="num">358</td><td class="num">1,086</td><td class="num"><strong>2,470</strong></td><td class="num">&times;2.3</td></tr></tbody>
+  </table></div>
+  <ol class="ranked">
+    <li><span><strong>Wayland leads by 1.5 to 2.6 times.</strong> With no X server in the middle, nothing copies the frame on its way to the screen. D3D12 gains the most because it also has the Turnip "check, don't wait" fix (Banners-Turnip r4 and later, and the Wayland adapter with any Turnip), which helps Wayland more than X11.</span></li>
+    <li><span><strong>The 230 to 270 fps wall on slide 3b was the test, not Wayland.</strong> OpenGL, D3D9, D3D8 and DirectDraw run at 2,000 to 3,500 fps here. The same copy-back held the X11 numbers on slide 3 down too.</span></li>
+    <li><span><strong>X11 OpenGL closed most of its gap in 3.1.4.</strong> Fast OpenGL took X11 OpenGL from 224 to 1,250 fps and DirectDraw from 358 to 1,086. Wayland stays ahead because X11 still passes every frame through the X server. Plain-language explainer: <a href="https://the412banner.github.io/Bannerlator/fast-opengl/">Fast OpenGL</a>.</span></li>
+  </ol>
+  <p class="note">Pocket FIT, Adreno 750, 1 October 2026 shortly after midnight, back to back. Banners-Turnip r7, Proton 11.0-2-arm64ec-9, AIO Graphics Test --cube &lt;api&gt; --bench 15 --autoclose 2, one launch per API. The GPU was held at 310 MHz by the device's thermal limit for both backends, so these compare with each other, not with slide 3's GPU clock. Fast OpenGL rows measured the same way within the hour. D3D11 wasn't measured this way; it was the one row the sweep didn't copy (slide 3b: Wayland about 3,400 to 3,700 against X11's 2,298). These are small test scenes at thousands of frames per second; in real games the GPU is usually the limit and the gaps are much smaller.</p>
 </section>
 
 <section class="slide" id="s4">

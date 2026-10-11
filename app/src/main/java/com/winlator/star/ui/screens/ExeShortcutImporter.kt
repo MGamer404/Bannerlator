@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.winlator.star.container.Container
+import com.winlator.star.container.GameDetails
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GameIdentifier
@@ -54,14 +55,18 @@ internal object ExeShortcutImporter {
             // Current on-disk base name; may be upgraded to the authoritative Steam name below.
             val base = shortcutFile.nameWithoutExtension
             try {
+                // No appId in the game's files: look the title up on the Steam store (same title only,
+                // remembered per name), so the art and the name come from Steam as for a game that has one.
+                val artAppId = steamAppId?.takeIf { it > 0 }
+                    ?: runCatching { SteamStoreSearch.findAppIdByName(appCtx, base) }.getOrNull()
                 // 1. Cover art keyed to the current name — Steam CDN 600x900 portrait first, then the
                 //    existing SGDB chain (by appid, then by name) inside saveCoverArt. Guarded on the
                 //    .desktop still existing so a user rename-via-dialog can't make saveCoverArt
                 //    recreate a stray shortcut for the old name.
                 if (File(desktopDir, "$base.desktop").isFile) {
-                    val steamCover = steamAppId?.takeIf { it > 0 }?.let { SteamStoreSearch.coverUrl(it) }
+                    val steamCover = artAppId?.let { SteamStoreSearch.coverUrl(it) }
                     StarLaunchBridge.saveCoverArt(
-                        appCtx, container, File(desktopDir, "$base.desktop"), base, steamCover, steamAppId,
+                        appCtx, container, File(desktopDir, "$base.desktop"), base, steamCover, artAppId,
                     )
                     val iconFile = container.getIconsDir(64)?.let { File(it, "$base.png") }
                     if ((iconFile == null || !iconFile.exists()) && File(desktopDir, "$base.desktop").isFile) {
@@ -84,8 +89,10 @@ internal object ExeShortcutImporter {
 
                 // 2. Steam authoritative name (network) — corrects a launcher/loader PE name.
                 //    renameShortcutFiles moves the cover/icon just written, so the art follows.
-                if (steamAppId != null && steamAppId > 0) {
-                    val better = betterSteamName(base, SteamStoreSearch.resolveName(steamAppId))
+                if (artAppId != null) {
+                    val details = runCatching { SteamStoreSearch.fetchDetails(artAppId) }.getOrNull()
+                    var finalBase = base
+                    val better = betterSteamName(base, details?.name ?: SteamStoreSearch.resolveName(artAppId))
                     // Race guard: only rename while the shortcut is still at its original name.
                     // If the user already Saved a different name via the confirm dialog, the
                     // original .desktop is gone and we leave their choice alone.
@@ -93,14 +100,41 @@ internal object ExeShortcutImporter {
                         File(desktopDir, "$base.desktop").isFile &&
                         renameShortcutFiles(container, base, better)
                     ) {
+                        finalBase = better
                         main.post { onNameResolved(base, better) }
                     }
+                    // 3. Link the game to its Steam app and fill in its details (genres, description,
+                    //    year, Metacritic) from the store, so its Game Details page comes filled in.
+                    if (linkSteamApp(container, finalBase, artAppId, details)) onCoverArtReady()
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Name/cover-art resolution failed for $base", e)
             }
         }, "exe-import-cover-art").start()
         return shortcutFile
+    }
+
+    /**
+     * Links the shortcut [base] to Steam app [appId] and fills its Game Details (genres, description,
+     * year, Metacritic) from the store; anything already set is kept. [details] when the caller has
+     * them, else fetched. False when the shortcut is not there. BLOCKING - call off the main thread.
+     */
+    fun linkSteamApp(
+        container: Container, base: String, appId: Int,
+        details: SteamStoreSearch.SteamGameDetails? = runCatching { SteamStoreSearch.fetchDetails(appId) }.getOrNull(),
+    ): Boolean {
+        val file = File(container.getDesktopDir(), "$base.desktop")
+        if (!file.isFile) return false
+        val shortcut = Shortcut(container, file)
+        val current = GameDetails.from(shortcut)
+        GameDetails(
+            steamAppId = appId,
+            genres = current.genres.ifEmpty { details?.genres.orEmpty() },
+            description = current.description ?: details?.shortDescription,
+            releaseYear = current.releaseYear ?: details?.releaseYear,
+            metacritic = current.metacritic ?: details?.metacritic,
+        ).writeTo(shortcut)
+        return true
     }
 
     /**

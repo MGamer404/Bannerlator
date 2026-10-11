@@ -534,9 +534,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                 if (buf == null) return;
                 nativeUpdateCursorImage(nativeHandle, buf, cd.width, cd.height, hotX, hotY);
                 if (nativeMode) {
+                    // Row pitch comes from the image itself: an AHB-backed drawable pads each row, and
+                    // deriving the pitch from the buffer capacity shredded 32- and 48-wide cursors.
                     java.nio.ByteBuffer buf2 = cd.getBuffer();
-                    short stride = (short)(buf2.capacity() / (cd.height * 4));
-                    nativeScanoutSetCursorImage(nativeHandle, buf2, cd.width, cd.height, stride);
+                    nativeScanoutSetCursorImage(nativeHandle, buf2, cd.width, cd.height, cd.getStride());
                 }
             }
         }

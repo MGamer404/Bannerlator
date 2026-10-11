@@ -226,7 +226,7 @@ static void on_client_created(struct wl_listener *l, void *data) {
 
 /* ------------------------------------------------------------------ surfaces */
 
-enum surface_role { ROLE_NONE, ROLE_TOPLEVEL, ROLE_SUBSURFACE, ROLE_DESKTOP, ROLE_CURSOR };
+enum surface_role { ROLE_NONE, ROLE_TOPLEVEL, ROLE_SUBSURFACE, ROLE_DESKTOP, ROLE_CURSOR, ROLE_POPUP };
 
 struct surface {
     struct wl_resource *resource;
@@ -280,6 +280,21 @@ struct surface {
     int hud_frame;                          /* a GPU frame arrived in this window since the HUD last counted one */
     int below_parent;
     int fullscreen;                         /* xdg_toplevel.set_fullscreen: no client decorations */
+
+    /* xdg_surface window geometry (double-buffered; only popup placement reads it). */
+    int geom[4], pending_geom[4];           /* x, y, w, h */
+    int geom_set, pending_geom_set;
+    uint32_t acked_serial;                  /* last xdg_surface.ack_configure */
+
+    /* xdg_popup: on the scene like a toplevel (g_toplevels, x/y), kept right above its parent. */
+    struct wl_resource *xdg_popup;
+    struct surface *popup_parent;           /* NULL: no parent, or the parent went (popup_done sent) */
+    int popup_rel[4];                       /* x, y, w, h relative to the parent's window geometry */
+    int popup_next[4];                      /* repositioned geometry, applied once acked and committed */
+    uint32_t popup_next_serial;
+    int popup_has_next;
+    int popup_dismissed;                    /* popup_done sent: never mapped again */
+    int popup_restacked;                    /* restack_popups bookkeeping */
 
     char *title;                            /* xdg_toplevel title, for the session log */
     int announced_vulkan;                   /* logged its first dmabuf frame */
@@ -591,6 +606,8 @@ static void constraints_focus_entered(struct wl_resource *target, struct wl_clie
 
 /* Window-manager style activation of new program windows; see "keyboard focus for new windows". */
 static void focus_new_window(struct surface *s);
+static void popup_commit(struct surface *s);
+static void popups_parent_gone(struct surface *parent);
 static void focus_topmost_if_unfocused(const char *why);
 static void auto_activate_schedule(struct surface *s);
 static void auto_activate_surface_gone(struct surface *s);
@@ -677,8 +694,71 @@ static struct surface *toplevel_by_hwnd(uint32_t hwnd) {
     return NULL;
 }
 
+/* ------------------------------------------------------------------ xdg_popup placement
+ * A mapped popup sits in g_toplevels directly above its parent (and above that parent's older
+ * popups), placed at the parent's window-geometry origin plus the position it was configured
+ * with. A popup without a mapped parent goes on top. */
+
+static int popup_descends_from(const struct surface *s, const struct surface *ancestor) {
+    for (int depth = 0; s && s->role == ROLE_POPUP && depth < 16; depth++) {
+        if (s->popup_parent == ancestor) return 1;
+        s = s->popup_parent;
+    }
+    return 0;
+}
+
+static void restack_popups(void) {
+    struct surface *s, *tmp;
+    struct wl_list popups;
+    wl_list_init(&popups);
+    wl_list_for_each_safe(s, tmp, &g_toplevels, toplevel_link) {
+        if (s->role != ROLE_POPUP) continue;
+        wl_list_remove(&s->toplevel_link);
+        wl_list_insert(popups.prev, &s->toplevel_link);
+        s->popup_restacked = 0;
+    }
+    /* Bottom to top, so a parent popup is back in the stack before its own popups. */
+    wl_list_for_each_safe(s, tmp, &popups, toplevel_link) {
+        struct surface *p = s->popup_parent;
+        struct wl_list *after = g_toplevels.prev;
+        wl_list_remove(&s->toplevel_link);
+        if (p && p->mapped && (p->role != ROLE_POPUP || p->popup_restacked)) {
+            after = &p->toplevel_link;
+            while (after->next != &g_toplevels) {
+                struct surface *n = wl_container_of(after->next, n, toplevel_link);
+                if (n->role != ROLE_POPUP || !popup_descends_from(n, p)) break;
+                after = after->next;
+            }
+        }
+        wl_list_insert(after, &s->toplevel_link);
+        s->popup_restacked = 1;
+    }
+}
+
+/* Scene position of a surface's window-geometry origin. */
+static void geometry_origin(const struct surface *s, int *x, int *y) {
+    *x = s && s->placed ? s->x : 0;
+    *y = s && s->placed ? s->y : 0;
+    if (s && s->geom_set) { *x += s->geom[0]; *y += s->geom[1]; }
+}
+
+/* Follow the parents (a window the desktop moved, a resized geometry). Parents come first in
+ * g_toplevels, so nested popups see their parent's new position. */
+static void place_popups(void) {
+    struct surface *s;
+    wl_list_for_each(s, &g_toplevels, toplevel_link) {
+        if (s->role != ROLE_POPUP) continue;
+        int px, py;
+        geometry_origin(s->popup_parent, &px, &py);
+        s->x = px + s->popup_rel[0] - (s->geom_set ? s->geom[0] : 0);
+        s->y = py + s->popup_rel[1] - (s->geom_set ? s->geom[1] : 0);
+        s->placed = 1;
+    }
+}
+
 /* Reorder the mapped toplevels to match the last reported Windows z-order. Windows the
- * report doesn't mention keep their relative order below the ones it does. */
+ * report doesn't mention keep their relative order below the ones it does; popups stay
+ * above their parents. */
 static void apply_zorder(void) {
     for (size_t i = g_zorder_count; i-- > 0;) {
         struct surface *s = toplevel_by_hwnd(g_zorder[i]);
@@ -686,6 +766,7 @@ static void apply_zorder(void) {
         wl_list_remove(&s->toplevel_link);
         wl_list_insert(g_toplevels.prev, &s->toplevel_link);
     }
+    restack_popups();
 }
 
 static void map_toplevel(struct surface *s) {
@@ -704,10 +785,27 @@ static void map_toplevel(struct surface *s) {
     focus_new_window(s);
 }
 
+/* Popups take no keyboard focus of their own (no xdg_popup.grab is honoured): the window
+ * that opened the menu or list keeps it, as on the X11 path. */
+static void map_popup(struct surface *s) {
+    int w, h;
+    if (s->mapped) return;
+    s->mapped = 1;
+    wl_list_insert(g_toplevels.prev, &s->toplevel_link);
+    restack_popups();
+    place_popups();
+    surface_size(s, &w, &h);
+    if (log_budget()) {
+        char name[160];
+        describe(s->popup_parent ? s->popup_parent : s, name, sizeof(name));
+        banner_log("window", "popup of %s opened %dx%d at %d,%d", name, w, h, s->x, s->y);
+    }
+}
+
 static void unmap_toplevel(struct surface *s) {
     if (!s->mapped) return;
     s->mapped = 0;
-    {
+    if (s->role != ROLE_POPUP) {
         char name[160];
         describe(s, name, sizeof(name));
         banner_log("window", "closed %s", name);
@@ -1094,9 +1192,16 @@ static void surface_commit(struct wl_client *c, struct wl_resource *r) {
     constraints_surface_commit(s);
     banner_color_commit(s->resource); /* wp_color_management_surface_v1 state (returns at once when HDR is off) */
 
+    if (s->pending_geom_set) {
+        memcpy(s->geom, s->pending_geom, sizeof(s->geom));
+        s->geom_set = 1;
+        s->pending_geom_set = 0;
+    }
     if (s->role == ROLE_TOPLEVEL && s->xdg_toplevel) {
         if (s->has_content) map_toplevel(s);
         else unmap_toplevel(s);
+    } else if (s->role == ROLE_POPUP && s->xdg_popup) {
+        popup_commit(s);
     }
     schedule_render();
 }
@@ -1148,6 +1253,7 @@ static void surface_resource_destroy(struct wl_resource *r) {
     if (g_desktop == s) { g_desktop = NULL; banner_log("desktop", "the desktop closed"); }
     if (g_hud_surface == s) { g_hud_surface = NULL; banner_on_game_surface(NULL, NULL); }
     constraints_surface_gone(s);
+    popups_parent_gone(s);
 
     unmap_toplevel(s);
     detach_from_parent(s);
@@ -1169,6 +1275,7 @@ static void surface_resource_destroy(struct wl_resource *r) {
     if (s->subsurface) wl_resource_set_user_data(s->subsurface, NULL);
     if (s->xdg_surface) wl_resource_set_user_data(s->xdg_surface, NULL);
     if (s->xdg_toplevel) wl_resource_set_user_data(s->xdg_toplevel, NULL);
+    if (s->xdg_popup) wl_resource_set_user_data(s->xdg_popup, NULL);
     wl_list_remove(&s->link);
     free(s->title);
     free(s);
@@ -1466,11 +1573,254 @@ static void xdg_surface_get_toplevel(struct wl_client *c, struct wl_resource *r,
     s->xdg_toplevel = tl;
     send_toplevel_configure(s);
 }
+
+/* ---- xdg_positioner / xdg_popup (xdg_wm_base v3: CachyOS's winewayland requires it for
+ * xdg_popup.reposition). winewayland makes owned/unmanaged windows (menus, tooltips, drop-down
+ * lists) popups of their owner outside the virtual desktop; on the desktop they stay toplevels. */
+
+struct positioner {
+    int w, h;                               /* 0 = unset */
+    int anchor_rect[4];                     /* x, y, w, h; anchor_set = 0: unset */
+    int anchor_set;
+    uint32_t anchor, gravity, adjust;
+    int offset[2];
+    /* v3: stored, not acted on (nothing here moves a parent on its own). */
+    int reactive, parent_w, parent_h;
+    uint32_t parent_serial;
+};
+
+static void positioner_destroy_req(struct wl_client *c, struct wl_resource *r) { wl_resource_destroy(r); }
+static void positioner_set_size(struct wl_client *c, struct wl_resource *r, int32_t w, int32_t h) {
+    struct positioner *p = wl_resource_get_user_data(r);
+    if (w <= 0 || h <= 0) {
+        wl_resource_post_error(r, XDG_POSITIONER_ERROR_INVALID_INPUT, "size %dx%d is not positive", w, h);
+        return;
+    }
+    p->w = w;
+    p->h = h;
+}
+static void positioner_set_anchor_rect(struct wl_client *c, struct wl_resource *r,
+                                       int32_t x, int32_t y, int32_t w, int32_t h) {
+    struct positioner *p = wl_resource_get_user_data(r);
+    if (w < 0 || h < 0) {
+        wl_resource_post_error(r, XDG_POSITIONER_ERROR_INVALID_INPUT, "anchor rect %dx%d is negative", w, h);
+        return;
+    }
+    p->anchor_rect[0] = x; p->anchor_rect[1] = y; p->anchor_rect[2] = w; p->anchor_rect[3] = h;
+    p->anchor_set = 1;
+}
+static void positioner_set_anchor(struct wl_client *c, struct wl_resource *r, uint32_t anchor) {
+    struct positioner *p = wl_resource_get_user_data(r);
+    if (anchor > XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT) {
+        wl_resource_post_error(r, XDG_POSITIONER_ERROR_INVALID_INPUT, "bad anchor %u", anchor);
+        return;
+    }
+    p->anchor = anchor;
+}
+static void positioner_set_gravity(struct wl_client *c, struct wl_resource *r, uint32_t gravity) {
+    struct positioner *p = wl_resource_get_user_data(r);
+    if (gravity > XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT) {
+        wl_resource_post_error(r, XDG_POSITIONER_ERROR_INVALID_INPUT, "bad gravity %u", gravity);
+        return;
+    }
+    p->gravity = gravity;
+}
+static void positioner_set_constraint_adjustment(struct wl_client *c, struct wl_resource *r, uint32_t adjust) {
+    struct positioner *p = wl_resource_get_user_data(r);
+    p->adjust = adjust;
+}
+static void positioner_set_offset(struct wl_client *c, struct wl_resource *r, int32_t x, int32_t y) {
+    struct positioner *p = wl_resource_get_user_data(r);
+    p->offset[0] = x;
+    p->offset[1] = y;
+}
+static void positioner_set_reactive(struct wl_client *c, struct wl_resource *r) {
+    struct positioner *p = wl_resource_get_user_data(r);
+    p->reactive = 1;
+}
+static void positioner_set_parent_size(struct wl_client *c, struct wl_resource *r, int32_t w, int32_t h) {
+    struct positioner *p = wl_resource_get_user_data(r);
+    p->parent_w = w;
+    p->parent_h = h;
+}
+static void positioner_set_parent_configure(struct wl_client *c, struct wl_resource *r, uint32_t serial) {
+    struct positioner *p = wl_resource_get_user_data(r);
+    p->parent_serial = serial;
+}
+static const struct xdg_positioner_interface positioner_impl = {
+    .destroy = positioner_destroy_req,
+    .set_size = positioner_set_size,
+    .set_anchor_rect = positioner_set_anchor_rect,
+    .set_anchor = positioner_set_anchor,
+    .set_gravity = positioner_set_gravity,
+    .set_constraint_adjustment = positioner_set_constraint_adjustment,
+    .set_offset = positioner_set_offset,
+    .set_reactive = positioner_set_reactive,
+    .set_parent_size = positioner_set_parent_size,
+    .set_parent_configure = positioner_set_parent_configure,
+};
+static void positioner_resource_destroy(struct wl_resource *r) { free(wl_resource_get_user_data(r)); }
+
+/* Horizontal / vertical side of an anchor or gravity value (same numbering): -1 left/top,
+ * 0 centre, 1 right/bottom. */
+static int edge_h(uint32_t v) {
+    switch (v) {
+    case XDG_POSITIONER_ANCHOR_LEFT: case XDG_POSITIONER_ANCHOR_TOP_LEFT: case XDG_POSITIONER_ANCHOR_BOTTOM_LEFT: return -1;
+    case XDG_POSITIONER_ANCHOR_RIGHT: case XDG_POSITIONER_ANCHOR_TOP_RIGHT: case XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT: return 1;
+    default: return 0;
+    }
+}
+static int edge_v(uint32_t v) {
+    switch (v) {
+    case XDG_POSITIONER_ANCHOR_TOP: case XDG_POSITIONER_ANCHOR_TOP_LEFT: case XDG_POSITIONER_ANCHOR_TOP_RIGHT: return -1;
+    case XDG_POSITIONER_ANCHOR_BOTTOM: case XDG_POSITIONER_ANCHOR_BOTTOM_LEFT: case XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT: return 1;
+    default: return 0;
+    }
+}
+
+/* One axis: anchor point on the anchor rect, the popup on the gravity side of it, plus offset. */
+static int place_axis(int rect_pos, int rect_len, int anchor_side, int gravity_side, int len, int offset) {
+    int a = rect_pos + (anchor_side < 0 ? 0 : anchor_side > 0 ? rect_len : rect_len / 2);
+    int pos = gravity_side < 0 ? a - len : gravity_side > 0 ? a : a - len / 2;
+    return pos + offset;
+}
+
+/* One axis of the constraint adjustment, against the scene [0, bound): flip (anchor and gravity
+ * mirrored, offset negated) if that fits where the original doesn't, then slide back inside.
+ * resize is not done: the client's buffer size is kept. */
+static int constrain_axis(int pos, int origin, int bound, int len, int rect_pos, int rect_len,
+                          int anchor_side, int gravity_side, int offset, int can_flip, int can_slide) {
+    if (bound <= 0) return pos;
+    int out = origin + pos < 0 || origin + pos + len > bound;
+    if (out && can_flip && (anchor_side || gravity_side)) {
+        int f = place_axis(rect_pos, rect_len, -anchor_side, -gravity_side, len, -offset);
+        if (origin + f >= 0 && origin + f + len <= bound) return f;
+    }
+    if (out && can_slide) {
+        if (origin + pos + len > bound) pos = bound - len - origin;
+        if (origin + pos < 0) pos = -origin;
+    }
+    return pos;
+}
+
+/* The popup's geometry relative to the parent's window geometry, per the positioner. */
+static void positioner_place(const struct positioner *p, const struct surface *parent, int out[4]) {
+    int w = p->w > 0 ? p->w : 1, h = p->h > 0 ? p->h : 1;
+    const int *ar = p->anchor_rect;
+    int ox, oy, ah = edge_h(p->anchor), av = edge_v(p->anchor), gh = edge_h(p->gravity), gv = edge_v(p->gravity);
+    int x = place_axis(ar[0], ar[2], ah, gh, w, p->offset[0]);
+    int y = place_axis(ar[1], ar[3], av, gv, h, p->offset[1]);
+    geometry_origin(parent, &ox, &oy);
+    x = constrain_axis(x, ox, g_scene_w, w, ar[0], ar[2], ah, gh, p->offset[0],
+                       p->adjust & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_FLIP_X,
+                       p->adjust & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X);
+    y = constrain_axis(y, oy, g_scene_h, h, ar[1], ar[3], av, gv, p->offset[1],
+                       p->adjust & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_FLIP_Y,
+                       p->adjust & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y);
+    out[0] = x; out[1] = y; out[2] = w; out[3] = h;
+}
+
+static uint32_t send_popup_configure(struct surface *s, const int g[4]) {
+    uint32_t serial = wl_display_next_serial(g_display);
+    xdg_popup_send_configure(s->xdg_popup, g[0], g[1], g[2], g[3]);
+    if (s->xdg_surface) xdg_surface_send_configure(s->xdg_surface, serial);
+    return serial;
+}
+
+/* Dismiss: popup_done, off the scene, never mapped again (the client must destroy it). */
+static void popup_dismiss(struct surface *s) {
+    if (!s->xdg_popup || s->popup_dismissed) return;
+    s->popup_dismissed = 1;
+    popups_parent_gone(s);                  /* its own popups go first */
+    xdg_popup_send_popup_done(s->xdg_popup);
+    unmap_toplevel(s);
+    s->popup_parent = NULL;
+    schedule_render();
+}
+
+/* A surface's xdg_surface or wl_surface is going, or its popup was dismissed or destroyed:
+ * the popups opened on it are dismissed. */
+static void popups_parent_gone(struct surface *parent) {
+    struct surface *s;
+    wl_list_for_each(s, &g_surfaces, link) {
+        if (s->role != ROLE_POPUP || s->popup_parent != parent) continue;
+        if (s->xdg_popup) popup_dismiss(s);
+        s->popup_parent = NULL;
+    }
+}
+
+static void popup_commit(struct surface *s) {
+    if (s->popup_has_next && (int32_t)(s->acked_serial - s->popup_next_serial) >= 0) {
+        memcpy(s->popup_rel, s->popup_next, sizeof(s->popup_rel));
+        s->popup_has_next = 0;
+        place_popups();
+    }
+    if (s->has_content && !s->popup_dismissed) map_popup(s);
+    else unmap_toplevel(s);
+}
+
+static void xdg_popup_destroy_req(struct wl_client *c, struct wl_resource *r) { wl_resource_destroy(r); }
+/* Accepted, nothing grabbed: input keeps going where it would (see map_popup). */
+static void xdg_popup_grab(struct wl_client *c, struct wl_resource *r, struct wl_resource *seat, uint32_t serial) {}
+static void xdg_popup_reposition(struct wl_client *c, struct wl_resource *r, struct wl_resource *positioner,
+                                 uint32_t token) {
+    struct surface *s = wl_resource_get_user_data(r);
+    struct positioner *p = wl_resource_get_user_data(positioner);
+    if (!s || !p || s->popup_dismissed) return;
+    positioner_place(p, s->popup_parent, s->popup_next);
+    xdg_popup_send_repositioned(r, token);
+    s->popup_next_serial = send_popup_configure(s, s->popup_next);
+    s->popup_has_next = 1;
+}
+static const struct xdg_popup_interface xdg_popup_impl = {
+    .destroy = xdg_popup_destroy_req,
+    .grab = xdg_popup_grab,
+    .reposition = xdg_popup_reposition,
+};
+static void xdg_popup_resource_destroy(struct wl_resource *r) {
+    struct surface *s = wl_resource_get_user_data(r);
+    if (!s) return;
+    s->xdg_popup = NULL;
+    popups_parent_gone(s);
+    unmap_toplevel(s);
+    s->popup_parent = NULL;
+    s->popup_has_next = 0;
+    s->placed = 0;
+    schedule_render();
+}
+
 static void xdg_surface_get_popup(struct wl_client *c, struct wl_resource *r, uint32_t id,
-                                  struct wl_resource *parent, struct wl_resource *positioner) {}
+                                  struct wl_resource *parent, struct wl_resource *positioner) {
+    struct surface *s = wl_resource_get_user_data(r);
+    struct wl_resource *pr = wl_resource_create(c, &xdg_popup_interface, wl_resource_get_version(r), id);
+    if (!pr) { wl_client_post_no_memory(c); return; }
+    wl_resource_set_implementation(pr, &xdg_popup_impl, s, xdg_popup_resource_destroy);
+    if (!s) return;
+    if (s->xdg_popup) wl_resource_set_user_data(s->xdg_popup, NULL); /* a stale one: detach it */
+    unmap_toplevel(s);
+    s->role = ROLE_POPUP;
+    s->xdg_popup = pr;
+    s->popup_parent = parent ? wl_resource_get_user_data(parent) : NULL; /* NULL parent is allowed */
+    if (s->popup_parent == s) s->popup_parent = NULL;
+    s->popup_dismissed = 0;
+    s->popup_has_next = 0;
+    s->placed = 0;
+    struct positioner *p = positioner ? wl_resource_get_user_data(positioner) : NULL;
+    struct positioner none = {0};
+    positioner_place(p ? p : &none, s->popup_parent, s->popup_rel);
+    send_popup_configure(s, s->popup_rel);
+}
 static void xdg_surface_set_geometry(struct wl_client *c, struct wl_resource *r,
-                                     int32_t x, int32_t y, int32_t w, int32_t h) {}
-static void xdg_surface_ack_configure(struct wl_client *c, struct wl_resource *r, uint32_t serial) {}
+                                     int32_t x, int32_t y, int32_t w, int32_t h) {
+    struct surface *s = wl_resource_get_user_data(r);
+    if (!s || w <= 0 || h <= 0) return;
+    s->pending_geom[0] = x; s->pending_geom[1] = y; s->pending_geom[2] = w; s->pending_geom[3] = h;
+    s->pending_geom_set = 1;
+}
+static void xdg_surface_ack_configure(struct wl_client *c, struct wl_resource *r, uint32_t serial) {
+    struct surface *s = wl_resource_get_user_data(r);
+    if (s) s->acked_serial = serial;
+}
 static const struct xdg_surface_interface xdg_surface_impl = {
     .destroy = xdg_surface_destroy_req,
     .get_toplevel = xdg_surface_get_toplevel,
@@ -1480,13 +1830,18 @@ static const struct xdg_surface_interface xdg_surface_impl = {
 };
 static void xdg_surface_resource_destroy(struct wl_resource *r) {
     struct surface *s = wl_resource_get_user_data(r);
-    if (s) s->xdg_surface = NULL;
+    if (!s) return;
+    s->xdg_surface = NULL;
+    s->geom_set = s->pending_geom_set = 0;
+    popups_parent_gone(s);
 }
 
 static void xdg_wm_base_destroy(struct wl_client *c, struct wl_resource *r) { wl_resource_destroy(r); }
 static void xdg_wm_base_create_positioner(struct wl_client *c, struct wl_resource *r, uint32_t id) {
-    struct wl_resource *p = wl_resource_create(c, &xdg_positioner_interface, wl_resource_get_version(r), id);
-    if (p) wl_resource_set_implementation(p, NULL, NULL, NULL);
+    struct positioner *pos = calloc(1, sizeof(*pos));
+    struct wl_resource *p = pos ? wl_resource_create(c, &xdg_positioner_interface, wl_resource_get_version(r), id) : NULL;
+    if (!p) { free(pos); wl_client_post_no_memory(c); return; }
+    wl_resource_set_implementation(p, &positioner_impl, pos, positioner_resource_destroy);
 }
 static void xdg_wm_base_get_xdg_surface(struct wl_client *c, struct wl_resource *r, uint32_t id,
                                         struct wl_resource *surf) {
@@ -2243,6 +2598,7 @@ static void render_scene(void) {
         g_scene_h = h;
     }
     if (g_desktop && !g_hide_shell) add_tree(&dl, g_desktop, 0, 0, 0);
+    place_popups();
     wl_list_for_each(s, &g_toplevels, toplevel_link) {
         if (g_desktop && !s->placed) continue; /* wait for its position */
         if (g_hide_shell && !strcmp(client_name(wl_resource_get_client(s->resource)), "explorer.exe")) continue;
@@ -2710,7 +3066,7 @@ static int focusable_window(const struct surface *s) {
 static struct surface *topmost_program_window(void) {
     struct surface *s;
     wl_list_for_each_reverse(s, &g_toplevels, toplevel_link)
-        if (s != g_desktop && !is_shell_window(s)) return s;
+        if (s != g_desktop && s->role == ROLE_TOPLEVEL && !is_shell_window(s)) return s;
     return NULL;
 }
 
@@ -3584,7 +3940,7 @@ struct wl_resource *banner_ime_target(void) {
     if (g_ime_click && g_ime_click->mapped) return g_ime_click->resource;
     struct wl_client *shell = g_desktop ? wl_resource_get_client(g_desktop->resource) : NULL;
     wl_list_for_each_reverse(s, &g_toplevels, toplevel_link)
-        if (!shell || wl_resource_get_client(s->resource) != shell) return s->resource;
+        if (s->role == ROLE_TOPLEVEL && (!shell || wl_resource_get_client(s->resource) != shell)) return s->resource;
     return NULL;
 }
 
@@ -3789,7 +4145,7 @@ int banner_wayland_run(void) {
     wl_display_init_shm(display); /* wl_shm global + pool/buffer handling */
     /* libdecor binds wl_output at 4; a lower version is a protocol error for the client. */
     wl_global_create(display, &wl_output_interface, 4, NULL, bind_output);
-    wl_global_create(display, &xdg_wm_base_interface, 1, NULL, bind_xdg_wm_base);
+    wl_global_create(display, &xdg_wm_base_interface, 3, NULL, bind_xdg_wm_base);
     wl_global_create(display, &zwp_linux_dmabuf_v1_interface, 4, NULL, bind_dmabuf);
     /* gamescope's Wayland backend refuses a seat older than 8. */
     wl_global_create(display, &wl_seat_interface, 9, NULL, bind_seat);

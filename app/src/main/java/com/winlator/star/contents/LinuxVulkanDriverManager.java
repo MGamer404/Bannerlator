@@ -197,7 +197,7 @@ public class LinuxVulkanDriverManager {
             icdBody.put("library_path", new File(dir, LIB_NAME).getAbsolutePath());
             icdBody.put("api_version", "1.1.274");
             icd.put("ICD", icdBody);
-            if (!FileUtils.writeString(new File(tmpDir, ICD_NAME), icd.toString(2))) throw new IOException("cannot write icd.json");
+            if (!FileUtils.writeString(new File(tmpDir, ICD_NAME), icd.toString(2).replace("\\/", "/"))) throw new IOException("cannot write icd.json");
 
             JSONObject meta = new JSONObject();
             meta.put("schemaVersion", 1);

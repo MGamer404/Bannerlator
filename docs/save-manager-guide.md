@@ -11,7 +11,7 @@
 3. [The three tiers: Cloud, Library, Container](#3-the-three-tiers-cloud-library-container)
 4. [Reading the status pills](#4-reading-the-status-pills)
 5. [Syncing your saves](#5-syncing-your-saves)
-6. [Auto-Collect: automatic backups on exit](#6-auto-collect-automatic-backups-on-exit)
+6. [Automatic sync: on launch and on exit](#6-automatic-sync-on-launch-and-on-exit)
 7. [Backups before you uninstall](#7-backups-before-you-uninstall)
 8. [Cloud honesty: when Steam Cloud isn't really there](#8-cloud-honesty-when-steam-cloud-isnt-really-there)
 9. [The universal custom-game vault](#9-the-universal-custom-game-vault)
@@ -123,23 +123,34 @@ A few sensible guardrails:
 
 ---
 
-## 6. Auto-Collect: automatic backups on exit
+## 6. Automatic sync: on launch and on exit
 
-You don't have to remember to back anything up. When you **close a game**, Bannerlator automatically snapshots its saves:
+You don't have to remember to back anything up. Bannerlator syncs a Steam game's saves around every launch:
 
-- **Steam-library games** → **Collected** into that game's local Library (Container → Library). This is a **local** snapshot only — **nothing is uploaded to Steam Cloud automatically**.
-- **Custom games** → snapshotted into the local **vault** (see [section 9](#9-the-universal-custom-game-vault)).
+- **Before the game starts:** it downloads your Steam Cloud saves into the Library, then puts them into the game **only if the cloud copy is newer** than what's already in the container. A newer save on your device is never overwritten. (Switch: **Steam games: auto-download from cloud on launch**, ON by default.)
+- **When the game closes:**
+  - **Steam-library games** are **Collected** into that game's local Library (Container → Library). (Switch: **Steam games: auto-collect on exit**, ON.)
+  - Then they are **uploaded to Steam Cloud** (Library → Cloud, additive, never deletes). (Switch: **Steam games: auto-upload to cloud on exit**, ON.) This step only runs **after you have accepted the one-time third-party cloud notice**. You see that notice the first time you use any cloud button, either on a game's detail page or in the Save Manager. Until then, closing a game only makes the local Collect.
+  - **Custom games** are snapshotted into the local **vault** (see [section 9](#9-the-universal-custom-game-vault)). (Switch: **Custom games: auto-back up on exit**, ON.)
 
-This runs **after** the game has fully closed and flushed its files, and it's **bounded** (capped at a few seconds) and fully guarded so it can never hang or interfere with exiting a game.
+All of this runs **after** the game has fully closed and flushed its files. Each step has a time limit and catches its own errors, so it can never hang or interfere with exiting a game. If the Steam connection is reconnecting at that moment, Bannerlator waits a few seconds for it to sign back in before it gives up.
 
-### Turning Auto-Collect on or off
+### What gets collected
 
-Both auto-backup behaviors are controlled from the **Settings cog** in the Save Manager header. Tap it to open **Save Manager settings**, with two switches (both **ON** by default):
+Collect only takes the game's save files, never a whole folder:
 
-- **Steam games: auto-collect on exit** — *"Snapshot Steam-library saves to your local Library when a game exits."*
-- **Custom games: auto-back up on exit** — *"Snapshot custom-import saves to the local vault when a game exits."*
+- files the Library already tracks for this game (each file itself, not its folder);
+- the game's **Steam API save folder**, where games that save through Steam keep their files (Goldberg: `AppData/Roaming/GSE Saves/<appId>/remote`; SteamLite: `Steam/userdata/<your id>/<appId>/remote` inside the prefix);
+- the files covered by the game's **Steam Cloud rules** (the folders and file patterns the game declares to Steam, e.g. Monster Train 2: `AppData/LocalLow/Shiny Shoe/MonsterTrain2`);
+- for a game with **no** Steam Cloud, a name match on the usual save folders, so its Library still works as a local backup.
 
-When you **turn a switch OFF**, Bannerlator asks you to confirm with a **Continue / Cancel** warning explaining that saves won't be captured automatically anymore (Cancel leaves it ON). When you **turn one ON**, you get a brief confirmation. The setting only changes when you actually confirm.
+### SteamLite (Real Steam) launches
+
+A game launched with **SteamLite** runs the genuine Steam client, which syncs Steam Cloud **by itself** at launch and exit. Bannerlator therefore skips its own cloud download and upload for those launches, so the two never write the same files at the same time. The local Collect on exit still runs.
+
+### Turning the switches on or off
+
+All switches live in the **Settings** section of the Save Manager. When you **turn a switch OFF**, Bannerlator asks you to confirm with a **Continue / Cancel** warning explaining what will no longer happen automatically (Cancel leaves it ON). When you **turn one ON**, you get a brief confirmation. The setting only changes when you actually confirm.
 
 > 💡 **Tip.** Leaving these ON is the safest choice for almost everyone. Turn them off only if you specifically want to manage backups by hand.
 
@@ -159,7 +170,7 @@ Not every Steam game actually keeps saves in Steam Cloud. Some older titles will
 
 Bannerlator refuses to lie about this. It checks cloud support **two ways**:
 
-1. **Before uploading (the UFS/PICS check).** It reads the game's declared cloud configuration from Steam's product info (`ufs/savefiles`). If the game declares **no** save-file patterns, it has no cloud store — Bannerlator stops and tells you plainly instead of pretending.
+1. **Before uploading (the UFS/PICS check).** It reads the game's declared cloud configuration from Steam's product info (`ufs`). A game has a cloud store if it declares save-file rules, **or** a cloud quota / file limit, **or** its cloud already holds files. Games that save through the Steam API (Left 4 Dead 2, Counter-Strike: Source, …) have a quota but no save-file rules, and they count. Only a game with none of these has no cloud store. Bannerlator then stops and tells you plainly instead of pretending.
 
 2. **After uploading (the empty-manifest check).** Even if a game *claims* cloud support, Bannerlator re-checks the cloud right after a successful upload. If it committed files but the cloud comes back **completely empty**, that's the fingerprint of a game that doesn't actually retain saves.
 
@@ -251,7 +262,15 @@ Everything the Save Manager creates is stored in plain, browsable folders on you
 
 Steam and custom saves are kept **completely separate** — Steam saves live under an App-ID folder, custom saves under a game-name folder, so they never overlap.
 
-Inside a container, the actual live save files sit under the game's Wine user profile (for example `…/.wine/drive_c/users/xuser/…`) and the game's install directory. The Save Manager knows how to translate between Steam's cloud path layout and those container locations, and it only ever touches recognized save roots.
+Inside a container, the actual live save files sit under the game's Wine user profile (for example `…/.wine/drive_c/users/xuser/…`), the game's Steam API save folder, and sometimes the game's install directory. The Save Manager knows how to translate between Steam's cloud path layout and those container locations, and it only ever touches recognized save roots.
+
+Library folders use Steam's own cloud names, with the root fused onto the path, e.g. `%WinMyDocuments%Electronic Arts/The Sims 4/…` or `%WinAppDataLocalLow%Shiny Shoe/MonsterTrain2/…`. Files saved through the Steam API keep their plain names, e.g. `cfg/config.cfg`. Older builds also wrote a second spelling (`%WinMyDocuments%/Electronic Arts/…`). Those copies are merged automatically, and the newer file wins. Anything that has to be moved out of the Library (an older duplicate, or game files an older version swept in) goes to:
+
+```
+Bannerlator/SteamCloudSaves/_moved-aside/<appId>/<date-time>/
+```
+
+Nothing there is ever deleted by the app.
 
 ---
 
@@ -263,6 +282,7 @@ The Save Manager is deliberately conservative:
 - **Restore targets a container you pick.** Nothing is restored anywhere until you choose the destination.
 - **It only touches recognized save locations.** Path translation rejects anything trying to escape its mapped folder (no "`..`" traversal), and files it can't map are skipped, never guessed.
 - **Auto-backups can't break game-exit.** They run after the game closes, are time-bounded, and swallow their own errors.
+- **Nothing is deleted from your Library either.** Merged duplicates and non-save files are moved to `_moved-aside/`, never removed.
 - **Snapshots are written atomically.** A custom-game snapshot is written to a temporary file and renamed into place, so a killed process can never leave a half-written backup where your last good one was.
 - **The instant view never hits the network.** Opening the screen is a local read; cloud calls only happen when you explicitly sync or pull-to-refresh.
 
@@ -302,4 +322,4 @@ Steam saves: `Bannerlator/SteamCloudSaves/<appId>/`. Custom saves: `Downloads/Ba
 
 ---
 
-*This guide reflects the **Save Manager v2** as shipped in the Bannerlator **2.9.3** release.*
+*This guide reflects the **Save Manager v2** as shipped in the Bannerlator **2.9.3** release, updated for the save-sync fixes after **3.1.4** (cloud detection for Steam API games, one cloud name per save, Collect scoped to save files, SteamLite left to the Steam client).*

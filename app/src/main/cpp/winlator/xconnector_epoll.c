@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <errno.h>
 #include <sys/epoll.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
@@ -116,6 +117,18 @@ Java_com_winlator_star_xconnector_ClientSocket_write(JNIEnv *env, jobject obj, j
                                                 jint length) {
     char *dataAddr = (*env)->GetDirectBufferAddress(env, data);
     return write(fd, dataAddr, length);
+}
+
+// Never blocks: returns the bytes written, or -errno (-EAGAIN when the client's socket is full
+// because it has stopped reading). Lets the X server queue output instead of stalling the
+// thread that produced it (the UI thread, for touch input).
+JNIEXPORT jint JNICALL
+Java_com_winlator_star_xconnector_ClientSocket_writeNonBlocking(JNIEnv *env, jobject obj, jint fd, jobject data,
+                                                                jint offset, jint length) {
+    char *dataAddr = (*env)->GetDirectBufferAddress(env, data);
+    if (!dataAddr) return -EINVAL;
+    ssize_t n = send(fd, dataAddr + offset, length, MSG_DONTWAIT | MSG_NOSIGNAL);
+    return n >= 0 ? (jint)n : -errno;
 }
 
 JNIEXPORT jint JNICALL

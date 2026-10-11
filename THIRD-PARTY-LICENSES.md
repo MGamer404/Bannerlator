@@ -104,6 +104,10 @@ SOFTWARE.
 
 Standard Gradle dependencies, each under its own license (Apache-2.0 unless noted): Jetpack Compose, AndroidX (appcompat, activity, lifecycle, navigation, preference, recyclerview, fragment), Google Material Components, [Coil](https://github.com/coil-kt/coil) (Apache-2.0), Retrofit / OkHttp / Okio (Apache-2.0), Gson (Apache-2.0), [zstd-jni](https://github.com/luben/zstd-jni) (BSD-2-Clause), Apache Commons Compress (Apache-2.0), `org.tukaani:xz` (public domain), Conscrypt (Apache-2.0), ZXing (Apache-2.0).
 
+## 5b. Winlator X server GLX / Composite extensions (MIT)
+
+The pure-Java X server's **`GLXExtension`** and **`XComposite`** extensions, and the associated GLX error classes (`GLXError`, `GLXBad{Context,Drawable,FBConfig,Pixmap,Window}`), are ported from **[Pipetto-crypto/winlator](https://github.com/Pipetto-crypto/winlator)** (branch `winlator_bionic`, `com.winlator.cmod.xserver`), original work **Copyright (c) 2023 BrunoSX and contributors**, under the **MIT License**. Adapted for `com.winlator.star`: package rename and MAJOR_OPCODE relocation (GLX `-105`->`-106`, Composite `-106`->`-107`, because `-105` is already taken by our RandrExtension) and GLX error base `+3`->`+4`. The `CreateContextAttribsARB` / `SetClientInfoARB` handling and the `GLXBadProfileARB` error come from the same repository (commit `60c291b9`, same copyright and license). They provide the server-side GLX fbconfig/context handshake a DRI-mode Mesa libGL needs on X11; rendered frames still travel our existing DRI3/Present path. Opt-in only: registered when a container or shortcut sets `BANNER_X11_GLX=1`.
+
 ---
 
 ## 6. Bannerlator's own contributions

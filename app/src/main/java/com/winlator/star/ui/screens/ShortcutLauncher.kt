@@ -34,6 +34,7 @@ import com.winlator.star.store.GoldbergMode
 import com.winlator.star.store.GoldbergPatcher
 import com.winlator.star.store.SteamDatabase
 import com.winlator.star.store.SteamGameUpdater
+import com.winlator.star.store.SteamHostComponent
 import com.winlator.star.store.SteamLiteComponent
 import com.winlator.star.store.SteamLoginActivity
 import com.winlator.star.store.SteamPrefs
@@ -209,6 +210,28 @@ class ShortcutLauncher internal constructor(
         }
     }
 
+    // App Steam launch (Option B): Valve's client set for the app's session host on demand (from
+    // Valve's CDN), then the same pre-flight dialog — its client step checks Valve's manifest instead
+    // of the SteamLite catalog (PreflightRequest.clientPackage, read off the shortcut's launchMode).
+    internal fun launchWithAppSteam(s: Shortcut) {
+        if (!SteamHostComponent.isInstalled(context)) {
+            componentDownloadFor = s
+            componentDownloadLabel = "Headless Steam (Valve Steam client)"
+            componentDownloadProgress = 0f
+            SteamHostComponent.downloadAsync(
+                context,
+                { f -> componentDownloadProgress = f },
+                { ok, msg ->
+                    componentDownloadFor = null
+                    if (ok) preflightFor = s
+                    else Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                },
+            )
+        } else {
+            preflightFor = s
+        }
+    }
+
     // The single launch choke point for the game grid/list. Every game opens the source-adaptive
     // launch-method popup first (Steam → SteamLite/Goldberg/Raw; Epic/GOG/Custom → Raw-only), UNLESS the
     // user already picked a method AND ticked "Remember" for it — a remembered pick launches DIRECTLY via
@@ -264,6 +287,8 @@ class ShortcutLauncher internal constructor(
         when {
             remembered && shortcut.getExtra("launchMode", "") == "RealSteam" && isSteamOriginShortcut(shortcut) ->
                 launchWithSteamLite(shortcut)
+            remembered && shortcut.getExtra("launchMode", "") == "AppSteam" && isSteamOriginShortcut(shortcut) ->
+                launchWithAppSteam(shortcut)
             remembered -> launchShortcutNow(activity, shortcut)
             else -> launchChoiceFor = shortcut
         }
@@ -276,7 +301,11 @@ class ShortcutLauncher internal constructor(
         val pending = SteamSessionManager.takePendingRelaunch(context) ?: return
         val s = shortcuts.firstOrNull { it.file.path == pending.shortcutPath } ?: return
         when (pending.mode) {
-            SteamSessionManager.RelaunchMode.STEAMLITE -> launchWithSteamLite(s)
+            SteamSessionManager.RelaunchMode.STEAMLITE -> {
+                s.putExtra("launchMode", "RealSteam"); s.saveData()
+                launchWithSteamLite(s)
+            }
+            SteamSessionManager.RelaunchMode.APPSTEAM -> launchWithAppSteam(s)
             SteamSessionManager.RelaunchMode.GOLDBERG -> {
                 SteamPrefs.init(context)
                 val gm = SteamPrefs.getGoldbergMode(steamAppIdOf(s)).let { if (it == GoldbergMode.OFF) GoldbergMode.REGULAR else it }
@@ -403,19 +432,22 @@ fun ShortcutLaunchDialogs(launcher: ShortcutLauncher, onRemove: (Shortcut) -> Bo
             // dismiss the sheet first (so no dialog is layered behind the ModalBottomSheet's window).
             onUpdateFiles = { launcher.launchChoiceFor = null; launcher.checkForUpdatesThenOffer(s) },
             onVerifyFiles = { launcher.launchChoiceFor = null; launcher.runSteamMaintenance(s, verify = true) },
-            onLaunch = { mode, goldbergMode, remember, controllerPassthrough, vacLaunch ->
+            onLaunch = { mode, goldbergMode, remember, controllerPassthrough, vacLaunch, steamInput ->
                 // Persist the choice on the shortcut's [Extra Data] so a remembered pick skips the popup
                 // next time (contract literals: launchMode ∈ RealSteam/Goldberg/Raw, launchModeRemembered="1").
                 s.putExtra("launchMode", mode)
                 s.putExtra("launchModeRemembered", if (remember) "1" else "0")
                 // Per-game "Controller passthrough" (read only on RealSteam launches; inert otherwise).
                 s.putExtra("controllerPassthrough", if (controllerPassthrough) "1" else "0")
+                // Per-game "Steam Input" (SteamLite only; the agent configures the client's controller layer).
+                s.putExtra("steamInput", if (steamInput) "1" else "0")
                 // Per-game "Requires secure (VAC) launch" override: "" = follow app-info detection, "1"/"0".
                 s.putExtra("steamVacLaunch", vacLaunch)
                 s.saveData()
                 launcher.launchChoiceFor = null
                 when (mode) {
                     "Goldberg" -> launcher.launchWithGoldberg(s, goldbergMode ?: GoldbergMode.REGULAR)
+                    "AppSteam" -> launcher.launchWithAppSteam(s)
                     "Raw" -> {
                         // Raw: run the game's .exe directly with no Steam layer (Epic/GOG/Custom, or a
                         // Steam game the user chose to run raw). The launchMode="Raw" extra is inert to the
@@ -447,6 +479,8 @@ fun ShortcutLaunchDialogs(launcher: ShortcutLauncher, onRemove: (Shortcut) -> Bo
                 installDir = installDir,
                 gameName = s.name,
                 pullCloudSaves = savePrefs.getBoolean("auto_download_steam_on_launch", true),
+                clientPackage = if (s.getExtra("launchMode", "") == "AppSteam") SteamSessionManager.ClientPackage.APP_STEAM
+                                else SteamSessionManager.ClientPackage.STEAMLITE,
             ),
             onLaunch = { launcher.preflightFor = null; launchShortcutNow(activity, s, preflightDone = true) },
             onDismiss = { launcher.preflightFor = null },

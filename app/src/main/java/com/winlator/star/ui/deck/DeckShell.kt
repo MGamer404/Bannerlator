@@ -258,17 +258,20 @@ private fun DeckShellContent(
     }
     val account = AccountUiBus.account
 
-    // In-app update banner: only when a newer stable exists, notify is on, and this version wasn't skipped.
-    var bannerUpdate by remember { mutableStateOf<UpdateManager.UpdateInfo?>(null) }
-    var bannerDismissed by remember { mutableStateOf(false) }
+    // In-app update pill, as in Classic: a newer release exists, notify is on, and this version was not
+    // dismissed this session. View slides it out and opens the highlights; Update now runs the download card.
+    var pillUpdate by remember { mutableStateOf<UpdateManager.UpdateInfo?>(null) }
+    var pillVisible by remember { mutableStateOf(false) }
+    var highlightsFor by remember { mutableStateOf<UpdateManager.UpdateInfo?>(null) }
     LaunchedEffect(Unit) {
         UpdateManager.check(context) { info ->
             (context as? MainActivity)?.runOnUiThread {
                 if (info != null && info.isNewer &&
                     UpdateManager.isNotifyEnabled(context) &&
-                    info.versionCode != UpdateManager.skippedVersionCode(context)
+                    info.versionCode != UpdateManager.dismissedThisSession
                 ) {
-                    bannerUpdate = info
+                    pillUpdate = info
+                    pillVisible = true
                 }
             }
         }
@@ -464,18 +467,6 @@ private fun DeckShellContent(
                             )
                         }
 
-                        val upd = bannerUpdate
-                        if (upd != null && !bannerDismissed) {
-                            DeckUpdateBanner(
-                                versionName = upd.versionName,
-                                onUpdate = { (context as? MainActivity)?.let { UpdateManager.downloadAndInstall(it, upd) {} } },
-                                onSkip = {
-                                    bannerDismissed = true
-                                    UpdateManager.skipVersion(context, upd.versionCode)
-                                },
-                            )
-                        }
-
                         val pageTitle = deckActions.pageInfo.value
                         if (rails) {
                             // One slim line: the page's title (description behind the info button) and the screen's own actions.
@@ -561,6 +552,27 @@ private fun DeckShellContent(
                                     },
                                 )
                             }
+                            // Update pill: over the content, under the title line / top bar (Classic's place relative to its top bar).
+                            val upd = pillUpdate
+                            if (upd != null && !searchOpen) {
+                                com.winlator.star.ui.UpdatePill(
+                                    info = upd,
+                                    visible = pillVisible,
+                                    onDismiss = {
+                                        pillVisible = false
+                                        UpdateManager.dismissedThisSession = upd.versionCode
+                                    },
+                                    onView = {
+                                        pillVisible = false
+                                        UpdateManager.dismissedThisSession = upd.versionCode
+                                        scope.launch {
+                                            kotlinx.coroutines.delay(com.winlator.star.ui.UPDATE_PILL_EXIT_MS)
+                                            highlightsFor = upd
+                                        }
+                                    },
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 12.dp),
+                                )
+                            }
                         }
                         // App-wide minimized progress pill for a running archive unpack (renders nothing when idle).
                         com.winlator.star.ui.UnpackProgressPill()
@@ -594,6 +606,19 @@ private fun DeckShellContent(
                     onAbout = { searchOpen = false; onAbout() },
                 )
             }
+
+            highlightsFor?.let { info ->
+                com.winlator.star.ui.UpdateHighlightsDialog(
+                    info = info,
+                    onLater = { highlightsFor = null },
+                    onUpdate = {
+                        highlightsFor = null
+                        (context as? MainActivity)?.let { UpdateManager.downloadAndInstall(it, info) {} }
+                    },
+                )
+            }
+            // The download card, whichever button started the download (pill, highlights, Settings, About).
+            com.winlator.star.ui.UpdateHost()
         }
     }
 }
@@ -1300,31 +1325,6 @@ private fun DeckPageBar(
         }
         Spacer(Modifier.weight(1f))
         Row(verticalAlignment = Alignment.CenterVertically, content = actions)
-    }
-}
-
-@Composable
-private fun DeckUpdateBanner(versionName: String, onUpdate: () -> Unit, onSkip: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(14.dp)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clip(shape)
-            .background(cs.primary.copy(alpha = 0.18f))
-            .padding(start = 14.dp),
-    ) {
-        Text(
-            text = "Update available — V $versionName",
-            color = cs.onSurface,
-            fontWeight = FontWeight.Bold,
-            fontSize = 13.5.sp,
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(onClick = onUpdate) { Text("Update", color = cs.primary, fontWeight = FontWeight.ExtraBold) }
-        TextButton(onClick = onSkip) { Text("Skip", color = cs.onSurfaceVariant) }
     }
 }
 

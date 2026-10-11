@@ -17,6 +17,17 @@
 #include <poll.h>
 #include <vector>
 
+// X cursor pixels are 0xAARRGGBB words (B,G,R,A in memory); the cursor buffer is R8G8B8A8, so
+// red and blue swap on the way in. Two-colour core cursors are mostly black/white, which hid this
+// until RENDER brought full-colour cursors.
+static inline void copyCursorRowBgraToRgba(uint32_t* dst, const uint32_t* src, int w) {
+    for (int x = 0; x < w; ++x) {
+        uint32_t p = src[x];
+        dst[x] = (p & 0xff00ff00u) | ((p & 0xffu) << 16) | ((p >> 16) & 0xffu);
+    }
+}
+
+
 #define LOG_TAG "ASurfaceRenderer"
 
 #ifndef ENABLE_ASR_LOGGING
@@ -220,7 +231,7 @@ void ASurfaceRendererContext::scanoutSetCursorImage(void* pixels, short w, short
     if (stride <= 0)
         stride = w;
 
-    uint32_t srcStride = (uint32_t)w;
+    uint32_t srcStride = (uint32_t)stride;
     if (scanoutCursorBuf && (scanoutCursorBufW != w || scanoutCursorBufH != h)) {
         if (scanoutCursorFence >= 0) { close(scanoutCursorFence); scanoutCursorFence = -1; }
         AHardwareBuffer_release(scanoutCursorBuf);
@@ -241,12 +252,8 @@ void ASurfaceRendererContext::scanoutSetCursorImage(void* pixels, short w, short
     if (AHardwareBuffer_lock(scanoutCursorBuf, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, nullptr, &dst) != 0) return;
     const uint32_t* src = reinterpret_cast<const uint32_t*>(pixels);
     auto* dstPx = reinterpret_cast<uint32_t*>(dst);
-    if (dstStride == (uint32_t)w && srcStride == (uint32_t)w) {
-        memcpy(dstPx, src, (size_t)w * h * 4);
-    } else {
-        for (int row = 0; row < h; ++row)
-            memcpy(dstPx + (size_t)row * dstStride, src + (size_t)row * srcStride, (size_t)w * 4);
-    }
+    for (int row = 0; row < h; ++row)
+        copyCursorRowBgraToRgba(dstPx + (size_t)row * dstStride, src + (size_t)row * srcStride, w);
     if (scanoutCursorFence >= 0) { close(scanoutCursorFence); scanoutCursorFence = -1; }
     AHardwareBuffer_unlock(scanoutCursorBuf, &scanoutCursorFence);
     void* tx = ST_CREATE();

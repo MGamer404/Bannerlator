@@ -202,9 +202,13 @@ class ShortcutActions internal constructor(
  * game menu asks this, so it always lists what the classic menu lists.
  */
 internal fun gameMenuOffers(action: GameMenuAction, shortcut: Shortcut): Boolean {
-    val wine = !AndroidGames.isAndroidEntry(shortcut)
+    // Settings: every game but Android ones (the Linux Steam entry's editor shows only Linux rows).
+    // The rest are Wine-container actions, never offered for the Linux Steam entry or Android games.
+    val hasSettings = !AndroidGames.isAndroidEntry(shortcut)
+    val wine = isWineEntry(shortcut)
     return when (action) {
-        GameMenuAction.SETTINGS, GameMenuAction.CLONE, GameMenuAction.COPY_TO_DRIVE_C, GameMenuAction.CHANGE_EXE,
+        GameMenuAction.SETTINGS -> hasSettings
+        GameMenuAction.CLONE, GameMenuAction.COPY_TO_DRIVE_C, GameMenuAction.CHANGE_EXE,
         GameMenuAction.EXPORT, GameMenuAction.COMMUNITY_CONFIGS, GameMenuAction.VIEW_LOGS -> wine
         GameMenuAction.CLOUD_SAVES -> wine && isSteamOriginShortcut(shortcut)
         GameMenuAction.BACKUP_SAVES, GameMenuAction.RESTORE_SAVES -> wine && isCustomShortcut(shortcut)

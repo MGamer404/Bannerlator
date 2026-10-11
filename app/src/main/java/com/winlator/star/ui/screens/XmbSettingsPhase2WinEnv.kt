@@ -25,6 +25,7 @@ import com.winlator.star.components.DependencyDetector
 import com.winlator.star.components.PrefixInstalledDetector
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.KeyValueSet
+import com.winlator.star.core.MediaDecoder
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.WinePath
 import com.winlator.star.ui.components.DllOverrides
@@ -202,19 +203,26 @@ internal fun xmbWinComponentsMenu(xmb: XmbScope, shortcut: Shortcut): XmbMenu {
         val all = entries().distinctBy { it.first }
         val directx = all.filter { it.first.startsWith("direct") }
         val general = all.filterNot { it.first.startsWith("direct") }
-        fun addChoice(e: Pair<String, Int>) {
+        // Media backend rows: not DLL overrides, their own option labels (see MediaDecoder).
+        val codecs = general.filter { MediaDecoder.isCodecKey(it.first) }
+        val generalOnly = general.filterNot { MediaDecoder.isCodecKey(it.first) }
+        fun addChoice(e: Pair<String, Int>, opts: List<String> = P2_WINCOMP_OPTIONS) {
             rows += XmbRow.Choice(
-                "wc:${e.first}", labelOf(e.first), Icons.Filled.Extension, P2_WINCOMP_OPTIONS,
-                P2_WINCOMP_OPTIONS.getOrElse(e.second) { P2_WINCOMP_OPTIONS[0] },
-            ) { v -> select(e.first, P2_WINCOMP_OPTIONS.indexOf(v).coerceAtLeast(0)) }
+                "wc:${e.first}", labelOf(e.first), Icons.Filled.Extension, opts,
+                opts.getOrElse(e.second) { opts[0] },
+            ) { v -> select(e.first, opts.indexOf(v).coerceAtLeast(0)) }
         }
         if (directx.isNotEmpty()) {
             rows += XmbRow.Header("hDirectX", "DirectX")
             directx.forEach { addChoice(it) }
         }
-        if (general.isNotEmpty()) {
+        if (generalOnly.isNotEmpty()) {
             rows += XmbRow.Header("hGeneral", "General")
-            general.forEach { addChoice(it) }
+            generalOnly.forEach { addChoice(it) }
+        }
+        if (codecs.isNotEmpty()) {
+            rows += XmbRow.Header("hCodecs", "Codecs")
+            codecs.forEach { addChoice(it, MediaDecoder.optionsFor(it.first).toList()) }
         }
         if (all.isEmpty()) rows += XmbRow.Info("noComponents", "No Windows components configured", Icons.Filled.Info)
         rows

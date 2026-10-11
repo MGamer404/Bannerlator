@@ -87,6 +87,7 @@ import com.winlator.star.ui.screens.ShortcutActionDialogs
 import com.winlator.star.ui.screens.ShortcutLaunchDialogs
 import com.winlator.star.ui.screens.ShortcutsViewModel
 import com.winlator.star.ui.screens.gameMenuOffers
+import com.winlator.star.ui.screens.isWineEntry
 import com.winlator.star.ui.screens.isSteamOriginShortcut
 import com.winlator.star.ui.screens.rememberShortcutActions
 import com.winlator.star.ui.screens.rememberShortcutLauncher
@@ -419,7 +420,8 @@ private fun gameMenuGroups(s: Shortcut): List<List<Pair<String?, GameMenuEntry>>
         listOf(ENTRY_PLAY to GameMenuEntry("Play", if (isAndroid) "Opens the app, as Android's own launcher would." else "Same launch path from every view: launch options, Steam pre-flight, Goldberg, cloud-save sync.", null)),
         listOfNotNull(
             e(GameMenuAction.SETTINGS, "Display, graphics, controls and more, for this game only."),
-            if (isAndroid) null else ENTRY_CONTAINER to GameMenuEntry("Container settings", "Opens the container this game runs in.", null),
+            // Android games and the Linux Steam entry have no Wine container to open.
+            if (!isWineEntry(s)) null else ENTRY_CONTAINER to GameMenuEntry("Container settings", "Opens the container this game runs in.", null),
         ),
         listOfNotNull(
             e(GameMenuAction.GAME_DETAILS, "Name, Steam link, genres, year, description."),

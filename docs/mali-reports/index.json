@@ -1,5 +1,45 @@
 [
   {
+    "id": "2026-10-11T14-21-44-be59d9",
+    "created": "2026-10-11T14:21:44.456Z",
+    "reporter": "anonymous",
+    "device": "Redmi K Pad (红米 K Pad)",
+    "gpu": "Mali-G925-Immortalis MC12",
+    "game": "Mewgenics",
+    "symptom": "Graphical glitches (corruption, flicker, missing textures)",
+    "logs": 0
+  },
+  {
+    "id": "2026-10-11T14-21-21-9dfb65",
+    "created": "2026-10-11T14:21:21.669Z",
+    "reporter": "",
+    "device": "",
+    "gpu": "Mali-G925-Immortalis MC12",
+    "game": "",
+    "symptom": "Graphical glitches (corruption, flicker, missing textures)",
+    "logs": 0
+  },
+  {
+    "id": "2026-10-08T16-38-15-c8aadb",
+    "created": "2026-10-08T16:38:15.100Z",
+    "reporter": "",
+    "device": "Infinix X6858",
+    "gpu": "Mali-G57 MC2 (driver r54p1, Vulkan 1.3.303, no BCn, maxImageDimension2D 16384)",
+    "game": "Hospital Seduction (Unity 2022.3.25f1, D3D11, URP)",
+    "symptom": "Crashes / closes to home",
+    "logs": 0
+  },
+  {
+    "id": "2026-10-07T20-27-48-4edce9",
+    "created": "2026-10-07T20:27:48.177Z",
+    "reporter": "MR.360",
+    "device": "INFINIX GT30 PRO",
+    "gpu": "Mali-G615 MC6",
+    "game": "gta4",
+    "symptom": "Black screen (no image)",
+    "logs": 0
+  },
+  {
     "id": "2026-09-27T09-19-49-af6469",
     "created": "2026-09-27T09:19:49.024Z",
     "reporter": "Simon",

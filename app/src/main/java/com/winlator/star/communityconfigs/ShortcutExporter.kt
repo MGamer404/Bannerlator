@@ -98,6 +98,16 @@ object ShortcutExporter {
             com.winlator.star.core.SyncSupport.requestedMode(
                 container?.getExtra(com.winlator.star.core.SyncMode.EXTRA), container?.getEnvVars(),
                 shortcut.getExtra(com.winlator.star.core.SyncMode.EXTRA), shortcut.getExtra("envVars")) ?: "")
+        // Fast OpenGL: effective = this game's override, else the container's switch (default on).
+        put(effective, com.winlator.star.core.FastOpenGL.EXTRA,
+            if (com.winlator.star.core.FastOpenGL.requested(
+                    container?.getExtra(com.winlator.star.core.FastOpenGL.EXTRA),
+                    shortcut.getExtra(com.winlator.star.core.FastOpenGL.EXTRA))) "1" else "0")
+        // Show OpenGL FPS / OpenGL vsync off: the same effective resolve (default off).
+        for (sw in listOf(com.winlator.star.core.FastOpenGL.FPS_HUD, com.winlator.star.core.FastOpenGL.VSYNC_OFF)) {
+            put(effective, sw.extra,
+                if (sw.requested(container?.getExtra(sw.extra), shortcut.getExtra(sw.extra))) "1" else "0")
+        }
 
         // Community-config coverage pass (2026-07). Container-level settings resolve EFFECTIVE exactly
         // as dxwrapperConfig/screenSize above do — shortcut override via orDefault, else the container
@@ -125,6 +135,8 @@ object ShortcutExporter {
         put(effective, "startupServices", orDefault(shortcut, "startupServices", container?.getStartupServices()))
         // Per-game upscaler override — a sticky extra on both shortcut and container (no dedicated getter).
         put(effective, "scalingMode", orDefault(shortcut, "scalingMode", container?.getExtra("scalingMode")))
+        // Force SSBS — effective shortcut-or-container, resolved to 1/0 like the launcher does.
+        put(effective, "forceSsbs", orDefault(shortcut, "forceSsbs", container?.let { if (it.isForceSsbs()) "1" else "0" }))
 
         val device = Build.MANUFACTURER + " " + Build.MODEL
         val soc = DeviceIdentity.gpu(context) ?: DeviceIdentity.soc()

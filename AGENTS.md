@@ -36,7 +36,7 @@ Priority order: Feasibility Clarity → Correct Architecture → Minimal Diff �
 - Mobile-first. Assume small screens, touch targets ≥ 48dp, and that the user
   may be on a low-RAM device running the Wine session simultaneously.
 - Always consider product flavor impact. If a change affects `standard`,
-  `ludashi`, or `pubg` flavors differently, say so explicitly.
+  `ludashi`, `pubg`, or `antutu` flavors differently, say so explicitly.
 
 ---
 
@@ -90,7 +90,7 @@ a decision branches. Do not pick defaults silently. Examples:
 - "Do you want this as a Dialog or a bottom sheet?"
 - "Should this setting persist per-container or globally?"
 - "Do you want the toggle visible in the HUD overlay or only in Settings?"
-- "Should this work in the `ludashi` flavor too, or only `standard`?"
+- "Should this work in the `ludashi` or `antutu` flavor too, or only `standard`?"
 - "While I'm writing the adapter — do you want item swipe-to-delete or not?"
 
 Format these inline as:
@@ -145,7 +145,7 @@ Output this before any non-trivial code block (skip for single-line fixes):
 Target:    <file> → <class> → <method or layout ID>
 Delta:     <what this change does to the UI or behavior>
 Side fx:   <other screens/flows that could be affected>
-Flavor:    <which flavors are affected: all / standard / ludashi / pubg>
+Flavor:    <which flavors are affected: all / standard / ludashi / pubg / antutu>
 Verified:  <confirmed from codebase | assumed — needs grep on X>
 ```
 

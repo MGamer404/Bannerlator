@@ -51,10 +51,10 @@ public final class SteamLiteLogCollector {
     private static final String[] MARKERS = { "steamlite.version", ".steamlite_version", "steam.exe" };
 
     /** Per Steam log: how much of its (accumulating) tail to carry, and the head cap on wine_debug. */
-    private static final long STEAM_LOG_TAIL_BYTES = 256L * 1024;
+    static final long STEAM_LOG_TAIL_BYTES = 256L * 1024;
     private static final long WINE_SCAN_TAIL_BYTES = 4L * 1024 * 1024;
     /** The agent's own log is small and rewritten each run; a modest tail covers the whole file. */
-    private static final long LAUNCHER_LOG_TAIL_BYTES = 256L * 1024;
+    static final long LAUNCHER_LOG_TAIL_BYTES = 256L * 1024;
     /** Most recent engine-log lines folded into the bundle (Rust engine only). */
     private static final int ENGINE_LINES_MAX = 400;
     // Exact "watching ... for exit (<path>)" suffixes from the agent's launch log; the "for exit ("
@@ -64,7 +64,7 @@ public final class SteamLiteLogCollector {
     private static final long DX_SCAN_TAIL_BYTES   = 1L * 1024 * 1024;
 
     /** The Steam logs we include, in the debug-flow order the summary reads top-to-bottom. */
-    private static final String[][] INCLUDED = {
+    static final String[][] INCLUDED = {
             { "connection_log.txt",     "login & network" },
             { "gameprocess_log.txt",    "game launch/exit" },
             { "remote_connections.txt", "game networking / P2P" },
@@ -124,8 +124,22 @@ public final class SteamLiteLogCollector {
      */
     public static void collect(Context context, File driveC, File perGameLogDir,
                                String gameName, int appId, Info info, List<String> agentEvents) {
+        collect(context, driveC, perGameLogDir, gameName, appId, info, agentEvents, null);
+    }
+
+    /**
+     * As {@link #collect(Context, File, File, String, int, Info, List)}, plus the App Steam session
+     * host's log ({@code bl-steam-host} stdout — {@link com.winlator.star.store.AppSteamLauncher.Plan#hostLog})
+     * for a {@code launchMode=AppSteam} launch. When given, the bundle is written even without a
+     * SteamLite marker in the prefix (App Steam stages no agent), the host log rides along as its own
+     * redacted section, and the host's Valve client logs ({@code <host HOME>/Steam/logs}) are included.
+     */
+    public static void collect(Context context, File driveC, File perGameLogDir,
+                               String gameName, int appId, Info info, List<String> agentEvents,
+                               File appSteamHostLog) {
         try {
             if (driveC == null || perGameLogDir == null) return;
+            final boolean appSteam = appSteamHostLog != null;
 
             // A Steam account NAME isn't pattern-detectable — the scrub can only strip it by exact
             // match against registered secrets. This collector runs on the game-launch path, where
@@ -142,7 +156,7 @@ public final class SteamLiteLogCollector {
             } catch (Throwable ignored) {}
 
             File steamDir = new File(driveC, STEAM_DIR_REL);
-            File logsDir = new File(steamDir, LOGS_SUBDIR);
+            File logsDir = new File(steamDir, LOGS_SUBDIR);   // reassigned for App Steam below
             String steamLiteVersion = readMarkerVersion(steamDir);
             // The prefs hold the account this app signed in with; the client's own loginusers.vdf
             // holds every account and persona name it has ever seen, and the device's public
@@ -154,9 +168,15 @@ public final class SteamLiteLogCollector {
             } catch (Throwable ignored) {}
 
             // Not a SteamLite launch (or the client left nothing) → collect nothing, don't error.
-            if (!logsDir.isDirectory() && steamLiteVersion == null) {
+            if (!logsDir.isDirectory() && steamLiteVersion == null && !appSteam) {
                 Log.d(TAG, "no SteamLite marker/logs in prefix — skipping");
                 return;
+            }
+            // App Steam: the genuine client ran in the app's session host, so its own logs live under
+            // the host's HOME (<state>/home/Steam/logs), not in the prefix.
+            if (appSteam) {
+                File hostLogs = new File(appSteamHostLog.getParentFile(), "home/Steam/logs");
+                if (hostLogs.isDirectory()) logsDir = hostLogs;
             }
 
             // Read the Steam client logs (redacted for output, raw kept only long enough to scan).
@@ -188,6 +208,8 @@ public final class SteamLiteLogCollector {
 
             StringBuilder out = new StringBuilder(8 * 1024);
             appendSummary(out, context, gameName, appId, info, steamLiteVersion, dxText);
+            if (appSteam) out.append("Launch mode: Headless Steam — the game ran on the app's own Steam session "
+                    + "(bl-steam-host + Valve androidarm64 libsteamclient.so; no in-container Steam client)\n");
             if (!engineLines.isEmpty()) out.append("Steam engine: Rust (libblsteam.so) — app-side session log included\n");
             // The genuine Steam client logs accumulate across every launch — anchor to THIS run so the
             // diagnostics and raw sections report this session, not days of history. Null = no anchor.
@@ -195,6 +217,7 @@ public final class SteamLiteLogCollector {
             appendDiagnostics(out, appId, wineText, dxText, steamRaw, since, launcherLog, agentEvents, engineLines);
             appendRawSections(out, steamRedacted, since);
             appendAgentSection(out, agentEvents);
+            if (appSteam) appendAppSteamSection(out, appSteamHostLog);
             appendEngineSection(out, engineLines, sessionTail);
 
             // Belt-and-suspenders: re-scan the finished file for anything a header line carried through.
@@ -220,7 +243,7 @@ public final class SteamLiteLogCollector {
      * technique + regexes from {@code LogReport}, and {@link GPUInformation}. Launch-specific fields
      * come straight from {@link Info}, i.e. the same values the wine header prints.
      */
-    private static void appendSummary(StringBuilder out, Context context, String gameName, int appId,
+    static void appendSummary(StringBuilder out, Context context, String gameName, int appId,
                                       Info info, String steamLiteVersion, String dxText) {
         out.append("===== SteamLite (Steam client) log =====\n\n");
         out.append(LogcatCapture.deviceHeader(context));   // === Bannerlator log ===, Captured/App/Device/Android
@@ -510,7 +533,7 @@ public final class SteamLiteLogCollector {
     // ── Rust engine log (Phase 3b-4) ────────────────────────────────────────────────────────────
 
     /** The engine's recent lines when the Rust engine drives the session; empty otherwise. */
-    private static List<String> engineLines(Context context) {
+    static List<String> engineLines(Context context) {
         try {
             if (!com.winlator.star.store.blsteam.BlSteamEngineFlag.isEnabled(context))
                 return java.util.Collections.emptyList();
@@ -536,7 +559,7 @@ public final class SteamLiteLogCollector {
     }
 
     /** Tail of the always-on steam_session.txt (status transitions), or null. */
-    private static String readEngineSessionTail(Context context) {
+    static String readEngineSessionTail(Context context) {
         try {
             File dir = context.getExternalFilesDir(null);
             if (dir == null) return null;
@@ -637,7 +660,7 @@ public final class SteamLiteLogCollector {
     }
 
     /** Raw section: the engine's own lines (redacted at the source) + the session-status tail. */
-    private static void appendEngineSection(StringBuilder out, List<String> lines, String sessionTail) {
+    static void appendEngineSection(StringBuilder out, List<String> lines, String sessionTail) {
         if (lines == null || lines.isEmpty()) return;
         out.append("\n===== steam_engine.txt — Rust engine (app-side session) =====\n");
         for (String line : lines) out.append(SteamLogRedactor.redactSteamClientLine(line)).append('\n');
@@ -648,6 +671,24 @@ public final class SteamLiteLogCollector {
                 out.append(SteamLogRedactor.redactSteamClientLine(line)).append('\n');
             }
         }
+    }
+
+    /** Raw section: the App Steam session host's own log (bl-steam-host stdout), redacted line by line. */
+    private static void appendAppSteamSection(StringBuilder out, File hostLog) {
+        out.append("\n===== Headless Steam — session host log (bl-steam-host) =====\n");
+        String text = hostLog != null ? readTail(hostLog, LAUNCHER_LOG_TAIL_BYTES) : null;
+        if (text == null || text.trim().isEmpty()) {
+            out.append("(no host log — the host never started, or its log was not written)\n");
+            return;
+        }
+        int cbLines = 0;
+        for (String line : text.split("\n")) {
+            // The host logs every callback id it drains (bounded); keep the bundle readable.
+            if (line.contains("callback id=")) { cbLines++; continue; }
+            if (line.trim().isEmpty()) continue;
+            out.append(SteamLogRedactor.redactSteamClientLine(line)).append('\n');
+        }
+        if (cbLines > 0) out.append("(").append(cbLines).append(" callback-trace lines omitted)\n");
     }
 
     /** Raw section: the agent-channel lines verbatim (already token-free / SteamID-masked). */
@@ -770,7 +811,7 @@ public final class SteamLiteLogCollector {
 
     // ── Raw sections ────────────────────────────────────────────────────────────────────────────
 
-    private static void appendRawSections(StringBuilder out, Map<String, String> redacted, String since) {
+    static void appendRawSections(StringBuilder out, Map<String, String> redacted, String since) {
         out.append('\n');
         if (redacted.isEmpty()) {
             out.append("(No Steam client logs were present in the prefix for this run.)\n");
@@ -1022,7 +1063,7 @@ public final class SteamLiteLogCollector {
     /** This session's start = timestamp of the LAST "AppID <appId> ... adding PID" in gameprocess_log
      *  (when the game launched this run), or null if not determinable. Timestamps are
      *  "YYYY-MM-DD HH:MM:SS", so a lexical compare is chronological. */
-    private static String sessionStart(String gameproc, int appId) {
+    static String sessionStart(String gameproc, int appId) {
         if (gameproc == null) return null;
         Pattern p = ci("appid\\s+" + appId + "\\b[^\\n]*adding\\s+pid");
         String anchor = null;
@@ -1101,7 +1142,7 @@ public final class SteamLiteLogCollector {
 
     /** Last {@code maxBytes} of a file as text (whole file if smaller), or null. Bounded so a huge
      *  {@code +seh} wine_debug.log can't OOM the exit path; a partial first line is dropped. */
-    private static String readTail(File f, long maxBytes) {
+    static String readTail(File f, long maxBytes) {
         if (f == null || !f.isFile()) return null;
         try {
             long len = f.length();
@@ -1161,7 +1202,7 @@ public final class SteamLiteLogCollector {
     }
 
     /** Redact a whole block line-by-line (bounds a redaction failure to its own line). */
-    private static String redactBlock(String text) {
+    static String redactBlock(String text) {
         if (text == null) return "";
         StringBuilder sb = new StringBuilder(text.length() + 64);
         for (String line : text.split("\n", -1)) {

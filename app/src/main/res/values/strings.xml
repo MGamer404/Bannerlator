@@ -229,6 +229,8 @@
     <string name="directx">DirectX</string>
     <string name="xaudio">XAudio</string>
     <string name="vcrun2010">Visual C++ 2010</string>
+    <string name="builtinDecoder">Builtin decoder</string>
+    <string name="softwareDecoding">Software decoding</string>
     <string name="opengl">OpenGL</string>
     <string name="renderer">Renderer</string>
     <string name="settings">Settings</string>
@@ -518,6 +520,15 @@
         Game settings follow the container unless you pick something else for that game.<br /><br />
         <i>Sets at launch: esync → WINEESYNC=1 · ntsync → WINENTSYNC=1 + WINEESYNC=1 · wineserver → WINEESYNC=0. Any of these typed into Environment Variables is replaced by this setting.</i>
     ]]></string>
+    <string name="help_opengl_settings"><![CDATA[
+        <b>OpenGL settings</b><br /><br />
+        <b>Fast</b> — sends an OpenGL game\'s frames straight to the screen through Vulkan (the route DXVK games take) instead of copying every frame back first. Several times faster on X11, and it also speeds up DirectDraw and older Direct3D games through WineD3D. Always on with Wayland. On X11 it works with any Wine layer: Wine 11 arm64ec layers go through EGL, everything else (older Wine, and every x86-64 layer) through GLX. It needs a Turnip graphics driver; without one it is greyed and games use the old path. On by default; turn it off for a game that shows a black screen, crashes or draws wrongly.<br /><br />
+        <b>Show FPS</b> — Mesa\'s frames-per-second counter in the top-left corner of OpenGL games. DXVK games don\'t show it. Off by default.<br /><br />
+        <b>Vsync off</b> — lets OpenGL games run above the screen\'s refresh rate instead of waiting for each refresh. You may see tearing. Off by default.<br /><br />
+        None of these speed up game time: a very old game that ties its speed to the frame rate can run too fast — cap it with the FPS limiter.<br /><br />
+        <b>Auto</b> (game settings) — follows the container\'s setting; On or Off applies to that game only. Changes take effect the next time the game starts.<br /><br />
+        <i>Sets at launch: Fast → the bundled X11 OpenGL libraries with Zink, plus WINE_USE_EGL=1 on the EGL route or the X server\'s GLX on the GLX route (BANNER_X11_EGL=0 turns it off, BANNER_X11_EGL=1 forces EGL, BANNER_X11_GLX=1 forces GLX) · Show FPS → GALLIUM_HUD=fps · Vsync off → vblank_mode=0. A GALLIUM_HUD or vblank_mode you typed into Environment Variables is kept.</i>
+    ]]></string>
     <string name="help_graphics_driver"><![CDATA[
         <b>Graphics driver (wrapper)</b><br /><br />
         The Vulkan driver the container uses to talk to your GPU. Different wrappers suit different GPUs — <i><b>Adreno</b></i> (Snapdragon) has the best support; <i><b>Mali</b></i> phones may need a specific wrapper to handle compressed textures. Stick with the default unless you\'re troubleshooting.
@@ -587,6 +598,35 @@
         <b>One UI / HyperOS Fix</b><br /><br />
         A compatibility workaround for some Samsung (One UI) and Xiaomi (HyperOS) phones, whose GPU drivers need an extra texture-compression hint to render correctly. Turn it <b>ON</b> only if games show corruption or crash on those devices; leave it <b>OFF</b> otherwise.
     ]]></string>
+    <string name="help_mali_panvk"><![CDATA[
+        <b>Mali (PanVK)</b><br /><br />
+        For FristOneRR\'s PanVK driver on an Arm Mali GPU (github.com/FristOneRR/FristOneRR-Panvk-Driver, MIT licence). Mali mode applies FristOneRR\'s tweaks in the Wayland adapter: it hides VK_KHR_present_id, VK_KHR_present_wait and VK_KHR_dynamic_rendering from the game, and turns on its two sync workarounds for this driver (skip GPU submit waits, skip the frame-acquire signal). Each of the three has its own switch under Advanced; the two sync workarounds are for DXVK games, so turn them off if a D3D12 game misbehaves or you see tearing. It turns on by itself when the driver\'s name contains \'panvk\'; you can switch it either way.<br /><br />
+        <b>BCn textures</b><br />
+        Turning Mali mode on sets BCn texture emulation to <b>none</b>. Converting BCn textures to ASTC can freeze or reboot the phone with this driver; only try another setting if a game shows broken or missing textures.<br /><br />
+        <b>Advanced</b><br />
+        The driver variables FristOneRR lists as safe. Left on Auto / Default they are not set at all. PANVK_ATOM_STRIDE is only for when auto-detection fails ([KFAULT] in the log); PANVK_TRACE adds driver tracing to the log.<br /><br />
+        Credit: FristOneRR, for the PanVK driver and these tweaks.
+    ]]></string>
+    <string name="mali_panvk_section">Mali (PanVK)</string>
+    <string name="mali_panvk_mode">Mali (PanVK) mode</string>
+    <string name="mali_panvk_mode_hint">FristOneRR\'s PanVK tweaks in the Wayland adapter: hides present_id, present_wait and dynamic_rendering, plus two sync workarounds. On by default with a PanVK driver.</string>
+    <string name="mali_panvk_bcn_warning">Converting BCn textures to ASTC can freeze or reboot the phone with this driver; only try it if a game shows broken or missing textures.</string>
+    <string name="mali_panvk_advanced">Advanced PanVK settings</string>
+    <string name="mali_panvk_default">Auto / Default</string>
+    <string name="mali_panvk_hide_exts">Hide present-wait / dynamic-rendering extensions</string>
+    <string name="mali_panvk_no_submit_waits">Skip GPU submit waits</string>
+    <string name="mali_panvk_no_acquire_signal">Skip frame-acquire signal</string>
+    <string name="mali_panvk_sync_hint">The two skips are for DXVK games: turn them off if a D3D12 game misbehaves or you see tearing. The acquire skip needs the submit-wait skip.</string>
+    <string name="mali_panvk_heap">PANVK_HEAP_MB (256–16384)</string>
+    <string name="mali_panvk_heap_hint">Default: a quarter of RAM, 1024–3072 MB.</string>
+    <string name="mali_panvk_tiler_heap">PANVK_TILER_HEAP_MB (16–2048)</string>
+    <string name="mali_panvk_tiler_heap_hint">Default: 512 MB.</string>
+    <string name="mali_panvk_poly_heap">PANVK_POLY_HEAP_MB (4–512)</string>
+    <string name="mali_panvk_poly_heap_hint">Default: 16 MB.</string>
+    <string name="mali_panvk_atom_stride">PANVK_ATOM_STRIDE</string>
+    <string name="mali_panvk_atom_stride_hint">Only if auto-detection fails ([KFAULT] in the log).</string>
+    <string name="mali_panvk_trace">PANVK_TRACE (driver tracing)</string>
+    <string name="mali_panvk_out_of_range">Out of range: not used.</string>
     <string name="help_bcn_emulation_type"><![CDATA[
         <b>BCn Emulation Type</b><br /><br />
         Chooses HOW compressed game textures (BCn / DXT) are unpacked on GPUs that can\'t read them natively — Mali and other non-Adreno chips. <b>Compute</b> uses a GPU compute-shader layer (usually faster); <b>software</b> uses the wrapper\'s built-in decoder. No effect on Adreno, which reads BCn textures natively. Switch options if textures look wrong or a game runs slowly.
@@ -1484,6 +1524,21 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="pref_summary_requiresTrackpadAndNative">Requires "Touchscreen input mode" to be "Trackpad" and "Display resolution mode" to be not "native"</string>
     <string name="fexcore_config">FEXCore</string>
     <string name="fexcore_preset">FEXCore Preset</string>
+    <string name="force_ssbs">Force SSBS (CPU speed fix)</string>
+    <string name="force_ssbs_summary">Keeps the CPU\'s speculative-store fast path on for game threads (arm64ec Proton only). On by default.</string>
+    <string name="force_ssbs_container_default">Container default (%1$s)</string>
+    <string name="force_ssbs_on">On</string>
+    <string name="force_ssbs_off">Off</string>
+    <string name="help_force_ssbs"><![CDATA[
+        <b>Force SSBS (CPU speed fix)</b><br /><br />
+        Wine has a bug on ARM devices: every time it handles certain internal events, it switches off a CPU speed feature called SSBS for the game\'s threads. With it off, the CPU uses a slower, extra-safe way of handling memory reads and writes.<br /><br />
+        Turning this on keeps SSBS switched on while the game runs:<br />
+        • On Proton builds that include the fix (Bannerlator layers, based on the upstream Wine fix MR 12262), Wine stops switching it off and leaves it as Android set it.<br />
+        • On older or third-party Proton builds (such as Proton 9 or 10), a small add-on that ships inside Bannerlator switches it back on.<br /><br />
+        How much it helps depends on your device and game. The biggest gains are expected on Snapdragon 8 Elite (Oryon) devices in CPU-heavy games; on other chips the difference may be small or none.<br /><br />
+        It only applies to arm64ec Proton containers. SSBS is a protection against a Spectre-type attack; switching it on relaxes that protection for the game, which is the trade-off for the extra speed.<br /><br />
+        On by default. If a game misbehaves, turn it off for that game or container. \'Container default\' uses the container\'s setting.
+    ]]></string>
     <!-- Preset action row shown under the preset pickers in Container and game-shortcut settings.
          Labels sit under the icons there (unlike App Settings, which is icon-only), so they must
          stay very short - six of them share one row on a phone. -->
@@ -1681,6 +1736,16 @@ E.g. <b>META</b> for <i>META key</i>, \n
         <b>On-screen controls</b> — the touch pad can be pinned to any player too. A physical pad connected BEFORE launch takes priority in the connect order. The On-screen priority setting decides what happens when a pad connects mid-game: <b>Keep</b> leaves the touch pad where it is, <b>Yield</b> hands Player 1 to the pad and moves the touch pad up, <b>Share</b> makes the pad share the touch pad\'s player.<br /><br />
         <b>Reset Input</b> (in-game side menu) rebuilds the controller connection without restarting the game.<br /><br />
         Changes made here (out of game) apply on the game\'s <b>next launch</b>; the in-game side menu changes players live. The app-drawer Input Controls copy of this sets the default for <b>newly-created</b> containers.
+    ]]></string>
+    <string name="help_menu_button"><![CDATA[
+        <b>Menu button</b><br /><br />
+        Picks one button on your device that opens Bannerlator\'s <b>in-game side menu</b> (the same menu a swipe from the left edge opens).<br /><br />
+        <b>Who it\'s for</b> — handhelds with built-in controls, such as the <b>AYANEO Pocket FIT</b>, <b>AYN Odin 2 Portal</b>, Retroid and similar devices. During a game their controls go to the game, so without this none of their buttons reaches the menu, not even a Back key on the controls.<br /><br />
+        It is <b>off until you set it</b>: no controller button opens the menu by default. The B button never opens it and can\'t be picked.<br /><br />
+        <b>Set button</b> — tap it, then press the button you want on your device. Guide/Home, a Back key, Select or a stick click work well. Pick a button your games don\'t need: <b>that button only opens the menu and is no longer sent to the game</b>. Press it again to close the menu.<br />
+        <b>None</b> — turns the menu button off.<br /><br />
+        If your controller profile binds the same button, the profile wins. In a Linux Steam session the Guide button stays the Steam button.<br /><br />
+        It takes effect the next time a game starts.
     ]]></string>
     <!-- ── Audio settings: per-preset and per-row "?" help ────────────────────────────────────
          Latency figures are TOTALS (driver buffer + Android's fixed ~21 ms mixer/HAL cost), because
@@ -2084,6 +2149,12 @@ error.
 <b>When to change:</b> only useful for OpenGL games, since DXVK titles will not show it. For
 D3D games use DXVK_HUD instead.
         ]]></string>
+    <string name="env_var_help__vblank_mode"><![CDATA[
+        Mesa\'s OpenGL vsync control.<br /><br />
+<b>0</b> : Never wait for the screen refresh (vsync off).<br /><br />
+<b>When to change:</b> use Vsync off in the OpenGL card on the General tab or in the game\'s settings
+instead; it sets vblank_mode=0. A value typed here is kept and wins over the switch.
+        ]]></string>
     <string name="env_var_help__ir3_shader_debug"><![CDATA[
         Flags for the Adreno shader compiler inside Mesa.<br /><br />
 <b>nouboopt</b>, <b>nopreamble</b>, <b>noearlypreamble</b> each disable a compiler optimisation.<br /><br />
@@ -2165,11 +2236,15 @@ use it only briefly.
 than falling back. Raise it only if a game refuses to start claiming the hardware is too old.
         ]]></string>
     <string name="env_var_help__vkd3d_shader_model"><![CDATA[
-        The highest D3D12 shader model VKD3D reports to the game.<br /><br />
-<b>6_6</b> down to <b>5_1</b>, newest first.<br /><br />
+        The highest D3D12 shader model VKD3D reports to the game. It is a ceiling, not a switch: a game
+built for an older model still asks for, and gets, that older model. DirectX 11, 9 and OpenGL games never
+read it.<br /><br />
+<b>6_6</b> : the default. Unreal Engine 5.3+ games built for Shader Model 6 refuse to start below it
+("DirectX 12 is not supported on your system"), and Turnip only advertises 6.5 on its own.<br />
+<b>6_5</b> down to <b>5_1</b> : what the driver reports natively, or lower.<br /><br />
 <b>When to change:</b> lower it when a game requests shaders your driver cannot actually compile —
-the symptom is a crash or black rendering shortly after loading. Lowering it makes the game pick a
-simpler path.
+the symptom is a crash or black rendering shortly after loading, never a refusal to start. Removing it
+brings back the Unreal Engine 5 refusal.
         ]]></string>
     <string name="env_var_help__vkd3d_swapchain_latency_frames"><![CDATA[
         How many frames VKD3D lets the game queue ahead of the display.<br /><br />
@@ -2252,6 +2327,23 @@ create a context.
 <b>When to change:</b> leave it alone unless you are diagnosing something. Custom values like
 "+loaddll,+seh" are kept as typed. Logging costs real performance, and a hang with logging on can
 write hundreds of megabytes.
+        ]]></string>
+    <string name="env_var_help__banner_x11_egl"><![CDATA[
+        Overrides the Fast OpenGL setting on X11.<br /><br />
+<b>1</b> : On through Wine\'s EGL backend, even where the setting is off or greyed (still needs the
+libraries bundled with the app, and a layer whose Wine has the EGL backend: Wine 11 arm64ec).<br />
+<b>0</b> : Off, whatever the setting says (also beats BANNER_X11_GLX).<br /><br />
+<b>When to change:</b> almost never — use Fast in the OpenGL card on the General tab or in the game\'s
+settings, which picks EGL or GLX by layer. This is for testing a layer or driver the switch does not
+offer it on.
+        ]]></string>
+    <string name="env_var_help__banner_x11_glx"><![CDATA[
+        Forces Fast OpenGL on X11 through GLX: the X server turns on its own GLX support (and DRI3/Present
+1.2) for the session, and Wine\'s GLX loads the bundled OpenGL library with Zink.<br /><br />
+<b>1</b> : GLX route on, whatever the layer.<br /><br />
+<b>When to change:</b> to try the GLX route on a Wine 11 arm64ec layer that would otherwise use EGL.
+Older Wine and x86-64 layers already take this route. BANNER_X11_EGL=0 still turns Fast OpenGL off.
+No effect on Wayland.
         ]]></string>
     <string name="env_var_help__winedlloverrides"><![CDATA[
         Tells Wine whether to use its own version of a DLL or one shipped with the game.<br /><br />

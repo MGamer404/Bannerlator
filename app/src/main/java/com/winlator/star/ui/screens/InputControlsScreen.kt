@@ -940,11 +940,13 @@ fun InputControlsScreen() {
                     // ── Assign: global default player slots for new containers ──
                     2 -> GlobalPlayerSlotsSection()
 
-                    // ── Device: gyroscope calibration + Steam Controller ──
+                    // ── Device: gyroscope calibration + Steam Controller + menu button ──
                     3 -> {
                         GyroscopeSection()
                         Spacer(Modifier.height(16.dp))
                         SteamControllerSection()
+                        Spacer(Modifier.height(16.dp))
+                        MenuButtonSection()
                     }
                 }
 
@@ -1434,6 +1436,101 @@ private fun GlobalPlayerSlotsSection() {
                 com.winlator.star.ui.components.GlobalControllerPrefs.setSlotOverridesJson(context, it)
             },
         )
+    }
+}
+
+/**
+ * Device-level menu button: one button on a handheld's own pad that opens the in-game side menu, for
+ * devices whose built-in controls have no Back key. LIVE (each game session reads it). The picker
+ * takes the next key press through MainActivity (MenuButtonCaptureBus).
+ */
+@Composable
+private fun MenuButtonSection() {
+    val context = LocalContext.current
+    val prefs = com.winlator.star.ui.components.GlobalControllerPrefs
+    var keyCode by remember { mutableStateOf(prefs.getMenuButtonKeyCode(context)) }
+    var capturing by remember { mutableStateOf(false) }
+    var helpRes by remember { mutableStateOf<Int?>(null) }
+    helpRes?.let { HelpDialog(it) { helpRes = null } }
+
+    fun refresh() {
+        keyCode = prefs.getMenuButtonKeyCode(context)
+    }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Menu button", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        IconButton(onClick = { helpRes = R.string.help_menu_button }) {
+            Icon(Icons.Default.Help, contentDescription = "What is this?",
+                tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
+        }
+    }
+    FieldSet {
+        Text(
+            "For handhelds with built-in controls: pick a button that opens the in-game side menu. " +
+                "Off until you set one. The chosen button then only opens the menu and isn't sent to the game.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        Text("Current: ${prefs.menuButtonName(keyCode)}", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = { capturing = true },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+                modifier = Modifier.weight(1f)
+            ) { Text("Set button", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
+            Button(
+                onClick = { prefs.setMenuButtonKeyCode(context, 0); refresh() },
+                enabled = keyCode != 0,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+                modifier = Modifier.weight(1f)
+            ) { Text("None", color = MaterialTheme.colorScheme.onBackground, fontSize = 12.sp) }
+        }
+    }
+
+    if (capturing) {
+        MenuButtonCaptureDialog { picked ->
+            capturing = false
+            if (picked > 0) {
+                prefs.setMenuButtonKeyCode(context, picked)
+                refresh()
+            }
+        }
+    }
+}
+
+/** "Press a button" prompt. The window is not focusable, so key presses reach MainActivity, which
+ *  hands the next one to [onResult] (-1 = cancelled). */
+@Composable
+private fun MenuButtonCaptureDialog(onResult: (Int) -> Unit) {
+    DisposableEffect(Unit) {
+        com.winlator.star.ui.components.MenuButtonCaptureBus.listener = { onResult(it) }
+        onDispose { com.winlator.star.ui.components.MenuButtonCaptureBus.listener = null }
+    }
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = { onResult(-1) },
+        properties = androidx.compose.ui.window.DialogProperties(dismissOnClickOutside = true),
+    ) {
+        val window = (androidx.compose.ui.platform.LocalView.current.parent
+            as? androidx.compose.ui.window.DialogWindowProvider)?.window
+        androidx.compose.runtime.SideEffect {
+            window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+        }
+        Column(
+            modifier = Modifier
+                .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(12.dp))
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("Press the button you want to open the menu", color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Text("Use your device's own controls. B and the volume keys can't be used.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            Spacer(Modifier.height(12.dp))
+            TextButton(onClick = { onResult(-1) }) { Text(stringResource(R.string.cancel)) }
+        }
     }
 }
 

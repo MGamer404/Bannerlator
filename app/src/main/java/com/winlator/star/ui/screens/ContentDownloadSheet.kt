@@ -1120,6 +1120,7 @@ private val RAIL_GROUPS = listOf(
         railCat(ContentProfile.ContentType.CONTENT_TYPE_FEXCORE, Icons.Filled.DeveloperBoard, "arm64ec x86 emu"),
         railCat(ContentProfile.ContentType.CONTENT_TYPE_BOX64, Icons.Filled.Dns, "x86_64 → ARM64"),
         railCat(ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64, Icons.Filled.Widgets, "x86 on arm64ec"),
+        railCat(ContentProfile.ContentType.CONTENT_TYPE_BOX64EC, Icons.Filled.Widgets, "x86_64 on arm64ec"),
     )),
 )
 

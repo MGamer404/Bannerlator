@@ -98,6 +98,7 @@ import com.winlator.star.core.TarCompressorUtils;
 import com.winlator.star.core.DirectAudioSupport;
 import com.winlator.star.core.WineInfo;
 import com.winlator.star.core.WineRegistryEditor;
+import com.winlator.star.core.MediaDecoder;
 import com.winlator.star.core.WineRequestHandler;
 import com.winlator.star.core.WineStartMenuCreator;
 import com.winlator.star.core.Callback;
@@ -327,6 +328,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // real-Steam session (set right after realSteamPlan is armed, cleared by releaseRealSteamSession).
     // Separate from realSteamPlan so the release is idempotent across exit() and onDestroy().
     private volatile boolean realSteamSessionHeld = false;
+    // App Steam (Option B) launch plan. Non-null ONLY for a genuine-Steam shortcut with launchMode=AppSteam
+    // whose prerequisites resolved AND whose session host (bl-steam-host, the app's own genuine Steam
+    // session) started — built by maybeStageAppSteam() on the launch worker. The game exe runs DIRECTLY
+    // under Wine (getWineStartCommand() untouched); the app's own CM session stays UP ("two logons, one
+    // player"): the offline-presence report is gated on this plan, the SteamLite suspend never runs
+    // (realSteamPlan stays null by construction), and the drawer Friends tab uses the app session.
+    private com.winlator.star.store.AppSteamLauncher.Plan appSteamPlan;
+    /** The host reported `host_ready` (logged on + app-info/ownership warm-up done). */
+    private volatile boolean appSteamHostReady = false;
+    /** Bound for the host's sign-in before the guest boots (the fail card offers Retry / SteamLite / Goldberg). */
+    private static final long APPSTEAM_HOST_WAIT_MS = 60_000L;
     private String graphicsDriver = Container.DEFAULT_GRAPHICS_DRIVER;
     // Which Vulkan driver the host compositor/present layer runs on ("system" = Android's own driver,
     // or an installed adrenotools Turnip). Separate from graphicsDriver (which the guest game renders
@@ -742,8 +754,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * on the HOST side of winewayland.drv (wine's unix libEGL -> Zink -> Turnip), and — device-measured
      * on this layer — it is mapped into a process only when that process really takes the GL path:
      * <ul>
-     *   <li><b>OpenGL</b>: the layer's own {@code lib/libEGL.so.1} / {@code libgallium-*.so} /
-     *       {@code libwayland-egl.so} appear in the game's maps. Measured against the counter-example:
+     *   <li><b>OpenGL</b>: the layer's own {@code lib/libEGL.so.1} / {@code libgallium-*.so} appear in
+     *       the game's maps ({@code libwayland-egl.so} does not count: winewayland links it into every
+     *       process). Measured against the counter-example:
      *       a D3D11-on-DXVK title (Titanfall 2, live Wayland session) maps NONE of them.</li>
      *   <li><b>Vulkan</b> (native, or DXVK/VKD3D on top): {@code winevulkan.so}, the unix half of
      *       winevulkan.dll, which only loads when the guest itself uses Vulkan.</li>
@@ -783,8 +796,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     // environment while rendering D3D11 through DXVK. Treat it the way the X11
                     // resolver already treats opengl32: resident, and proof of nothing. Zink runs GL
                     // on Vulkan here anyway, so the neutral "Vulkan" stays underlying-accurate.
-                    if (!gamescopeMode && (line.indexOf("libegl.so.1") >= 0 || line.indexOf("libgallium") >= 0
-                            || line.indexOf("libwayland-egl.so") >= 0)) { gl = true; break; }
+                    // libwayland-egl.so is NOT evidence either: winewayland links it for its own window
+                    // surfaces, so every Wayland Wine process maps it - a Vulkan game (DOOM 2016's
+                    // DOOMx64vk.exe: only libvulkan_wrapper/libvulkan_freedreno mapped) read "OpenGL".
+                    if (!gamescopeMode && (line.indexOf("libegl.so.1") >= 0 || line.indexOf("libgallium") >= 0)) { gl = true; break; }
                     if (line.indexOf("winevulkan.so") >= 0 || line.indexOf("winevulkan.dll") >= 0
                             || line.indexOf("vulkan-1.dll") >= 0) vulkan = true;
                 }
@@ -1654,6 +1669,73 @@ public class XServerDisplayActivity extends AppCompatActivity {
             waylandCursorView.setVisibility(View.VISIBLE);
         waylandCursorIdle.postDelayed(waylandCursorHideRunnable, WAYLAND_CURSOR_IDLE_MS);
     }
+
+    // The X11 pointer gets the same idle / controller rules as the Wayland overlay above. X11 already
+    // honours the game's own hide (ASurfaceRenderer.gameCursorVisible); nothing hid it when it was
+    // just sitting there or while a controller was driving. The renderer's setCursorVisible is the
+    // launch gate (hidden until the first game frame); these rules sit on top of it, so the effective
+    // state is wanted && !autoHidden. BANNER_CURSOR_AUTOHIDE=0 keeps the pointer up as before.
+    // A held stick marks controller input every tick of the virtual-mouse loop, so a short window
+    // still keeps the pointer hidden while it moves; 1.2 s (the Wayland value) made a touch right
+    // after using the pad wait about a second for the pointer to come back.
+    private static final long X11_CURSOR_PAD_MS = 250L;
+    private volatile boolean x11CursorWanted = false;   // launch gate
+    private boolean x11CursorAutoHidden = false;         // main thread only
+    private volatile boolean x11CursorAutoHide = true;
+    private final java.util.concurrent.atomic.AtomicBoolean x11CursorPokePending =
+            new java.util.concurrent.atomic.AtomicBoolean();
+    private final Runnable x11CursorHideRunnable = () -> setX11CursorAutoHidden(true);
+
+    private void applyX11CursorVisibility() {
+        if (xServerView == null) return;
+        HostRenderer renderer = xServerView.getRenderer();
+        if (renderer == null) return;
+        boolean visible = x11CursorWanted && !x11CursorAutoHidden;
+        if (renderer.isCursorVisible() != visible) renderer.setCursorVisible(visible);
+    }
+
+    private void setX11CursorAutoHidden(boolean hidden) {
+        if (x11CursorAutoHidden == hidden) return;
+        x11CursorAutoHidden = hidden;
+        applyX11CursorVisibility();
+    }
+
+    /** X11: the player moved the pointer or pressed a button. Main thread only. */
+    private void x11CursorPoke() {
+        if (waylandMode || !x11CursorAutoHide) return;
+        waylandCursorIdle.removeCallbacks(x11CursorHideRunnable);
+        boolean padDriving =
+                android.os.SystemClock.uptimeMillis() - waylandLastPadInputMs < X11_CURSOR_PAD_MS;
+        if (padDriving) {
+            setX11CursorAutoHidden(true);
+            return;
+        }
+        setX11CursorAutoHidden(false);
+        waylandCursorIdle.postDelayed(x11CursorHideRunnable, WAYLAND_CURSOR_IDLE_MS);
+    }
+
+    /**
+     * X11: a finger landing now should only bring the auto-hidden pointer back, not click. A tap is a
+     * left click, and Gothic 1 Remake shows its own cursor only if no click reaches it before its
+     * menu settles - waking the pointer with a tap left it on the plain arrow for the session. Not
+     * when the game hid the cursor itself (its hide wins, so the touch has nothing to reveal and is a
+     * real click). Main thread only.
+     */
+    private boolean x11TouchOnlyWakesCursor() {
+        if (waylandMode || gamescopeMode || !x11CursorAutoHide || !x11CursorWanted || !x11CursorAutoHidden) {
+            return false;
+        }
+        Window pw = xServer != null ? xServer.inputDeviceManager.getPointWindow() : null;
+        com.winlator.star.xserver.Cursor cursor = pw != null ? pw.attributes.getCursor() : null;
+        return cursor == null || cursor.isVisible();
+    }
+
+    /** X11: a physical pad produced input - hide the pointer now rather than at the idle timeout. */
+    private void x11CursorPadInput() {
+        if (waylandMode || !x11CursorAutoHide || x11CursorAutoHidden) return;
+        waylandCursorIdle.removeCallbacks(x11CursorHideRunnable);
+        waylandCursorIdle.post(x11CursorHideRunnable);
+    }
     private volatile boolean waylandPointerLocked; // a program holds a pointer lock in the compositor
     private EnvVars overrideEnvVars;
 
@@ -1850,6 +1932,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         com.winlator.star.core.PreloaderState.setOnOpenLog(() -> runOnUiThread(this::openLogFolder));
         com.winlator.star.core.PreloaderState.setOnCancel(() -> runOnUiThread(this::exit));
         preferences = PreferenceManager.getDefaultSharedPreferences(this);
+        menuButtonKeyCode = com.winlator.star.ui.components.GlobalControllerPrefs.getMenuButtonKeyCode(this);
 
         cursorLock = preferences.getBoolean("cursor_lock", false);
 
@@ -2992,7 +3075,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             public void onUpdateWindowContent(Window window) {
                 if (!winStarted && window.isApplicationWindow()) {
                     winStarted = true;   // set first so this fires exactly once
-                    xServerView.getRenderer().setCursorVisible(true);
+                    x11CursorWanted = true;
+                    runOnUiThread(() -> {
+                        applyX11CursorVisibility();
+                        x11CursorPoke();   // starts the idle timer even if nothing has moved yet
+                    });
                     cancelLaunchTimers();
                     // First real game frame: hold the launch screen a few more seconds (the game
                     // renders behind it) so the boot steps are actually seen, then close and pop the
@@ -3125,7 +3212,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         runSteamInstallScriptPreLaunch();
                         extractGraphicsDriverFiles();
                         changeWineAudioDriver();
+                        applyMediaDecoderSettings();
                         applyGameRefreshRateUnlock();
+                        applyColorCursorRegistry();
                         provisionEpicOverlay();
                     } else {
                         preloaderDialog.step(2, "Preparing the Linux runtime…");
@@ -5412,6 +5501,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         // window to log on, so the Steam Cloud upload + achievement sync-back below run on a
                         // live session. Worker thread, so the wait never touches the UI. No-op otherwise.
                         if (realSteamPlan != null) releaseRealSteamSession("game exit", 6000L);
+                        // App Steam: the guest is gone — log the session host off (clean Steam_LogOff)
+                        // so the account's "playing" state clears before the cloud/achievement work.
+                        stopAppSteamHost("game exit");
                         clearOfflineSteamPresence("game exit");
                         SharedPreferences savePrefs = getSharedPreferences("save_manager_prefs", MODE_PRIVATE);
                         if (isGenuineSteamShortcut()) {
@@ -5422,7 +5514,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                             // stays unconditional (independent of this cloud toggle).
                             boolean cloudDisclaimerOk = getSharedPreferences("steam_prefs", MODE_PRIVATE)
                                     .getBoolean("cloud_saves_disclaimer_accepted", false);
-                            if (cloudDisclaimerOk && savePrefs.getBoolean("auto_upload_steam_on_exit", true))
+                            // A SteamLite launch's genuine client already uploaded on exit — don't race it.
+                            if (realSteamPlan != null)
+                                Log.i("BH_SAVE_SYNC", "auto-upload Steam: SteamLite launch — the Steam client syncs cloud saves itself, skip");
+                            else if (cloudDisclaimerOk && savePrefs.getBoolean("auto_upload_steam_on_exit", true))
                                 autoUploadSteamSavesBlocking();
                         } else {
                             // GOG-library games (untagged, installed under gog_games/) push their saves to
@@ -5451,8 +5546,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         // collector itself also no-ops when the marker/logs aren't present. Fully guarded —
                         // logging must never break a game exiting.
                         try {
-                            if (realSteamPlan != null
-                                    && preferences.getBoolean("enable_steamlite_logs", false)) {
+                            boolean wantSteamLite = realSteamPlan != null
+                                    && preferences.getBoolean("enable_steamlite_logs", false);
+                            boolean wantHeadless = appSteamPlan != null
+                                    && preferences.getBoolean("enable_headless_steam_logs", false);
+                            if (wantSteamLite || wantHeadless) {
                                 Context appCtx = getApplicationContext();
                                 String gameName = currentLogGameName();
                                 File driveC = new File(container.getRootDir(), ".wine/drive_c");
@@ -5467,9 +5565,32 @@ public class XServerDisplayActivity extends AppCompatActivity {
                                                 dxwrapper,
                                                 dxwrapperConfig != null ? dxwrapperConfig.get("version") : null,
                                                 dxwrapperConfig != null ? dxwrapperConfig.get("vkd3dVersion") : null);
-                                com.winlator.star.core.SteamLiteLogCollector.collect(
-                                        appCtx, driveC, perGameLogDir, gameName, realSteamPlan.appId, info,
-                                        steamAgentChannel != null ? steamAgentChannel.eventLines() : null);
+                                List<String> channelEvents =
+                                        steamAgentChannel != null ? steamAgentChannel.eventLines() : null;
+                                if (wantSteamLite) {
+                                    com.winlator.star.core.SteamLiteLogCollector.collect(
+                                            appCtx, driveC, perGameLogDir, gameName,
+                                            realSteamPlan.appId, info, channelEvents, null);
+                                }
+                                if (wantHeadless) {
+                                    // Headless Steam: its own bundle (headless_steam.txt) — checklist +
+                                    // host events + host log + Valve's session logs + bridge lines.
+                                    String valveBuild = com.winlator.star.store.SteamHostComponent.INSTANCE.installedVersion(appCtx);
+                                    com.winlator.star.core.HeadlessSteamLogCollector.Launch launch =
+                                            new com.winlator.star.core.HeadlessSteamLogCollector.Launch(
+                                                    true, appSteamPlan.appId, valveBuild,
+                                                    com.winlator.star.store.SteamHostComponent.INSTANCE.getVERIFIED_BUILDS().contains(valveBuild),
+                                                    appSteamPlan.layerHasLsteamclient,
+                                                    appSteamPlan.env != null ? new ArrayList<>(appSteamPlan.env.keySet()) : null,
+                                                    appSteamPlan.envRemove != null ? java.util.Arrays.asList(appSteamPlan.envRemove) : null,
+                                                    appSteamHostReady, null);
+                                    String logcatText = null;
+                                    try { logcatText = com.winlator.star.core.LogcatCapture.capture(
+                                            com.winlator.star.core.LogcatCapture.DEFAULT_LINES); } catch (Throwable ignored) {}
+                                    com.winlator.star.core.HeadlessSteamLogCollector.collect(
+                                            appCtx, perGameLogDir, gameName, info, launch,
+                                            appSteamPlan.hostLog, channelEvents, logcatText);
+                                }
                             }
                         } catch (Throwable t) {
                             Log.w("SteamLiteLogs", "collect on exit errored", t);
@@ -5845,6 +5966,125 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * App Steam (Option B): if this is a genuine-Steam shortcut explicitly set to {@code launchMode=AppSteam},
+     * seed the prefix (genuine PE client DLLs from the SteamLite package when present + the
+     * {@code ActiveProcess} registry), open the agent channel, and START the app's genuine Steam session
+     * host ({@link com.winlator.star.store.SteamHost}) with the engine's refresh token. The plan's env
+     * ({@code WINESTEAMCLIENTPATH64}, {@code Steam3Master}, {@code SteamAppId}…) is merged into the
+     * launch env later; {@code PROTON_DISABLE_LSTEAMCLIENT} is REMOVED so Proton's ntdll hook redirects
+     * the game's {@code steamclient64.dll} to the layer's {@code lsteamclient.dll}, whose unix side talks
+     * to the host over loopback. The game exe is launched directly — no agent, no {@code WN_STEAM_*}.
+     *
+     * <p>Runs on the launch worker (file I/O + Room). Mutually exclusive with {@link #maybeStageRealSteam()}
+     * by {@code launchMode}. Any missing prerequisite (Valve client not downloaded / host binary absent /
+     * no token / appId unresolved) leaves {@code appSteamPlan} null → the NORMAL launch, byte-for-byte.
+     * The host's sign-in is awaited (bounded) by {@link #awaitAppSteamHost()} right before the guest boots.
+     */
+    private void maybeStageAppSteam() {
+        try {
+            if (shortcut == null || container == null) return;
+            if (!com.winlator.star.store.AppSteamLauncher.LAUNCH_MODE.equals(shortcut.getExtra("launchMode"))) return;
+            if (!isGenuineSteamShortcut()) return;
+            if (realSteamPlan != null) { Log.w("BH_APPSTEAM", "RealSteam plan already armed — skipping AppSteam"); return; }
+
+            File driveC = new File(container.getRootDir(), ".wine/drive_c");
+            SteamAppRef ref = resolveSteamAppRef();   // Room lookup — off-main OK on this worker thread
+            if (ref == null) {
+                Log.w("BH_APPSTEAM", "AppSteam requested but appId unresolved — falling back to normal launch");
+                return;
+            }
+            // Wine layer dir (to report whether lsteamclient is present — informational).
+            File wineLibDir = null;
+            try { wineLibDir = new File(imageFs.getWinePath(), "lib/wine"); } catch (Throwable ignored) {}
+            File guestHome = null;
+            try { guestHome = new File(imageFs.home_path); } catch (Throwable ignored) {}
+
+            // The host streams its status over the same loopback channel the SteamLite agent uses.
+            int agentPort = com.winlator.star.store.SteamSessionManager.INSTANCE.openAgentChannel(agentChannelListener);
+            steamAgentChannel = com.winlator.star.store.SteamSessionManager.INSTANCE.agentChannel();
+            appSteamHostReady = false;
+
+            appSteamPlan = com.winlator.star.store.AppSteamLauncher.prepare(
+                    this, driveC, wineLibDir, guestHome, shortcut, ref.appId, agentPort);
+            if (appSteamPlan != null) {
+                if (preferences.getBoolean("enable_headless_steam_logs", false))
+                    com.winlator.star.core.HeadlessSteamLogCollector.startLiveCapture(getApplicationContext());
+                Log.i("BH_APPSTEAM", "AppSteam launch armed (appId=" + appSteamPlan.appId
+                        + (agentPort > 0 ? ", agent channel port " + agentPort : ", no agent channel")
+                        + ", layerHasLsteamclient=" + appSteamPlan.layerHasLsteamclient + ")");
+                preloaderHint("Starting the app's Steam session host…");
+                armAgentWatchdog();
+            } else {
+                Log.w("BH_APPSTEAM", "AppSteam prep incomplete — falling back to normal launch");
+                closeAgentChannel();
+            }
+        } catch (Throwable t) {
+            appSteamPlan = null;
+            closeAgentChannel();
+            com.winlator.star.store.SteamHost.INSTANCE.stop("stage errored", 2000L);
+            Log.w("BH_APPSTEAM", "AppSteam setup errored — falling back to normal launch", t);
+        }
+    }
+
+    /**
+     * Block the launch worker (bounded) until the App Steam host reports {@code host_ready} (or at least
+     * {@code logged_in}), so the game's {@code steam_api} finds a logged-on client with a warm ownership
+     * ticket the moment it initialises. On a host failure / exit / timeout show the fail card (Retry /
+     * SteamLite / Goldberg / Keep going) — the guest still boots so "Keep going" is meaningful. No-op
+     * unless {@link #maybeStageAppSteam()} armed a plan.
+     */
+    private void awaitAppSteamHost() {
+        if (appSteamPlan == null) return;
+        long deadline = System.currentTimeMillis() + APPSTEAM_HOST_WAIT_MS;
+        preloaderHint("Signing in to Steam (app session host)…");
+        boolean loggedIn = false;
+        long loggedInAt = 0L;
+        while (System.currentTimeMillis() < deadline && !exiting) {
+            com.winlator.star.store.SteamAgentChannel ch = steamAgentChannel;
+            if (appSteamHostReady) {
+                preloaderHint("Steam session ready — launching the game…");
+                return;
+            }
+            if (ch != null && ch.getLoggedIn() && !loggedIn) { loggedIn = true; loggedInAt = System.currentTimeMillis(); }
+            // logged_in without host_ready for 15 s: the app-info/ownership warm-up is still running —
+            // good enough, the game will ask again itself.
+            if (loggedIn && System.currentTimeMillis() - loggedInAt > 15_000L) {
+                preloaderHint("Signed in to Steam — launching the game…");
+                return;
+            }
+            if (!com.winlator.star.store.SteamHost.INSTANCE.isAlive()) {
+                String why = ch != null && ch.getLastFailure() != null ? ch.getLastFailure() : "the host process exited";
+                showAgentFailure("Steam session host", "The app's Steam session host stopped",
+                        why + ". Retry, launch with SteamLite (in-container Steam), or offline with Goldberg.", true);
+                return;
+            }
+            if (ch != null && ch.getLastFailure() != null && !loggedIn) {
+                showAgentFailure("Steam session host", "Steam rejected the app session's sign-in",
+                        ch.getLastFailure() + " — the saved sign-in did not work for the session host. Retry, or use SteamLite / Goldberg.", true);
+                return;
+            }
+            try { Thread.sleep(100); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+        }
+        if (!exiting && !appSteamHostReady) {
+            showAgentFailure("Steam session host", "Steam sign-in did not complete",
+                    "The app's Steam session host reported no sign-in within " + (APPSTEAM_HOST_WAIT_MS / 1000)
+                            + "s. Retry, launch with SteamLite, or offline with Goldberg.", true);
+        }
+    }
+
+    /** Stop the App Steam session host (clean logoff); idempotent, never throws. */
+    private void stopAppSteamHost(String why) {
+        if (appSteamPlan == null) return;
+        try { com.winlator.star.store.HeadlessServerBrowser.stop(); } catch (Throwable ignored) {}
+        try {
+            com.winlator.star.store.SteamHost.INSTANCE.stop(why, 6000L);
+        } catch (Throwable t) {
+            Log.w("BH_APPSTEAM", "host stop errored (" + why + ")", t);
+        }
+        closeAgentChannel();
+    }
+
     // ── Live SteamLite agent channel (Phase 1-C) ─────────────────────────────────────────────────
     // The in-container agent streams its login / launch / game events over loopback (see
     // SteamAgentChannel + agent-src/AGENT_CHANNEL.md). They drive the launch overlay's reassurance
@@ -5986,8 +6226,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         Log.w(AGENT_TAG, "watchdog: no sign-in result from the agent within " + (AGENT_LOGIN_TIMEOUT_MS / 1000) + "s");
         showAgentFailure("Steam sign-in",
                 "Steam sign-in did not complete",
-                "The Steam client inside the container reported no sign-in result within "
-                        + (AGENT_LOGIN_TIMEOUT_MS / 1000) + "s.");
+                (appSteamPlan != null ? "The app's Steam session host" : "The Steam client inside the container")
+                        + " reported no sign-in result within " + (AGENT_LOGIN_TIMEOUT_MS / 1000) + "s.");
     };
 
     private final com.winlator.star.store.SteamAgentChannel.Listener agentChannelListener =
@@ -6084,6 +6324,34 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 case "session_lost":
                     preloaderHint("Steam session lost — online features may drop");
                     break;
+                // App Steam session host (bl-steam-host) — same channel, a few extra events.
+                case "host_ready":
+                    agentLoginResolved = true;
+                    appSteamHostReady = true;
+                    preloaderHint("Steam session ready — launching the game…");
+                    break;
+                case "ownership":
+                    preloaderHint(obj.optBoolean("ok", false) ? "Steam ownership ticket ready" : "Steam ownership ticket not confirmed (continuing)");
+                    break;
+                case "port_busy":
+                case "host_failed": {
+                    agentLoginResolved = true;
+                    String reason = obj.optString("reason", "");
+                    if (steamAgentChannel != null) steamAgentChannel.setLastFailure(ev + " " + reason);
+                    Log.w(AGENT_TAG, ev + ": " + obj);
+                    showAgentFailure("Headless Steam",
+                            "port_busy".equals(ev) ? "The Steam session host could not start: its port is in use"
+                                                   : "The Steam session host failed to start",
+                            (reason.isEmpty() ? "" : reason + "\n\n")
+                                    + ("port_busy".equals(ev)
+                                        ? "Another Steam client is holding 127.0.0.1:57343 — usually a Steam client "
+                                          + "left running in the background by another app (e.g. a Linux Steam session). "
+                                          + "Close it and retry. Without the host the game will report "
+                                          + "\"Steam client must be running\"."
+                                        : "See the Headless Steam log for the host's own message."),
+                            true);
+                    break;
+                }
                 case "game_exited":
                 case "shutdown":
                     Log.i(AGENT_TAG, ev + ": " + obj);
@@ -6132,16 +6400,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         () -> { try { preloaderDialog.enterGuest("Waiting for the game to render…"); } catch (Throwable ignored) {} }));
             }
             if (sc != null && c != null) {
+                final boolean appSteam = appSteamPlan != null;
                 actions.add(new com.winlator.star.core.FailureAction("Launch with Goldberg", false, () -> {
                     com.winlator.star.store.SteamSessionManager.INSTANCE.setPendingRelaunch(
                             getApplicationContext(), sc.file.getPath(), c.id,
                             com.winlator.star.store.SteamSessionManager.RelaunchMode.GOLDBERG);
                     exit();
                 }));
+                if (appSteam) {
+                    // App Steam failed: the proven in-container path is one tap away.
+                    actions.add(new com.winlator.star.core.FailureAction("Launch with SteamLite", false, () -> {
+                        com.winlator.star.store.SteamSessionManager.INSTANCE.setPendingRelaunch(
+                                getApplicationContext(), sc.file.getPath(), c.id,
+                                com.winlator.star.store.SteamSessionManager.RelaunchMode.STEAMLITE);
+                        exit();
+                    }));
+                }
                 actions.add(new com.winlator.star.core.FailureAction("Retry", true, () -> {
                     com.winlator.star.store.SteamSessionManager.INSTANCE.setPendingRelaunch(
                             getApplicationContext(), sc.file.getPath(), c.id,
-                            com.winlator.star.store.SteamSessionManager.RelaunchMode.STEAMLITE);
+                            appSteam ? com.winlator.star.store.SteamSessionManager.RelaunchMode.APPSTEAM
+                                     : com.winlator.star.store.SteamSessionManager.RelaunchMode.STEAMLITE);
                     exit();
                 }));
             }
@@ -6181,6 +6460,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private void announceOfflineSteamPresence() {
         try {
             if (realSteamPlan != null || realSteamSessionHeld) return;
+            // App Steam: the genuine client in the app's session host reports "playing" itself; the
+            // engine must NOT also send ClientGamesPlayed ("two logons, one player" — spike §3 rule 1).
+            if (appSteamPlan != null) {
+                Log.i("BL_STEAM_PRESENCE", "offline presence: skipped — App Steam host reports the game");
+                return;
+            }
             if (shortcut == null || !isGenuineSteamShortcut()) return;
             if (!SteamPrefs.INSTANCE.isOfflinePresenceEnabled(getApplicationContext())) return;
             SteamRepository repo = SteamRepository.getInstance();
@@ -6494,10 +6779,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (sc == null) return;
             if (!isGenuineSteamShortcut()) return;
 
-            // The SteamLite pre-flight (SteamSessionManager, run in the launch popup BEFORE this
-            // activity opened) already did this pull — never repeat it over the game art.
-            if (getIntent().getBooleanExtra(com.winlator.star.store.SteamSessionManager.EXTRA_PREFLIGHT_DONE, false)) {
-                Log.i("BH_SAVE_SYNC", "auto-download Steam: done by the launch pre-flight — skip");
+            // SteamLite launch (genuine client in the prefix, armed by maybeStageRealSteam() earlier in
+            // setupXEnvironment): the client syncs Steam Cloud itself at launch — writing the same save
+            // files from here first only invites its cloud-conflict prompt. A SteamLite request that
+            // fell back to a normal launch (realSteamPlan == null) still gets the app's pull.
+            if (realSteamPlan != null) {
+                Log.i("BH_SAVE_SYNC", "auto-download Steam: SteamLite launch — the Steam client syncs cloud saves itself, skip");
                 return;
             }
 
@@ -6960,6 +7247,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // suspended it this session.
         linuxSessionWatchStop = true;
         releaseRealSteamSession("activity destroyed", 0L);
+        stopAppSteamHost("activity destroyed");
         clearOfflineSteamPresence("activity destroyed");
         // Hide the drawer's Friends tab source + leave any in-game chat thread (the full Friends
         // screen's own open/close is untouched).
@@ -7335,45 +7623,37 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
     }
 
-    // Controller path to the in-game menu: Select + Start pressed together (either order) toggles the drawer, and B closes it while it is open.
-    // The first button of the chord reaches the game as usual; only the one that completes it is swallowed (down, repeats and up), so a lone Start or Select is never delayed or eaten.
-    private boolean padSelectHeld = false;
-    private boolean padStartHeld = false;
-    private final java.util.Set<Integer> padKeysSwallowedUntilUp = new java.util.HashSet<>();
+    // Input Controls › Device › Menu button: one button on the device's own pad opens the side menu
+    // (handhelds whose built-in controls have no Back key). Read once per session.
+    private int menuButtonKeyCode;
+    private boolean menuButtonHeld;
 
-    private boolean handlePadMenuKeys(KeyEvent event) {
-        if (environment == null || drawerLayout == null || !ExternalController.isGameController(event.getDevice())) return false;
+    private boolean menuButtonEvent(KeyEvent event) {
         int kc = event.getKeyCode();
-        int action = event.getAction();
-        if (kc == KeyEvent.KEYCODE_BUTTON_SELECT || kc == KeyEvent.KEYCODE_BUTTON_START) {
-            boolean isSelect = kc == KeyEvent.KEYCODE_BUTTON_SELECT;
-            if (action == KeyEvent.ACTION_UP) {
-                if (isSelect) padSelectHeld = false; else padStartHeld = false;
-                return padKeysSwallowedUntilUp.remove(kc);
-            }
-            if (action != KeyEvent.ACTION_DOWN) return false;
-            if (event.getRepeatCount() > 0) return padKeysSwallowedUntilUp.contains(kc);
-            boolean otherHeld = isSelect ? padStartHeld : padSelectHeld;
-            if (isSelect) padSelectHeld = true; else padStartHeld = true;
-            if (!otherHeld) return false;
-            padKeysSwallowedUntilUp.add(kc);
+        if (menuButtonKeyCode <= 0 || kc != menuButtonKeyCode || kc == KeyEvent.KEYCODE_BUTTON_B) return false;
+        // A Back chosen as the menu button means the device's own Back key (KEY_BACK, scan 158), never
+        // the Back Android makes out of an unhandled B: that fallback keeps B's scan code, and some
+        // vendor dispatchers drop its FLAG_FALLBACK.
+        if (kc == KeyEvent.KEYCODE_BACK && ((event.getFlags() & KeyEvent.FLAG_FALLBACK) != 0
+                || (event.getScanCode() >= 0x130 && event.getScanCode() <= 0x13f))) return false;
+        // In a Linux Steam session Guide is the Steam button.
+        if (kc == KeyEvent.KEYCODE_BUTTON_MODE && isLinuxSteamSession()) return false;
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            if (event.getRepeatCount() > 0) return menuButtonHeld;
+            // A controller-profile binding for the same button wins.
+            if (inputControlsView != null && inputControlsView.onKeyEvent(event)) return true;
+            menuButtonHeld = true;
             openXServerDrawer();
             return true;
         }
-        if (kc == KeyEvent.KEYCODE_BUTTON_B) {
-            if (action == KeyEvent.ACTION_UP) return padKeysSwallowedUntilUp.remove(kc);
-            if (action != KeyEvent.ACTION_DOWN) return false;
-            if (event.getRepeatCount() == 0 && drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                padKeysSwallowedUntilUp.add(kc);
-                drawerLayout.closeDrawers();
-                return true;
-            }
-            return padKeysSwallowedUntilUp.contains(kc);
+        if (event.getAction() == KeyEvent.ACTION_UP && menuButtonHeld) {
+            // The release of a press that toggled the menu belongs to nobody else.
+            menuButtonHeld = false;
+            return true;
         }
         return false;
     }
 
-    /** Opens the drawer, or closes it when it is already open (the controller chord above). */
     private void openXServerDrawer() {
         if (environment != null) {
             releasePointerCaptureIfNeeded("open-drawer/shortcut");
@@ -7428,12 +7708,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        // Button releases made while another window has focus never reach dispatchKeyEvent, so the chord state could go stale.
-        if (!hasFocus) {
-            padSelectHeld = false;
-            padStartHeld = false;
-            padKeysSwallowedUntilUp.clear();
-        }
         if (hasFocus && waylandClipboard != null) waylandClipboard.refresh();
 
         if (hasFocus && (cursorLock || isRelativeMouseMovement || waylandPointerLocked) && inGameControlsEditor == null) {
@@ -7553,10 +7827,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         WineStartMenuCreator.create(this, container);
         WineUtils.createDosdevicesSymlinks(container);
 
-        // Ship the current in-container file manager (wfm.exe) from the APK into this container's
-        // drive_c\windows on every launch, so an app update delivers a new wfm.exe to EVERY existing
+        // Ship the current in-container file manager (wfm.exe) and winhandler.exe from the APK into this
+        // container's drive_c\windows on every launch, so an app update delivers them to EVERY existing
         // container without an imagefs reinstall or a new container. Version-gated + best-effort.
         stageBundledFileManager();
+        stageBundledWinHandler();
 
         // Configure Wine joystick registry keys based on DInput setting
         int inputType = container.getInputType();
@@ -7629,57 +7904,78 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // asset is replaced so a fresh APK restages the file into every container on next launch.
     private static final String BUNDLED_WFM_VERSION = "1.2.1";
 
+    // Version of the bundled winhandler.exe in app/src/main/assets/winhandler.exe: the prebuilt one from
+    // container_pattern_common.tzst (md5 3b550703…) with its two ShowWindow(hwnd, SW_RESTORE) calls in
+    // bringToFront changed to SW_SHOW (file offsets 0xd5c/0xd8c, 09 -> 05; md5 f64864e1…). The
+    // SwitchToThisWindow(hwnd, TRUE) right after still restores a minimized window (Wine does that for an
+    // iconic window), so the only behaviour change is that a maximized window is no longer
+    // un-maximized when the app brings it to the front. Toy Story 2 maximizes a "Screen Mode Select"
+    // window it created at 0x0; the restore shrank it back to 0x0 and the game waited on an invisible
+    // window (black screen on X11).
+    private static final String BUNDLED_WINHANDLER_VERSION = "1-no-unmaximize";
+
     // Stage the APK-bundled wfm.exe (the in-container file manager) into this container's
     // drive_c\windows, overwriting whatever the imagefs shipped. Previously wfm.exe lived only in the
     // imagefs, so updating it needed an imagefs reinstall; carrying it in the APK and copying it here
     // means an app update reaches every EXISTING container on its next launch — no reinstall, no new
-    // container. A tiny ".wfm_version" marker beside the exe records the staged version; we only rewrite
-    // when it's missing or doesn't match, so the steady-state launch does no work. Best-effort: any
-    // failure is logged and the launch continues on whatever wfm.exe the container already had. Runs on
-    // the background launch worker (setupWineSystemFiles), so the copy is off the UI thread.
+    // container.
     private void stageBundledFileManager() {
+        stageBundledWindowsExe("wfm.exe", ".wfm_version", BUNDLED_WFM_VERSION);
+    }
+
+    // Same for winhandler.exe (see BUNDLED_WINHANDLER_VERSION).
+    private void stageBundledWinHandler() {
+        stageBundledWindowsExe("winhandler.exe", ".winhandler_version", BUNDLED_WINHANDLER_VERSION);
+    }
+
+    // Copy assets/<exeName> into this container's drive_c\windows. A tiny marker file beside the exe
+    // records the staged version; we only rewrite when it's missing or doesn't match, so the
+    // steady-state launch does no work. Best-effort: any failure is logged and the launch continues on
+    // whatever copy the container already had. Runs on the background launch worker
+    // (setupWineSystemFiles), so the copy is off the UI thread.
+    private void stageBundledWindowsExe(String exeName, String markerName, String version) {
         try {
             // The launching container's own drive_c\windows — /home/xuser resolves here through the
-            // xuser symlink at launch, so this is exactly the C:\windows the guest reads wfm.exe from.
+            // xuser symlink at launch, so this is exactly the C:\windows the guest reads the exe from.
             File windowsDir = new File(container.getRootDir(), ".wine/drive_c/windows");
             if (!windowsDir.isDirectory() && !windowsDir.mkdirs()) {
-                Log.w("XServerDisplayActivity", "stageBundledFileManager: windows dir unavailable: " + windowsDir);
+                Log.w("XServerDisplayActivity", "stageBundledWindowsExe: windows dir unavailable: " + windowsDir);
                 return;
             }
-            File wfmFile = new File(windowsDir, "wfm.exe");
-            File marker = new File(windowsDir, ".wfm_version");
+            File exeFile = new File(windowsDir, exeName);
+            File marker = new File(windowsDir, markerName);
 
-            boolean upToDate = wfmFile.isFile() && marker.isFile()
-                    && BUNDLED_WFM_VERSION.equals(FileUtils.readString(marker).trim());
+            boolean upToDate = exeFile.isFile() && marker.isFile()
+                    && version.equals(FileUtils.readString(marker).trim());
             if (upToDate) return;
 
-            // Copy to a temp sibling then rename, so a crash mid-copy can't leave a truncated wfm.exe
+            // Copy to a temp sibling then rename, so a crash mid-copy can't leave a truncated exe
             // that the guest would then try to run.
-            File tmp = new File(windowsDir, "wfm.exe.tmp");
-            try (java.io.InputStream in = getAssets().open("wfm.exe");
+            File tmp = new File(windowsDir, exeName + ".tmp");
+            try (java.io.InputStream in = getAssets().open(exeName);
                  java.io.FileOutputStream out = new java.io.FileOutputStream(tmp)) {
                 byte[] buf = new byte[65536];
                 int n;
                 while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
             }
             if (!tmp.isFile() || tmp.length() == 0) {
-                Log.w("XServerDisplayActivity", "stageBundledFileManager: staged wfm.exe empty, skipping");
+                Log.w("XServerDisplayActivity", "stageBundledWindowsExe: staged " + exeName + " empty, skipping");
                 tmp.delete();
                 return;
             }
             // renameTo won't overwrite on some Android fs layers — clear the old exe first.
-            if (wfmFile.exists()) wfmFile.delete();
-            if (!tmp.renameTo(wfmFile)) {
-                Log.w("XServerDisplayActivity", "stageBundledFileManager: rename into place failed");
+            if (exeFile.exists()) exeFile.delete();
+            if (!tmp.renameTo(exeFile)) {
+                Log.w("XServerDisplayActivity", "stageBundledWindowsExe: rename into place failed for " + exeName);
                 tmp.delete();
                 return;
             }
-            wfmFile.setReadable(true, false);
-            wfmFile.setExecutable(true, false);
-            FileUtils.writeString(marker, BUNDLED_WFM_VERSION);
-            Log.i("XServerDisplayActivity", "Staged bundled wfm.exe " + BUNDLED_WFM_VERSION + " -> " + wfmFile);
+            exeFile.setReadable(true, false);
+            exeFile.setExecutable(true, false);
+            FileUtils.writeString(marker, version);
+            Log.i("XServerDisplayActivity", "Staged bundled " + exeName + " " + version + " -> " + exeFile);
         } catch (Exception e) {
-            Log.w("XServerDisplayActivity", "stageBundledFileManager failed (continuing launch)", e);
+            Log.w("XServerDisplayActivity", "stageBundledWindowsExe(" + exeName + ") failed (continuing launch)", e);
         }
     }
 
@@ -8930,7 +9226,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // extensions either and gave a fresh install the very same black screen, device-seen
         // 2026-09-22) so a clean install boots. (The problem is WinNative's c01a89f0; it
         // downloads a driver, we already ship several.)
-        if (libraryName == null || libraryName.isEmpty()) {
+        // Except on a Mali GPU where "System" was picked on purpose (the picker offers it there,
+        // see ContainerDetailScreen.maliSystemChoice): the user asked for the phone's own driver.
+        boolean maliSystemPick = false;
+        try {
+            String gdcPick = (shortcut != null)
+                    ? shortcut.getExtra("graphicsDriverConfig", container.getGraphicsDriverConfig())
+                    : container.getGraphicsDriverConfig();
+            maliSystemPick = "System".equals(com.winlator.star.contentdialog.GraphicsDriverConfigDialog.getVersion(gdcPick))
+                    && com.winlator.star.core.MaliPanvk.isMaliGpu();
+        } catch (Exception ignored) {}
+        if (maliSystemPick) {
+            Log.w("XServerDisplayActivity", "wayland: Mali with \"System\" picked: the compositor uses the system "
+                    + "Vulkan driver (experimental; no bundled Turnip fallback)");
+        }
+        if (!maliSystemPick && (libraryName == null || libraryName.isEmpty())) {
             try {
                 com.winlator.star.contents.AdrenotoolsManager atm =
                         new com.winlator.star.contents.AdrenotoolsManager(this);
@@ -10261,6 +10571,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // prepare() returns null and realSteamPlan stays null → the NORMAL launch is byte-for-byte
             // unchanged. The refresh token lives ONLY inside the returned env map; nothing here logs it.
             maybeStageRealSteam();
+            // App Steam (Option B): mutually exclusive with the above by launchMode. Starts the app's
+            // genuine Steam session host now so its sign-in overlaps the rest of the launch setup.
+            maybeStageAppSteam();
             // Tell the drawer's Friends tab which source to wait for: the agent relay when the plan is
             // armed, else the app's own session (a fallback to the normal launch never pauses it).
             try { com.winlator.star.store.InGameFriendsSource.INSTANCE.setRealSteamLaunch(realSteamPlan != null); }
@@ -10420,6 +10733,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
             }
 
+            // "Fast OpenGL" on X11: the bundled Mesa through Wine's EGL backend or, for layers without
+            // it, winex11's GLX on the X server's server-side GLX, so Zink presents through a Vulkan
+            // swapchain instead of XMesa's finish + readback + XPutImage per frame (see
+            // core.FastOpenGL / X11Egl). After both user env merges so a value the user typed wins, and
+            // before the X server's socket opens below (the GLX route turns server GLX on); never on
+            // Wayland (winewayland always uses its own EGL) or in the Linux session. The same helper
+            // writes "Show OpenGL FPS" / "OpenGL vsync off", which apply on both backends.
+            if (!gamescopeMode) applyFastOpenGLEnv(waylandMode);
+
+            // Full-colour game cursors on X11: register the cursor subset of RENDER so libXcursor
+            // stops falling back to two-colour core cursors. Same placement rule as Fast OpenGL
+            // (after the user env merges, before the socket opens); Wine on X11 only, since the
+            // prefix step above keeps winex11's GDI off RENDER. BANNER_X11_RENDER=0 turns it off.
+            if (!gamescopeMode && !waylandMode) applyColorCursors();
+            // Raw mouse on X11 (XInput 2), same placement rule. BANNER_X11_XINPUT2=0 turns it off.
+            if (!gamescopeMode && !waylandMode) applyXInput2();
+            if (!gamescopeMode && !waylandMode) applyX11CursorAutoHide();
+
             // Keep the lsfg-vk Vulkan layer INERT unless lsfg-vk is actually the engine.
             // Placed AFTER both user env merges (container above, shortcut just here) so
             // nothing the user carries over can re-enable it. The layer's manifest honours
@@ -10453,6 +10784,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // PROTON_DISABLE_LSTEAMCLIENT env HERE — after the container (5288) and shortcut/Epic env merges
             // — so the RealSteam env always wins. No-op (realSteamPlan == null) for every non-RealSteam or
             // failed-prep launch. The refresh token lives ONLY inside plan.env; nothing here logs it.
+            // App Steam (Option B) — ENV injection (no secrets in this map). Removes the SteamLite-only
+            // switches (PROTON_DISABLE_LSTEAMCLIENT must be UNSET so ntdll redirects steamclient64.dll
+            // to lsteamclient.dll) and adds WINESTEAMCLIENTPATH64 / Steam3Master / SteamAppId… so the
+            // game's genuine steam_api reaches the app's session host. No-op unless a plan is armed.
+            if (appSteamPlan != null) {
+                for (String k : appSteamPlan.envRemove) envVars.remove(k);
+                for (Map.Entry<String, String> e : appSteamPlan.env.entrySet())
+                    envVars.put(e.getKey(), e.getValue());
+                Log.i("BH_APPSTEAM", "guest env merged (" + appSteamPlan.env.size() + " keys; PROTON_DISABLE_LSTEAMCLIENT unset)");
+            }
             if (realSteamPlan != null) {
                 for (Map.Entry<String, String> e : realSteamPlan.env.entrySet())
                     envVars.put(e.getKey(), e.getValue());
@@ -10525,6 +10866,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (overrideEnvVars != null) {
             envVars.putAll(overrideEnvVars);
             overrideEnvVars.clear(); // Clear overrideEnvVars as per smali logic
+        }
+
+        // Codecs rows (Win Components tab): the registry half is applyMediaDecoderSettings(); these
+        // two env vars are the rest. Only ever ADDED, so a user's own value in the env string stays.
+        {
+            String codecComponents = shortcut != null ? shortcut.getExtra("wincomponents", container.getWinComponents()) : container.getWinComponents();
+            if (MediaDecoder.backend(codecComponents) == MediaDecoder.BACKEND_FFMPEG && !envVars.has("WINE_USE_DMO")) {
+                envVars.put("WINE_USE_DMO", "1");
+            }
+            if (MediaDecoder.softwareDecoding(codecComponents) && !envVars.has("WINE_DO_NOT_CREATE_DXGI_DEVICE_MANAGER")) {
+                envVars.put("WINE_DO_NOT_CREATE_DXGI_DEVICE_MANAGER", "1");
+            }
         }
 
         // Sync selector: the ONE writer of WINEESYNC / WINENTSYNC (and the remover of WINEFSYNC). After
@@ -10682,6 +11035,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // reports itself), non-Steam shortcuts, or with the setting off. Cleared on exit / destroy.
         announceOfflineSteamPresence();
 
+        // App Steam: wait (bounded) for the app's session host to be signed in + ready before the guest
+        // boots, so the game's steam_api finds a live client. No-op for every other launch.
+        awaitAppSteamHost();
+
         // Start all environment components (XServer, Audio, Wine, etc.)
         preloaderDialog.step(4, "Launching Windows…");
         environment.startEnvironmentComponents();
@@ -10738,6 +11095,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // in onCreate) so the drawer can grey Wayland-unsupported controls such as Relative Mouse.
         XServerDrawerState.INSTANCE.setIsWaylandMode(waylandMode);
         if (waylandMode) setupWaylandDrawerGlue();
+        XServerDrawerState.INSTANCE.setLinuxRuntimeSession(gamescopeMode || isLinuxRuntimeSession());
         if (isLinuxSteamSession()) setupLinuxSteamDrawerGlue(rootView);
         xServerView = new XServerView(this, xServer);
         String rendererType = container != null ? resolvedRenderer() : "vulkan";
@@ -10771,6 +11129,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServerView.initRenderer(rendererType);
         final HostRenderer renderer = xServerView.getRenderer();
         renderer.setCursorVisible(false);
+        x11CursorWanted = false;
+        if (!waylandMode) {
+            // On/off is decided later, once the user's env vars are merged (applyX11CursorAutoHide);
+            // x11CursorPoke checks it on every call.
+            // Called on whichever thread injected the input; coalesce to one UI-thread poke.
+            xServer.setPointerActivityListener(() -> {
+                if (x11CursorPokePending.compareAndSet(false, true)) {
+                    runOnUiThread(() -> {
+                        x11CursorPokePending.set(false);
+                        x11CursorPoke();
+                    });
+                }
+            });
+        }
 
         // Power-user perf (non-root): arm the thermal watchdog for this session, and if the priority
         // boost is on, raise the guest CPU-worker subtree once it exists (short delay so the guest is
@@ -11198,6 +11570,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // surface, which hands them to gamescope as real touches (Big Picture scrolls under one).
         // Read at every touch, so the drawer's Touch choice applies at once.
         touchpadView.setPassThrough(() -> gamescopeMode && waylandTouchscreenMode(), () -> waylandSurfaceView);
+        touchpadView.setWakeGate(this::x11TouchOnlyWakesCursor);
         rootView.addView(touchpadView);
 
         inputControlsView = new InputControlsView(this, timeoutHandler, hideControlsRunnable);
@@ -11593,7 +11966,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         String arch = arm64ec ? "arm64ec" : "x86-64";
         String emu = emulator == null ? "" : emulator.toLowerCase();
         String translator;
+        String emu64 = shortcut != null
+                ? shortcut.getExtra("emulator64", container.getEmulator64()) : container.getEmulator64();
         if (!arm64ec) translator = "Box64";                 // x86-64 always runs under box64
+        else if (Container.EMULATOR64_BOX64EC.equalsIgnoreCase(emu64)) translator = "Box64EC";
         else if (emu.contains("wowbox64")) translator = "wowbox64";
         else translator = "FEXCore";
 
@@ -12802,6 +13178,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
         envVars.put("MESA_VK_WSI_PRESENT_MODE", presentMode);
     }
 
+    // Mali (PanVK) mode + PANVK_* (the Wayland driver gear's Mali section). Mali GPUs only: elsewhere
+    // it returns at once and stored maliMode/panvk* keys are ignored. Before the BCn block so its
+    // default bcnEmulation=none is what that block reads.
+    String maliApplied = com.winlator.star.core.MaliPanvk.applyToLaunchEnv(this, envVars, graphicsDriverConfig,
+            adrenoToolsDriverId);
+    if (maliApplied != null && wineDebugWriter != null) wineDebugWriter.println("XServerVulkan: " + maliApplied);
+
     String resourceType = graphicsDriverConfig.get("resourceType");
     if (resourceType != null) envVars.put("WRAPPER_RESOURCE_TYPE", resourceType);
 
@@ -13064,13 +13447,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             super.dispatchGenericMotionEvent(event);
             return true;
         }
-        // A physical pad moving/pressing: the player is not using the pointer, so let the Wayland
-        // overlay cursor hide (see waylandCursorPoke).
-        if (waylandMode) {
+        // A physical pad moving/pressing: the player is not using the pointer, so let the pointer
+        // hide (Wayland overlay: waylandCursorPoke; X11: x11CursorPoke).
+        {
             int src = event.getSource();
             if ((src & android.view.InputDevice.SOURCE_JOYSTICK) == android.view.InputDevice.SOURCE_JOYSTICK
                     || (src & android.view.InputDevice.SOURCE_GAMEPAD) == android.view.InputDevice.SOURCE_GAMEPAD) {
                 waylandNotePadInput();
+                x11CursorPadInput();
             }
         }
         if (isSteamControllerShadowEvent(event.getDevice())) return true;
@@ -13120,13 +13504,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             super.dispatchKeyEvent(event);
             return true;
         }
-        // A physical pad moving/pressing: the player is not using the pointer, so let the Wayland
-        // overlay cursor hide (see waylandCursorPoke).
-        if (waylandMode) {
+        // A physical pad moving/pressing: the player is not using the pointer, so let the pointer
+        // hide (Wayland overlay: waylandCursorPoke; X11: x11CursorPoke).
+        {
             int src = event.getSource();
             if ((src & android.view.InputDevice.SOURCE_JOYSTICK) == android.view.InputDevice.SOURCE_JOYSTICK
                     || (src & android.view.InputDevice.SOURCE_GAMEPAD) == android.view.InputDevice.SOURCE_GAMEPAD) {
                 waylandNotePadInput();
+                x11CursorPadInput();
             }
         }
         if (isSteamControllerShadowEvent(event.getDevice())) return true;
@@ -13139,7 +13524,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             controllerTestFeedKeyEvent(event);
             return true;
         }
-        if (handlePadMenuKeys(event)) return true;
+
+        if (menuButtonEvent(event)) return true;
 
         // Wayland mode: route keyboard keys to wl_keyboard (the guest) instead of the X server.
         // Game controller buttons stay on the normal path below (WinHandler -> XInput, drawer
@@ -13787,6 +14173,10 @@ return true;
             Iterator<String[]> oldWinComponentsIter = new KeyValueSet(container.getExtra("wincomponents", Container.FALLBACK_WINCOMPONENTS)).iterator();
 
             for (String[] wincomponent : new KeyValueSet(wincomponents)) {
+                // Codecs rows are not DLL overrides (no tzst, no registry override): applied by
+                // applyMediaDecoderSettings() instead. Skipped BEFORE the lockstep next() so an
+                // older saved string without them still pairs up entry for entry.
+                if (MediaDecoder.isCodecKey(wincomponent[0])) continue;
                 if (wincomponent[1].equals(oldWinComponentsIter.next()[1]) && !firstTimeBoot) continue;
                 String identifier = wincomponent[0];
                 boolean useNative = wincomponent[1].equals("1");
@@ -13856,6 +14246,75 @@ return true;
                 + " -> " + mode + " [layer esync=" + caps.getEsync() + " ntsync=" + caps.getNtsync() + "]"
                 + " WINEESYNC=" + envVars.get("WINEESYNC")
                 + (envVars.has("WINENTSYNC") ? " WINENTSYNC=" + envVars.get("WINENTSYNC") : ""));
+    }
+
+    /**
+     * Resolve "Fast OpenGL" for this X11 launch (core.FastOpenGL.decideX11) and, when on, export
+     * X11Egl's env for the route: BANNER_X11_EGL=0 (off), BANNER_X11_GLX=1 (GLX route) and
+     * BANNER_X11_EGL=1 (EGL route) in the environment win outright; else the shortcut's override,
+     * else the container's choice (default on), on only when the driver is a Turnip and the APK
+     * carries the GL set. The layer picks the route: EGL when its aarch64-unix win32u knows
+     * WINE_USE_EGL, else GLX, which also turns on the X server's server-side GLX + DRI3/Present 1.2
+     * for this session. Runs on the launch worker before XServerComponent opens the socket, so no
+     * client ever sees the extension list change; EGL route or off leaves the X server as it always
+     * was. On Wayland it is always on and nothing is exported. Then the two plain switches beside it
+     * (Show OpenGL FPS, OpenGL vsync off), on either backend. One log line for all three.
+     */
+    private void applyFastOpenGLEnv(boolean wayland) {
+        if (container == null) return;
+        com.winlator.star.core.FastOpenGL.X11Decision decision;
+        if (wayland) {
+            decision = null;
+        } else {
+            String game = shortcut != null
+                    ? com.winlator.star.core.FastOpenGL.normalize(shortcut.getExtra(com.winlator.star.core.FastOpenGL.EXTRA))
+                    : null;
+            boolean requested = game != null ? game.equals("1") : container.isFastOpenGL();
+            String driverId = graphicsDriverConfig != null ? graphicsDriverConfig.get("version") : null;
+            decision = com.winlator.star.core.FastOpenGL.decideX11(requested, game != null ? "game" : "container",
+                    com.winlator.star.core.X11Egl.envOverride(envVars),
+                    com.winlator.star.core.X11Egl.glxForced(envVars),
+                    com.winlator.star.core.FastOpenGL.unavailableReason(this, driverId),
+                    com.winlator.star.core.FastOpenGL.layerHasEgl(wineInfo != null ? wineInfo.path : null));
+        }
+        String detail = null;
+        String glxLine = null;
+        if (decision != null && decision.getOn()) {
+            boolean egl = decision.route == com.winlator.star.core.FastOpenGL.Route.EGL;
+            detail = com.winlator.star.core.X11Egl.apply(this, envVars, imageFs.getRootDir().getPath() + "/usr/lib", egl);
+            if (detail == null) {
+                decision = new com.winlator.star.core.FastOpenGL.X11Decision(null,
+                        "unsupported: the bundled GL libraries could not be installed");
+            } else if (!egl) {
+                xServer.enableServerGlx();
+                glxLine = "x11 glx: server GLX + DRI3/Present 1.2 on (" + decision.why + ")";
+            }
+        }
+        String line = (decision != null ? decision.toString() : "fast opengl: on (wayland)")
+                + " | fps hud: " + applyGlLaunchSwitch(com.winlator.star.core.FastOpenGL.FPS_HUD)
+                + " | vsync off: " + applyGlLaunchSwitch(com.winlator.star.core.FastOpenGL.VSYNC_OFF);
+        Log.i("XServerDisplayActivity", line + (detail != null ? " - " + detail : ""));
+        if (glxLine != null) Log.i("XServerDisplayActivity", glxLine);
+        if (wineDebugWriter != null) {
+            wineDebugWriter.println(line);
+            if (detail != null) wineDebugWriter.println(detail);
+            if (glxLine != null) wineDebugWriter.println(glxLine);
+        }
+    }
+
+    /**
+     * Resolve one plain OpenGL switch (shortcut override, else container) and export its variable when
+     * on, unless the environment variables already set it. Returns its part of the log line.
+     */
+    private String applyGlLaunchSwitch(com.winlator.star.core.GlLaunchSwitch sw) {
+        String game = shortcut != null ? com.winlator.star.core.FastOpenGL.normalize(shortcut.getExtra(sw.extra)) : null;
+        boolean on = sw.requested(container.getExtra(sw.extra), shortcut != null ? shortcut.getExtra(sw.extra) : null);
+        String why = game != null ? "game" : "container";
+        if (!on) return "off (" + why + ")";
+        if (envVars.has(sw.envName))
+            return "on (" + why + ", " + sw.envName + "=" + envVars.get(sw.envName) + " is yours, kept)";
+        envVars.put(sw.envName, sw.envValue);
+        return "on (" + why + ", " + sw.envName + "=" + sw.envValue + ")";
     }
 
     private String getWineStartCommand() {
@@ -15033,6 +15492,29 @@ return true;
         return overrideEnvVars;
     }
 
+    // Codecs rows of the Win Components tab (per-game override → container). Written on every
+    // launch (idempotent, survives a prefix regen) into the ACTIVE prefix's user.reg: a DWORD 0
+    // under HKCU\Software\Wine\MediaFoundation routes Wine's MF byte-stream handlers to
+    // winegstreamer, a DWORD 1 to winedmo (FFmpeg). See MediaDecoder.
+    // The env side (WINE_USE_DMO / WINE_DO_NOT_CREATE_DXGI_DEVICE_MANAGER) is added where the
+    // launch env is assembled, after the override merge.
+    private void applyMediaDecoderSettings() {
+        String wincomponents = shortcut != null ? shortcut.getExtra("wincomponents", container.getWinComponents()) : container.getWinComponents();
+        boolean gstreamer = MediaDecoder.backend(wincomponents) == MediaDecoder.BACKEND_GSTREAMER;
+        File rootDir = imageFs.getRootDir();
+        File userRegFile = new File(rootDir, ImageFs.WINEPREFIX+"/user.reg");
+        try (WineRegistryEditor registryEditor = new WineRegistryEditor(userRegFile)) {
+            if (gstreamer) {
+                registryEditor.setDwordValue(MediaDecoder.REG_KEY, MediaDecoder.REG_VALUE, 0);
+            }
+            else {
+                registryEditor.setDwordValue(MediaDecoder.REG_KEY, MediaDecoder.REG_VALUE, 1);
+            }
+        }
+        Log.d("XServerDisplayActivity", "Media decoder backend: " + (gstreamer ? "GStreamer" : "FFmpeg (winedmo)")
+                + ", software decoding " + MediaDecoder.softwareDecoding(wincomponents));
+    }
+
     private void changeWineAudioDriver() {
         if (!audioDriver.equals(container.getExtra("audioDriver"))) {
             File rootDir = imageFs.getRootDir();
@@ -15098,6 +15580,73 @@ return true;
         if (unlock && !capable && explicit) {
             runOnUiThread(() -> showToast(this, R.string.refresh_unlock_needs_compatible_layer));
         }
+    }
+
+    // Keep winex11's GDI drawing off the X RENDER extension. Our server only implements RENDER's
+    // cursor requests (RenderExtension), so without this winex11 would try to draw text and blits
+    // through RENDER the moment it sees the extension. "ClientSideWithRender"="N" makes
+    // X11DRV_XRender_Init return before it even queries RENDER (winex11 xrender.c), while the
+    // Xcursor path in mouse.c still uses it for colour cursors. Harmless when RENDER is off: winex11
+    // then finds no extension and takes the same non-RENDER path. Written on every launch so it
+    // survives a prefix regen and retrofits existing containers.
+    private void applyColorCursorRegistry() {
+        File userRegFile = new File(imageFs.getRootDir(), ImageFs.WINEPREFIX + "/user.reg");
+        try (WineRegistryEditor registryEditor = new WineRegistryEditor(userRegFile)) {
+            registryEditor.setStringValue("Software\\Wine\\X11 Driver", "ClientSideWithRender", "N");
+        }
+        catch (Exception e) {
+            Log.w("XServerDisplayActivity", "colour cursors: could not write ClientSideWithRender", e);
+        }
+    }
+
+    // After both user env merges (container + shortcut), unlike the renderer setup, which runs first.
+    private void applyX11CursorAutoHide() {
+        String v = envVars.has("BANNER_CURSOR_AUTOHIDE") ? envVars.get("BANNER_CURSOR_AUTOHIDE").trim() : "";
+        boolean on = !(v.equals("0") || v.equalsIgnoreCase("false"));
+        x11CursorAutoHide = on;
+        Log.i("XServerDisplayActivity", "x11 cursor auto-hide: " + (on ? "on" : "off (BANNER_CURSOR_AUTOHIDE=" + v + ")"));
+        if (!on) {
+            runOnUiThread(() -> {
+                waylandCursorIdle.removeCallbacks(x11CursorHideRunnable);
+                setX11CursorAutoHidden(false);
+            });
+        }
+    }
+
+    // Raw mouse for Wine on X11: games that read the mouse through raw input (usually mouse-look)
+    // got nothing, every log saying "XInput 2.0 not available". BANNER_X11_XINPUT2=0 turns it off;
+    // BANNER_X11_XGE=1 also advertises the Generic Event extension (A/B: GameNative ships it as an
+    // option); BANNER_X11_XI2_TOUCH=0 keeps touchscreen-mode drags out of raw motion.
+    private void applyXInput2() {
+        if (envFlagOff("BANNER_X11_XINPUT2")) {
+            Log.i("XServerDisplayActivity", "raw mouse (XInput 2): off (BANNER_X11_XINPUT2=0)");
+            return;
+        }
+        boolean xge = envFlagOn("BANNER_X11_XGE");
+        boolean touch = !envFlagOff("BANNER_X11_XI2_TOUCH");
+        xServer.enableXInput2(xge, touch);
+        Log.i("XServerDisplayActivity", "raw mouse (XInput 2): on | XGE " + (xge ? "on" : "off")
+                + " | touchscreen drags " + (touch ? "on" : "off"));
+    }
+
+    private boolean envFlagOff(String name) {
+        String v = envVars.has(name) ? envVars.get(name).trim() : "";
+        return v.equals("0") || v.equalsIgnoreCase("false");
+    }
+
+    private boolean envFlagOn(String name) {
+        String v = envVars.has(name) ? envVars.get(name).trim() : "";
+        return v.equals("1") || v.equalsIgnoreCase("true");
+    }
+
+    private void applyColorCursors() {
+        String v = envVars.has("BANNER_X11_RENDER") ? envVars.get("BANNER_X11_RENDER").trim() : "";
+        if (v.equals("0") || v.equalsIgnoreCase("false")) {
+            Log.i("XServerDisplayActivity", "colour cursors: off (BANNER_X11_RENDER=" + v + ")");
+            return;
+        }
+        xServer.enableRenderCursors();
+        Log.i("XServerDisplayActivity", "colour cursors: on (X RENDER cursor subset)");
     }
 
     // Whether the guest-side refresh setting was explicitly chosen by the user (extra present) vs. left

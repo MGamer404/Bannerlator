@@ -16,6 +16,7 @@ import com.winlator.star.box64.Box64Preset
 import com.winlator.star.box64.Box64PresetManager
 import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
+import com.winlator.star.contentdialog.DXVKConfigDialog
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.WrapperManager
@@ -27,6 +28,7 @@ import com.winlator.star.core.NewContainerDefaults
 import com.winlator.star.core.PreloaderState
 import com.winlator.star.core.StorageRoots
 import com.winlator.star.core.StringUtils
+import com.winlator.star.ui.screens.contents.SetAsDefault
 import com.winlator.star.core.SyncCaps
 import com.winlator.star.core.SyncMode
 import com.winlator.star.core.SyncSupport
@@ -227,6 +229,16 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // Fast OpenGL (extra "fastOpenGL": "1" / "0", absent = on; core.FastOpenGL). fastOpenGL is the
+    // stored switch. Any layer can use it (the launch picks the EGL or GLX route), so availability is
+    // judged in the screen from the picked driver alone; on Wayland the row is locked on and the
+    // stored value is kept as is.
+    var fastOpenGL by mutableStateOf(true)
+    // Show OpenGL FPS / OpenGL vsync off (extras "glFpsHud" / "glVsyncOff", absent = off): plain
+    // launch switches beside Fast OpenGL, on both backends, never greyed.
+    var glFpsHud by mutableStateOf(false)
+    var glVsyncOff by mutableStateOf(false)
+
     // Render scale (supersampling) — stored via the "renderScale" extra (no DB field). "1.0" = Off.
     var renderScale         by mutableStateOf("1.0")
     var autoCloseOnExit     by mutableStateOf(true)
@@ -241,6 +253,14 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var emulatorEntries by mutableStateOf(emptyList<String>()); private set
     var selectedEmulator by mutableStateOf(Container.DEFAULT_EMULATOR)
     var emulatorEnabled by mutableStateOf(false); private set
+
+    // x86-64 translator (arm64ec only): FEXCore, or Box64EC when a Box64EC component is installed.
+    // Stored lowercase on the container ("fexcore" / "box64ec"), shown as the entry labels.
+    val emulator64Entries = listOf("FEXCore", "Box64EC")
+    var selectedEmulator64 by mutableStateOf("FEXCore")
+
+    // Force SSBS (arm64ec only, opt-in): keeps the speculative-store fast path on for game threads.
+    var forceSsbs by mutableStateOf(true)
 
     var midiEntries by mutableStateOf(emptyList<String>()); private set
     var selectedMidiIndex by mutableStateOf(0)
@@ -404,6 +424,10 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var box64PresetEntries by mutableStateOf(emptyList<String>()); private set
     var selectedBox64PresetIndex by mutableStateOf(0)
     private var box64PresetIds = emptyList<String>()
+
+    // ── Box64EC (arm64ec only; installed components only, nothing is bundled) ──
+    var box64ECVersionEntries by mutableStateOf(emptyList<String>()); private set
+    var selectedBox64ECVersion by mutableStateOf("")
 
     // ── FEXCore (arm64ec only) ────────────────────────────────────────────────
     var fexCoreVersionEntries by mutableStateOf(emptyList<String>()); private set
@@ -578,10 +602,13 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         // ARCH-MATCHED profile (box64/wowbox64/emulator/FEXCore are arch-coupled). Defaults mode uses
         // the explicit selector; a real new container derives it from its default wine version (the
         // same isArm64EC refreshWineDependent would compute below); edit mode's template is unused.
+        // A layer set as the default (Contents › Installed › Set as default…) opens the create form.
+        val preferredWine = if (c == null && !defaultsMode)
+            NewContainerDefaults.preferredLayer(context, wineVersionEntries) else null
         val seedArch: String = when {
             defaultsMode -> defaultsArch
             c == null -> if (WineInfo.fromIdentifier(
-                    context, contentsManager, wineVersionEntries.firstOrNull() ?: ""
+                    context, contentsManager, preferredWine ?: wineVersionEntries.firstOrNull() ?: ""
                 ).isArm64EC()) NewContainerDefaults.ARCH_ARM64EC else NewContainerDefaults.ARCH_X86_64
             else -> NewContainerDefaults.ARCH_X86_64
         }
@@ -607,9 +634,10 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         // Wine version — NEVER templated (profiles omit it): a new container always picks its wine
-        // fresh from the REAL container / first entry, so a saved profile can't force one. In defaults
+        // fresh from the REAL container / the default layer set from Contents / first entry, so a
+        // saved profile can't force one. In defaults
         // mode the arch comes from the explicit selector (applyArch), not from any wine version.
-        selectedWineVersion = c?.wineVersion ?: wineVersionEntries.firstOrNull() ?: ""
+        selectedWineVersion = c?.wineVersion ?: preferredWine ?: wineVersionEntries.firstOrNull() ?: ""
         if (defaultsMode) applyArch(defaultsArch == NewContainerDefaults.ARCH_ARM64EC)
         else refreshWineDependent(selectedWineVersion)
 
@@ -636,10 +664,15 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             ?: if (isEditMode) Container.WAYLAND_GAME_DRIVER_AUTO else Container.WAYLAND_GAME_DRIVER_ADAPTER
         waylandHdr               = seed?.isWaylandHdr() ?: false
         unrealHdr                = seed?.getUnrealHdr() ?: com.winlator.star.core.UnrealHdr.OFF
+        fastOpenGL               = seed?.isFastOpenGL() ?: true
+        glFpsHud                 = seed?.isGlFpsHud() ?: false
+        glVsyncOff               = seed?.isGlVsyncOff() ?: false
         renderScale              = seed?.getExtra("renderScale", "1.0") ?: "1.0"
         autoCloseOnExit          = (seed?.getExtra("autoCloseOnExit", "1") ?: "1") == "1"
         selectedDXWrapper        = identifierToDisplay(seed?.getDXWrapper() ?: Container.DEFAULT_DXWRAPPER, dxWrapperEntries)
         dxWrapperConfig          = seed?.getDXWrapperConfig() ?: Container.DEFAULT_DXWRAPPERCONFIG
+        // No profile for this arch: lay its "Set as default" picks over the built-in defaults.
+        if (seed == null) applyDefaultPicks(seedArch, archDependent = false)
 
         // Audio driver (load as display name). Emulator is arch-dependent → seedArchDependentDefaults.
         selectedAudioDriver = identifierToDisplay(seed?.audioDriver ?: Container.DEFAULT_AUDIO_DRIVER, audioDriverEntries)
@@ -855,7 +888,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             isArm64EC -> NewContainerDefaults.ARCH_ARM64EC
             else -> NewContainerDefaults.ARCH_X86_64
         }
-        val json = NewContainerDefaults.load(context, arch) ?: return null
+        val json = NewContainerDefaults.load(context, arch)
+            ?: return NewContainerDefaults.loadPicks(context, arch)?.optString(SetAsDefault.Kind.DRIVER.name)
+                ?.takeIf { it.isNotEmpty() && it != "System" }
         val v = runCatching {
             GraphicsDriverConfigDialog.getVersion(JSONObject(json).optString("graphicsDriverConfig", ""))
         }.getOrNull() ?: return null
@@ -879,6 +914,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
         val current = compositorVersion()
         if ((current.isNotEmpty() && current != "System") || compositorFillJob?.isActive == true) return
+        // On Mali "System" is a choice the picker offers (maliSystemChoice): kept, never refilled.
+        if (current == "System" && com.winlator.star.core.MaliPanvk.isMaliGpu()) return
         compositorDriverSearching = true
         val preferred = defaultsProfileCompositorDriver()
         compositorFillJob = viewModelScope.launch {
@@ -887,6 +924,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
                        finally { if (compositorFillJob === coroutineContext[Job]) compositorDriverSearching = false }
             val now = compositorVersion()
             if (!isWaylandBackend || (now.isNotEmpty() && now != "System")) return@launch
+            if (now == "System" && com.winlator.star.core.MaliPanvk.isMaliGpu()) return@launch
             if (pick == null) { compositorDriverNoneUsable = true; return@launch }
             versionBeforeCompositorFill = now
             // The auto-picked driver is part of the loaded form, not a user edit.
@@ -937,9 +975,45 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         loadFEXCoreVersions()
         selectedFEXCoreVersion = archSeed?.getFEXCoreVersion() ?: DefaultVersion.FEXCORE
 
+        // x86-64 translator + Box64EC version (installed components only).
+        selectedEmulator64 = identifierToDisplay(archSeed?.emulator64 ?: Container.DEFAULT_EMULATOR64, emulator64Entries)
+        loadBox64ECVersions()
+        selectedBox64ECVersion = archSeed?.box64ECVersion
+            ?.takeIf { it.isNotEmpty() && box64ECVersionEntries.contains(it) }
+            ?: (box64ECVersionEntries.firstOrNull() ?: "")
+        forceSsbs = archSeed?.isForceSsbs ?: true
+
         // FEXCore preset.
         val fexPreset = archSeed?.getFEXCorePreset() ?: prefs.getString("fexcore_preset", FEXCorePreset.INTERMEDIATE) ?: FEXCorePreset.INTERMEDIATE
         selectedFEXCorePresetIndex = fexCorePresetIds.indexOf(fexPreset).takeIf { it >= 0 } ?: 0
+
+        if (archSeed == null) applyDefaultPicks(arch, archDependent = true)
+    }
+
+    /**
+     * The sparse "Set as default" picks for [arch] (NewContainerDefaults.loadPicks), written onto the
+     * form through the same writers the Contents hub uses for containers. Only used when [arch] has
+     * no full profile (a profile carries the values itself). [archDependent] = the Box64/WOWBox64 and
+     * FEXCore versions (seedArchDependentDefaults); otherwise the graphics driver and DX wrapper.
+     * A value no longer in its list (component removed since) is ignored.
+     */
+    private fun applyDefaultPicks(arch: String, archDependent: Boolean) {
+        val picks = NewContainerDefaults.loadPicks(context, arch) ?: return
+        fun pick(kind: SetAsDefault.Kind) = picks.optString(kind.name).ifEmpty { null }
+        if (archDependent) {
+            val b64Kind = if (arch == NewContainerDefaults.ARCH_ARM64EC) SetAsDefault.Kind.WOWBOX64 else SetAsDefault.Kind.BOX64
+            pick(b64Kind)?.takeIf { it in box64VersionEntries }?.let { selectedBox64Version = it }
+            pick(SetAsDefault.Kind.FEXCORE)?.takeIf { it in fexCoreVersionEntries }?.let { selectedFEXCoreVersion = it }
+            return
+        }
+        pick(SetAsDefault.Kind.DRIVER)?.let { graphicsDriverConfig = withGraphicsDriverVersion(graphicsDriverConfig, it) }
+        val dxvk = { DXVKConfigDialog.loadDxvkVersionList(context, contentsManager, arch == NewContainerDefaults.ARCH_ARM64EC) }
+        for (kind in listOf(SetAsDefault.Kind.DXVK, SetAsDefault.Kind.VEGAS, SetAsDefault.Kind.VKD3D)) {
+            val v = pick(kind) ?: continue
+            val (w, cfg) = SetAsDefault.withDx(kind, v, StringUtils.parseIdentifier(selectedDXWrapper), dxWrapperConfig, dxvk)
+            selectedDXWrapper = identifierToDisplay(w, dxWrapperEntries)
+            dxWrapperConfig = cfg
+        }
     }
 
     // The arch-dependent slice of the form: emulator gate + the box64/wowbox64 version list & its
@@ -965,6 +1039,16 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
         box64VersionEntries = b64Array
         selectedBox64Version = box64VersionEntries.firstOrNull() ?: ""
+    }
+
+    private fun loadBox64ECVersions() {
+        val list = mutableListOf<String>()
+        for (p in contentsManager.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_BOX64EC) ?: emptyList()) {
+            val name = ContentsManager.getEntryName(p)
+            val dash = name.indexOf('-')
+            list.add(name.substring(dash + 1))
+        }
+        box64ECVersionEntries = list
     }
 
     private fun loadFEXCoreVersions() {
@@ -1064,6 +1148,13 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshFEXCoreVersions() {
         contentsManager.syncContents()
         loadFEXCoreVersions()
+    }
+
+    fun refreshBox64ECVersions() {
+        contentsManager.syncContents()
+        loadBox64ECVersions()
+        if (selectedBox64ECVersion !in box64ECVersionEntries)
+            selectedBox64ECVersion = box64ECVersionEntries.firstOrNull() ?: ""
     }
 
     fun onExclusiveXInputChanged(checked: Boolean) {
@@ -1321,6 +1412,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         c.setWaylandGameDriver(waylandGameDriver)
         c.setWaylandHdr(waylandHdr)                 // off clears the extra
         c.setUnrealHdr(unrealHdr)                   // off clears the extra
+        c.setFastOpenGL(fastOpenGL)                 // kept as chosen, also while Wayland locks it on
+        c.setGlFpsHud(glFpsHud)
+        c.setGlVsyncOff(glVsyncOff)
         c.putExtra("renderScale", if (renderScale == "1.0") null else renderScale)
         c.putExtra("autoCloseOnExit", if (autoCloseOnExit) null else "0")  // default ON
         c.setInputType(inputType)
@@ -1332,6 +1426,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         c.setBox64Preset(box64PresetIds.getOrElse(selectedBox64PresetIndex) { Box64Preset.COMPATIBILITY })
         c.setFEXCoreVersion(selectedFEXCoreVersion)
         c.setFEXCorePreset(fexCorePresetIds.getOrElse(selectedFEXCorePresetIndex) { FEXCorePreset.INTERMEDIATE })
+        c.setEmulator64(StringUtils.parseIdentifier(selectedEmulator64))
+        c.setBox64ECVersion(selectedBox64ECVersion)
+        c.setForceSsbs(forceSsbs)
         c.desktopTheme       = buildDesktopThemeStr(colorAsString)
         c.setMidiSoundFont(if (selectedMidiIndex == 0) "" else midiEntries.getOrElse(selectedMidiIndex) { "" })
         c.setLC_ALL(lcAll)
@@ -1423,6 +1520,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             profile.remove("drives")
             profile.remove("wineVersion")
             NewContainerDefaults.save(context, defaultsArch, profile.toString())
+            // The form showed the arch's "Set as default" picks; they're in the profile now.
+            NewContainerDefaults.clearPicks(context, defaultsArch)
             AppUtils.showToast(context, R.string.new_container_defaults_saved)
         } catch (e: Exception) {
             AppUtils.showToast(context, R.string.new_container_defaults_save_failed)
@@ -1433,6 +1532,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     /** Reset mode ✓: forget the CURRENT arch's profile and reload the form to its built-in defaults. */
     fun resetDefaults() {
         NewContainerDefaults.clear(context, defaultsArch)
+        // App defaults means app defaults: the arch's "Set as default" picks and layer go too.
+        NewContainerDefaults.clearPicks(context, defaultsArch)
+        NewContainerDefaults.clearLayer(context, defaultsArch)
         loadContainerData()   // template is now null → every field falls back to Container.DEFAULT_*
         AppUtils.showToast(context, R.string.reset_to_app_defaults)
     }

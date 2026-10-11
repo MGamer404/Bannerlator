@@ -257,12 +257,65 @@ object SteamPrefs {
 
     private const val K_CLOUD_SUPPORT_PREFIX = "cloud_support_"
 
+    /**
+     * Version of the rule that produced the cached verdicts. Rule 1 only looked at `ufs/savefiles`, so
+     * every game that keeps its saves through the Steam API (a UFS quota but no savefiles rules —
+     * Left 4 Dead 2, Counter-Strike: Source, …) was cached as "no cloud" and never uploaded again.
+     * Rule 2 also counts the quota / file limit and a non-empty cloud manifest. The key deliberately
+     * does NOT start with [K_CLOUD_SUPPORT_PREFIX], so the migration below can't mistake it for a verdict.
+     */
+    private const val K_CLOUD_RULE_VERSION = "cloud_rule_version"
+    private const val CLOUD_RULE_VERSION = 2
+
+    @Volatile private var cloudRuleChecked = false
+
+    /** One-time: drop every "no cloud" verdict cached by rule 1 so those games are probed again. */
+    private fun migrateCloudSupportVerdicts() {
+        if (cloudRuleChecked) return
+        synchronized(this) {
+            if (cloudRuleChecked) return
+            if (prefs.getInt(K_CLOUD_RULE_VERSION, 1) < CLOUD_RULE_VERSION) {
+                val stale = prefs.all.filter { (k, v) -> k.startsWith(K_CLOUD_SUPPORT_PREFIX) && v == false }.keys
+                val ed = prefs.edit()
+                for (k in stale) ed.remove(k)
+                ed.putInt(K_CLOUD_RULE_VERSION, CLOUD_RULE_VERSION).apply()
+                android.util.Log.i("BH_STEAM_CLOUD", "cloud-support rule $CLOUD_RULE_VERSION: cleared ${stale.size} stale 'no cloud' verdict(s)")
+            }
+            cloudRuleChecked = true
+        }
+    }
+
     /** Cached Steam-Cloud-support verdict for [appId]: true/false if resolved before, null if never. */
     fun getCloudSupportCached(ctx: Context, appId: Int): Boolean? {
         init(ctx)
+        migrateCloudSupportVerdicts()
         val key = K_CLOUD_SUPPORT_PREFIX + appId
         if (!prefs.contains(key)) return null
         return prefs.getBoolean(key, false)
+    }
+
+    // ── Cached UFS config (PICS `ufs`: quota, file limit, savefiles rules) ─────────────────────
+    // Stored as the JSON [SteamUfsConfig] writes, so Collect can scope itself to the game's save
+    // rules without a network round-trip (it runs on game exit, possibly offline).
+
+    private const val K_UFS_PREFIX = "ufs_config_v1_"
+
+    fun getUfsConfigJson(ctx: Context, appId: Int): String? {
+        init(ctx)
+        return prefs.getString(K_UFS_PREFIX + appId, null)
+    }
+
+    fun setUfsConfigJson(ctx: Context, appId: Int, json: String) {
+        init(ctx)
+        prefs.edit().putString(K_UFS_PREFIX + appId, json).apply()
+    }
+
+    /** The signed-in account's 32-bit id (SteamID3), derived from the 64-bit id if needed; 0 = unknown. */
+    fun accountIdOrDerived(ctx: Context): Int {
+        init(ctx)
+        val a = prefs.getInt(K_ACCOUNT_ID, 0)
+        if (a != 0) return a
+        return (prefs.getLong(K_STEAM_ID_64, 0L) and 0xFFFFFFFFL).toInt()
     }
 
     /** Persist a DEFINITIVE Steam-Cloud-support verdict for [appId]. Only call with a known true/false. */

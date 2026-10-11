@@ -124,4 +124,37 @@ object GlobalControllerPrefs {
             .putString(KEY_STEAM_PADDLES[index], binding.name)
             .apply()
     }
+    // ───── Menu button (Input Controls › Device) ─────
+    // One button on the device's own pad that opens the in-game side menu, for handhelds whose
+    // built-in controls have no Back key. LIVE: each game session reads it. Off (0) until the user
+    // picks one: no pad button opens the menu by default.
+    private const val KEY_MENU_BUTTON = "global_menu_button_keycode"
+
+    @JvmStatic
+    fun getMenuButtonKeyCode(context: Context): Int =
+        PreferenceManager.getDefaultSharedPreferences(context).getInt(KEY_MENU_BUTTON, 0)
+
+    /** [keyCode] 0 turns the menu button off. */
+    @JvmStatic
+    fun setMenuButtonKeyCode(context: Context, keyCode: Int) {
+        PreferenceManager.getDefaultSharedPreferences(context).edit().putInt(KEY_MENU_BUTTON, keyCode).apply()
+    }
+
+    @JvmStatic
+    fun menuButtonName(keyCode: Int): String = when (keyCode) {
+        0 -> "None"
+        android.view.KeyEvent.KEYCODE_BUTTON_MODE -> "Guide / Home"
+        android.view.KeyEvent.KEYCODE_BUTTON_SELECT -> "Select / View"
+        android.view.KeyEvent.KEYCODE_BUTTON_START -> "Start / Menu"
+        android.view.KeyEvent.KEYCODE_BUTTON_THUMBL -> "Left stick click (L3)"
+        android.view.KeyEvent.KEYCODE_BUTTON_THUMBR -> "Right stick click (R3)"
+        android.view.KeyEvent.KEYCODE_BACK -> "Back"
+        else -> android.view.KeyEvent.keyCodeToString(keyCode).removePrefix("KEYCODE_").replace('_', ' ')
+    }
+}
+
+/** While Input Controls is waiting for the menu button, MainActivity hands it the next key press:
+ *  the key code on release, or -1 if the user backed out with the screen's own Back. */
+object MenuButtonCaptureBus {
+    @JvmField @Volatile var listener: ((Int) -> Unit)? = null
 }
