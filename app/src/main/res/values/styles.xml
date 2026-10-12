@@ -34,6 +34,16 @@
         <item name="popupMenuStyle">@style/PopupMenu.Dark</item>
     </style>
 
+    <!-- "Open with → Bannerlator" (OpenExeActivity): only its dialogs show, over the file manager
+         that sent the .exe, so the window itself is see-through and dim-free. -->
+    <style name="AppTheme.Dark.Translucent" parent="@style/AppTheme.Dark">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+
     <!-- Cold-start splash (AndroidX core-splashscreen). Shown by the OS before the launcher
          activity's first frame, then hands off to postSplashScreenTheme (AppTheme.Dark). -->
     <style name="Theme.Bannerlator.Splash" parent="Theme.SplashScreen">

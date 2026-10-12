@@ -122,14 +122,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.winlator.star.MainActivity
 import com.winlator.star.R
-import com.winlator.star.XServerDisplayActivity
 import com.winlator.star.container.Container
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.PeIconExtractor
 import com.winlator.star.core.StorageRoots
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.GameIdentifier
-import com.winlator.star.core.WinePath
 import com.winlator.star.util.FavoritesStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -542,49 +540,17 @@ fun FileManagerScreen(
         return name.endsWith(".exe") || name.endsWith(".bat") || name.endsWith(".msi") || name.endsWith(".sh")
     }
 
-    // Launch [file] inside [container] the same way the Games importer does: map the
-    // file's folder to a Wine drive letter (persisted on the container), then hand
-    // XServerDisplayActivity a shortcut whose Exec is `wine <X:\path>`. We don't add a
-    // permanent Games entry — the .desktop lives in app storage, not the container's
-    // desktop dir, so it never shows up in the Shortcuts list.
+    // Launch [file] inside [container] without adding a Games entry — see ExeQuickRun, which
+    // "Open with → Bannerlator" (OpenExeActivity) shares so the two never drift.
     fun runFileInContainer(file: File, container: Container) {
         scope.launch {
             val shortcutFile = withContext(Dispatchers.IO) {
-                runCatching {
-                    val winPath = WinePath.resolveWindowsPath(container, file.absolutePath)
-                    val escaped = WinePath.escapeForExec(winPath)
-                    val desktopDir = File(context.filesDir, "desktops").apply { mkdirs() }
-                    val safeName = file.nameWithoutExtension
-                        .replace(Regex("""[\\/:*?"<>|]"""), "_").trim().ifEmpty { "run" }
-                    File(desktopDir, "$safeName.desktop").apply {
-                        writeText(
-                            buildString {
-                                append("[Desktop Entry]\n")
-                                append("Name=").append(file.nameWithoutExtension).append("\n")
-                                append("Exec=wine ").append(escaped).append("\n")
-                                append("Icon=").append(safeName).append("\n")
-                                append("Type=Application\n")
-                                append("StartupWMClass=explorer\n")
-                                append("\ncontainer_id:").append(container.id).append("\n")
-                                append("\n[Extra Data]\n")
-                            }
-                        )
-                    }
-                }
+                runCatching { ExeQuickRun.writeRunShortcut(context, container, file) }
             }.getOrElse { failure ->
-                val message = if (failure is WinePath.NoFreeDriveLetterException) {
-                    "No free drive letters left in this container — remove one you don't need in its Drives tab"
-                } else {
-                    "Couldn't prepare ${file.name} to run"
-                }
-                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                Toast.makeText(context, ExeQuickRun.failureMessage(file, failure), Toast.LENGTH_LONG).show()
                 return@launch
             }
-            val intent = Intent(context, XServerDisplayActivity::class.java)
-            intent.putExtra("container_id", container.id)
-            intent.putExtra("shortcut_path", shortcutFile.absolutePath)
-            intent.putExtra("shortcut_name", shortcutFile.nameWithoutExtension)
-            context.startActivity(intent)
+            context.startActivity(ExeQuickRun.sessionIntent(context, container, shortcutFile))
         }
     }
 

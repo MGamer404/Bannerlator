@@ -198,6 +198,102 @@
             android:screenOrientation="sensor"
             android:exported="false" />
 
+        <!-- "Open with → Bannerlator" for a Windows .exe in any file manager (OpenExeActivity). Wine runs
+             the exe from its real folder, so the activity resolves the shared Uri back to a path; it never
+             copies the file. Kept narrow so it doesn't show up for every file:
+              1. the .exe MIME types, matched as-is (file managers that know what an exe is);
+              2. octet-stream / any type, or no type at all, ONLY when the path ends in .exe — pathPattern's
+                 matcher stops ".*" at the first ".", so each extra dot in the path needs its own variant
+                 (up to five here), and pathSuffix (Android 12+) covers the rest;
+              3. ACTION_SEND for the .exe MIME types only (a share carries no path to check).
+             The activity still checks the PE header and turns away anything that isn't a Windows program.
+             No screenOrientation: a translucent activity that fixes one crashes on Android 8.0. -->
+        <activity
+            android:name="com.winlator.star.OpenExeActivity"
+            android:theme="@style/AppTheme.Dark.Translucent"
+            android:excludeFromRecents="true"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation|uiMode"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/x-msdownload" />
+                <data android:mimeType="application/x-msdos-program" />
+                <data android:mimeType="application/x-dosexec" />
+                <data android:mimeType="application/x-ms-dos-executable" />
+                <data android:mimeType="application/vnd.microsoft.portable-executable" />
+                <data android:mimeType="application/exe" />
+                <data android:mimeType="application/x-exe" />
+                <data android:mimeType="application/x-winexe" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="*/*" />
+                <data android:pathSuffix=".exe" tools:targetApi="31" />
+                <data android:pathPattern=".*\\.exe" />
+                <data android:pathPattern=".*\\..*\\.exe" />
+                <data android:pathPattern=".*\\..*\\..*\\.exe" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.exe" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\..*\\.exe" />
+                <data android:pathSuffix=".EXE" tools:targetApi="31" />
+                <data android:pathPattern=".*\\.EXE" />
+                <data android:pathPattern=".*\\..*\\.EXE" />
+                <data android:pathPattern=".*\\..*\\..*\\.EXE" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.EXE" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\..*\\.EXE" />
+                <data android:pathSuffix=".Exe" tools:targetApi="31" />
+                <data android:pathPattern=".*\\.Exe" />
+                <data android:pathPattern=".*\\..*\\.Exe" />
+                <data android:pathPattern=".*\\..*\\..*\\.Exe" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.Exe" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\..*\\.Exe" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:pathSuffix=".exe" tools:targetApi="31" />
+                <data android:pathPattern=".*\\.exe" />
+                <data android:pathPattern=".*\\..*\\.exe" />
+                <data android:pathPattern=".*\\..*\\..*\\.exe" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.exe" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\..*\\.exe" />
+                <data android:pathSuffix=".EXE" tools:targetApi="31" />
+                <data android:pathPattern=".*\\.EXE" />
+                <data android:pathPattern=".*\\..*\\.EXE" />
+                <data android:pathPattern=".*\\..*\\..*\\.EXE" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.EXE" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\..*\\.EXE" />
+                <data android:pathSuffix=".Exe" tools:targetApi="31" />
+                <data android:pathPattern=".*\\.Exe" />
+                <data android:pathPattern=".*\\..*\\.Exe" />
+                <data android:pathPattern=".*\\..*\\..*\\.Exe" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.Exe" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\..*\\.Exe" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/x-msdownload" />
+                <data android:mimeType="application/x-msdos-program" />
+                <data android:mimeType="application/x-dosexec" />
+                <data android:mimeType="application/x-ms-dos-executable" />
+                <data android:mimeType="application/vnd.microsoft.portable-executable" />
+                <data android:mimeType="application/exe" />
+                <data android:mimeType="application/x-exe" />
+                <data android:mimeType="application/x-winexe" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:exported="false"
             android:name="com.winlator.star.store.GogMainActivity"

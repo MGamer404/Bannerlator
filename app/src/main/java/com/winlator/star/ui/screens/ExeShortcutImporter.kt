@@ -46,6 +46,7 @@ internal object ExeShortcutImporter {
         steamAppId: Int? = null,
         onCoverArtReady: () -> Unit = {},
         onNameResolved: (oldBase: String, newBase: String) -> Unit = { _, _ -> },
+        onFinished: () -> Unit = {},
     ): File {
         val shortcutFile = writeExeShortcut(container, exeFile, displayName)
         val appCtx = context.applicationContext
@@ -109,6 +110,8 @@ internal object ExeShortcutImporter {
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Name/cover-art resolution failed for $base", e)
+            } finally {
+                main.post { onFinished() }
             }
         }, "exe-import-cover-art").start()
         return shortcutFile
