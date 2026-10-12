@@ -79,7 +79,7 @@ Before any **stable release** is published, all changes are **manually debugged 
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) · `Bannerlator Bionic AnTuTu` (antutu) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) · `com.antutu.ABenchMark` (antutu) |
-| **Version** | Bannerlator **V 3.1.6-pre3** — built from Star **marcescence** (`versionName 3.1.6-pre3`, `versionCode 97`) |
+| **Version** | Bannerlator **V 3.1.7-pre1** — built from Star **marcescence** (`versionName 3.1.7-pre1`, `versionCode 99`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -111,6 +111,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [🤖 AI Disclaimer](#-ai-disclaimer)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
+- [🎮 The full Deck style, Windows components & Remove (3.1.7-pre1)](#-the-full-deck-style-windows-components--remove-317-pre1)
 - [⬇️ Small updates, Win Components offline & smarter game adding (3.1.6)](#️-small-updates-win-components-offline--smarter-game-adding-316)
 - [⚡ Force SSBS, v14 layers & Mali on Wayland (3.1.6)](#-force-ssbs-v14-layers--mali-on-wayland-316)
 - [🆕 SteamLite Steam Input & Wayland xdg-shell v3 (3.1.6)](#-steamlite-steam-input--wayland-xdg-shell-v3-316)
@@ -130,6 +131,16 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📄 License](#-license)
 
 ---
+
+## 🎮 The full Deck style, Windows components & Remove (3.1.7-pre1)
+
+**[3.1.7-pre1](https://github.com/The412Banner/Bannerlator/releases/tag/3.1.7-pre1) completes the Deck style and is the first small update (about 20 MB from 3.1.6).**
+
+- **Deck style, complete** — a console-style interface for controllers on every screen: side tabs and button hints in landscape, a phone layout upright, the full settings editor (Simple / Advanced / Expert, search, inherits-from chain), game pages and the in-game game menu and quick menu, all navigable with a controller. Switch it on in Settings › Appearance › Interface Style; Classic is unchanged.
+- **Fits every screen** — the console layout works at the stock and large display sizes, draws 20% smaller, keeps clear of camera holes and keeps Android's navigation bar hidden behind pop-ups.
+- **Windows components in Deck** — recommended, optional and all components plus the Wine-or-Microsoft DLL choices, for a game, a container or the defaults.
+- **Remove components** — in Deck and Classic; every install now records what it changed, and Remove puts it back. Older installs come out through their own Windows Installer product, or after one reinstall.
+- **Smarter recommendations** — from the game's store, its Steam install script and the DLLs its exe loads; installers only found in the folder move to a folded group.
 
 ## ⬇️ Small updates, Win Components offline & smarter game adding (3.1.6)
 
