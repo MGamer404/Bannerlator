@@ -13660,11 +13660,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
         }
         if (isSteamControllerShadowEvent(event.getDevice())) return true;
-        // Deck panel open: sticks and the hat go to the panel (Android turns them into d-pad moves there), never the game.
-        // Closed, nothing here is taken.
-        if (deckPanelOpen() && ExternalController.isGameController(event.getDevice())) {
-            return super.dispatchGenericMotionEvent(event);
-        }
         // Controller-test isolation: while the Players popup is open, a game-controller AXIS event
         // drives ONLY the throwaway visualizer snapshot and is swallowed here — it never reaches
         // winHandler / touchpadView / the guest. Strictly gated on controllerTestActive so the normal
@@ -13672,6 +13667,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (controllerTestActive && isControllerTestMotionEvent(event)) {
             controllerTestFeedMotionEvent(event);
             return true;
+        }
+        // Deck panel open: sticks and the hat go to the panel (Android turns them into d-pad moves there), never the game.
+        // Closed, nothing here is taken. After the controller test, which a panel can open on top of itself.
+        if (deckPanelOpen() && ExternalController.isGameController(event.getDevice())) {
+            return super.dispatchGenericMotionEvent(event);
         }
         boolean handledByWinHandler = false;
         boolean handledByTouchpadView = false;
