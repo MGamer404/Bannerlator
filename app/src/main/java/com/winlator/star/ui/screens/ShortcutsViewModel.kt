@@ -47,6 +47,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -208,8 +209,18 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val communityRepo = CommunityConfigRepository(app)
 
+    /**
+     * Set by the Deck shell's game-actions host (DeckGameActionsHost): every refresh of this list then
+     * also re-reads every other live ShortcutsViewModel's, so a game it adds or renames shows up on the
+     * Deck page underneath at once. Receivers re-read without passing it on, so it never loops.
+     */
+    var sharesRefreshes = false
+
     init {
         refresh()
+        viewModelScope.launch {
+            libraryChanged.collect { from -> if (from !== this@ShortcutsViewModel) reload() }
+        }
     }
 
     /**
@@ -1183,6 +1194,12 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
             mainHandler.post { refresh() }
             return
         }
+        reload()
+        if (sharesRefreshes) libraryChanged.tryEmit(this)
+    }
+
+    // The re-read itself, on the main thread (refresh() gets it there).
+    private fun reload() {
         // Re-scan the home dir first: this manager is constructed once and lives for the whole
         // session, so a container created in the container editor (its own ContainerManager
         // instance) is otherwise absent from our in-memory list until the ViewModel is rebuilt.
@@ -1246,6 +1263,9 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val TAG = "ShortcutsImport"
+
+        // Which ViewModel just re-read the library on behalf of the others (see sharesRefreshes).
+        private val libraryChanged = MutableSharedFlow<ShortcutsViewModel>(extraBufferCapacity = 4)
 
         // A shortcut name genuinely ties several canonical games when their match scores sit within
         // this epsilon of the top score → the "Which game is this?" picker (issue #167). Capped so a

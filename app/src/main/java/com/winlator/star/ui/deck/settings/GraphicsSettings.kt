@@ -41,6 +41,9 @@ import com.winlator.star.contents.WrapperManager
 import com.winlator.star.core.GPUInformation
 import com.winlator.star.core.GpuSpoof
 import com.winlator.star.core.KeyValueSet
+import com.winlator.star.core.MaliPanvk
+import com.winlator.star.core.WaylandAdapter
+import com.winlator.star.core.WaylandGameDriver
 import com.winlator.star.core.StringUtils
 import com.winlator.star.ui.deck.deckFocusRing
 import com.winlator.star.ui.deck.settings.SettingLevel.ADVANCED
@@ -50,8 +53,12 @@ import com.winlator.star.ui.screens.ContentDownloadSheet
 import com.winlator.star.ui.screens.DxvkConfigDialog
 import com.winlator.star.ui.screens.StockConfigDownloadSheet
 import com.winlator.star.ui.screens.VegasDownloadSheet
+import com.winlator.star.ui.screens.WAYLAND_DRIVER_SETTINGS_HELP
+import com.winlator.star.ui.screens.WAYLAND_PRESENT_MODES
 import com.winlator.star.ui.screens.WrapperManagerDialog
+import com.winlator.star.ui.screens.adrenodownload.AdrenoDriverDownloadSheet
 import com.winlator.star.ui.screens.graphicsProbeMutex
+import com.winlator.star.ui.screens.waylandAutoVariant
 import com.winlator.star.ui.screens.withGraphicsDriverKeys
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -70,9 +77,13 @@ import com.winlator.star.contentdialog.WineD3DConfigDialog as WineD3DConfig
 // other way round. A game keeps a string of its own only while it differs from its container's, as
 // the Win Components rows do. An absent key reads as what the classic dialog shows for it.
 //
+// The Wayland driver gear (WaylandDriverSettingsDialog) is rows too: the Wayland game driver, then the
+// gear's keys of the same driver config. GPU name, memory, present mode and the OneUI fix are the X11
+// rows shown on both backends; the Mali (PanVK) switches are rows of their own (waylandDefs).
+//
 // What is not a setting sits beside the rows (DeckGraphicsState): the downloads of DXVK, VKD3D, D7VK
-// and VEGAS builds and of stock VEGAS configs, the wrapper manager, and the VEGAS config file editor.
-// The lists those rows offer are read while the Graphics page is open (GraphicsLists).
+// and VEGAS builds, of stock VEGAS configs and of Turnip drivers, the wrapper manager, and the VEGAS
+// config file editor. The lists those rows offer are read while the Graphics page is open (GraphicsLists).
 
 internal object GraphicsRows {
 
@@ -167,8 +178,10 @@ internal object GraphicsRows {
         visible: (SettingsEnv, (String) -> String) -> Boolean = { _, _ -> true },
         disabled: (SettingsEnv, (String) -> String) -> String? = { _, _ -> null },
         note: (SettingsEnv, (String) -> String) -> String? = { _, _ -> null },
+        /** For a key whose shown value depends on other keys of the string: decodes from the whole config instead. */
+        decodeConfig: ((SettingsEnv, String?) -> String)? = null,
     ): SettingDef {
-        fun valueIn(env: SettingsEnv, config: String?) = decode(env, p.raw(config, key))
+        fun valueIn(env: SettingsEnv, config: String?) = decodeConfig?.invoke(env, config) ?: decode(env, p.raw(config, key))
         fun changed(config: String, v: String): String = p.with(config, also(v, config) + (key to encode(v, p.raw(config, key))))
         return SettingDef(
             id = id, category = "graphics", group = group, label = label, hint = hint, help = help,
@@ -210,8 +223,10 @@ internal object GraphicsRows {
     private fun wineD3D(values: (String) -> String) = wrapperOf(values).isNotEmpty() && !dxvkLike(values)
     /** The DXVK build in use: the VEGAS build when the wrapper is VEGAS (both are the "version" key). */
     private fun dxvkBuild(values: (String) -> String) = values(if (vegas(values)) ID_VEGAS else ID_DXVK)
-    /** The X11 game driver: the driver config only reaches a Wine game on X11 (Wayland has the driver gear). */
+    /** The X11 game driver: most of the driver config only reaches a Wine game on X11. */
     private fun x11(env: SettingsEnv, values: (String) -> String) = !env.isLinuxEntry && !env.wayland(values)
+    /** A Wine game on Wayland: the keys of the Wayland driver gear apply (never the Linux Steam client entry). */
+    private fun waylandGame(env: SettingsEnv, values: (String) -> String) = !env.isLinuxEntry && env.wayland(values)
     /** VKD3D-Proton needs DXVK 2.x's DXGI; only the Mali "Wrapper + compat + bcn" driver may pair it with 1.x (#137). */
     private fun relaxDxvk(values: (String) -> String) = values(ID_GFX_DRIVER) == "wrapper-compat-bcn"
 
@@ -484,6 +499,10 @@ internal object GraphicsRows {
         return (TURNIP_TOKENS.filter { it in set } + set.filter { it !in TURNIP_TOKENS }).joinToString(",")
     }
 
+    /**
+     * A key of the X11 driver configuration. With [wayland] the row also shows on Wayland: the Wayland
+     * driver gear (WaylandDriverSettingsDialog) edits the same keys, so one row serves both backends.
+     */
     private fun gdcRow(
         id: String, key: String, group: String, label: String, level: SettingLevel,
         control: (SettingsEnv, (String) -> String) -> Control,
@@ -494,9 +513,11 @@ internal object GraphicsRows {
         visible: (SettingsEnv, (String) -> String) -> Boolean = { _, _ -> true },
         disabled: (SettingsEnv, (String) -> String) -> String? = { _, _ -> null },
         note: (SettingsEnv, (String) -> String) -> String? = { _, _ -> null },
+        wayland: Boolean = false,
     ) = packedRow(
         DRIVER_CFG, id, key, group, label, level, control, decode, encode, also, hint, null,
-        visible = { env, values -> x11(env, values) && visible(env, values) }, disabled = disabled, note = note,
+        visible = { env, values -> (x11(env, values) || (wayland && waylandGame(env, values))) && visible(env, values) },
+        disabled = disabled, note = note,
     )
 
     private fun gdcToggle(
@@ -505,10 +526,11 @@ internal object GraphicsRows {
         default: Boolean = false,
         visible: (SettingsEnv, (String) -> String) -> Boolean = { _, _ -> true },
         note: (SettingsEnv, (String) -> String) -> String? = { _, _ -> null },
+        wayland: Boolean = false,
     ) = gdcRow(
         id, key, group, label, level, toggle(),
         decode = { _, r -> if (r == null) (if (default) "1" else "0") else on(r) },
-        hint = hint, visible = visible, note = note,
+        hint = hint, visible = visible, note = note, wayland = wayland,
     )
 
     private fun tokenRow(token: String, label: String, hint: String?, disabled: (SettingsEnv, (String) -> String) -> String? = { _, _ -> null }) = gdcRow(
@@ -583,6 +605,7 @@ internal object GraphicsRows {
             },
             decode = { _, r -> r?.ifEmpty { null } ?: GpuSpoof.DEVICE },
             note = { env, values -> runCatching { GpuSpoof.vendorWarning(env.context, values("graphics.gdc.gpuName")) }.getOrNull() },
+            wayland = true,
         ),
         gdcRow(
             "graphics.gdc.maxDeviceMemory", "maxDeviceMemory", "GPU driver", "GPU memory games see", ADVANCED,
@@ -593,12 +616,27 @@ internal object GraphicsRows {
                 Control.Select(opts + if (opts.none { it.value == current }) listOf(Opt(current, "$current MB")) else emptyList())
             },
             decode = { _, r -> r?.ifEmpty { null } ?: "0" },
+            wayland = true,
         ),
         gdcRow(
             "graphics.gdc.presentMode", "presentMode", "Driver tuning", "Driver present mode", EXPERT,
             hint = "How the wrapper hands frames over. Not the screen renderer's setting.",
-            control = { env, _ -> Control.Segmented(env.graphics.presentModes.map { Opt(it, it.replaceFirstChar(Char::uppercase)) }) },
+            control = { env, values ->
+                if (!waylandGame(env, values)) Control.Segmented(env.graphics.presentModes.map { Opt(it, it.replaceFirstChar(Char::uppercase)) })
+                else {
+                    // Wayland offers mailbox and fifo only; a stored X11-only mode stays listed so it is kept for X11.
+                    val stored = values("graphics.gdc.presentMode")
+                    Control.Segmented(
+                        WAYLAND_PRESENT_MODES.map { Opt(it, it.replaceFirstChar(Char::uppercase)) } +
+                            if (stored in WAYLAND_PRESENT_MODES) emptyList() else listOf(Opt(stored, "${stored.replaceFirstChar(Char::uppercase)} (X11 only)")),
+                    )
+                }
+            },
             decode = { _, r -> r?.ifEmpty { null } ?: "mailbox" },
+            note = { env, values ->
+                if (waylandGame(env, values)) "Wayland offers mailbox and fifo only: immediate needs tearing, which the compositor doesn't allow." else null
+            },
+            wayland = true,
         ),
         gdcRow(
             "graphics.gdc.resourceType", "resourceType", "Driver tuning", "Resource type", EXPERT,
@@ -609,7 +647,7 @@ internal object GraphicsRows {
             hint = "Waits for each frame to finish. Fixes flicker in a few games, costs speed."),
         gdcToggle("graphics.gdc.disablePresentWait", "disablePresentWait", "Driver tuning", "Disable present wait", EXPERT),
         gdcToggle("graphics.gdc.fdDevFeatures", "fdDevFeatures", "Driver tuning", "OneUI / HyperOS fix", ADVANCED,
-            hint = "For Samsung and Xiaomi phones whose games show corrupt textures. Leave off otherwise."),
+            hint = "For Samsung and Xiaomi phones whose games show corrupt textures. Leave off otherwise.", wayland = true),
 
         // BCn textures
         gdcRow(
@@ -673,6 +711,137 @@ internal object GraphicsRows {
             disabled = { _, values -> if (values(ID_GMEM) == "on") "GMEM Force on overrides it." else null }),
         tokenRow("deck_emu", "Report a Steam Deck (deck_emu)", "Banners-Turnip drivers only; stock Turnip ignores it."),
     )
+
+    // ── Wayland game driver and the Mali (PanVK) switches (WaylandDriverSettingsDialog) ──────────
+
+    const val ID_WL_GAME_DRIVER = "graphics.wl.gameDriver"
+    private const val ID_MALI_MODE = "graphics.wl.maliMode"
+    private const val ID_MALI_SUBMIT = "graphics.wl.maliNoSubmitWaits"
+    private const val ID_COMPOSITOR = "graphics.compositorDriver"
+
+    /** Mali mode as the launch decides it: the stored switch, else on for a PanVK driver (MaliPanvk.modeOn). */
+    private fun maliModeOn(env: SettingsEnv, config: String?): Boolean = when (DRIVER_CFG.raw(config, MaliPanvk.KEY_MODE)) {
+        "1" -> true
+        "0" -> false
+        else -> env.graphics.looksLikePanvk(DRIVER_CFG.raw(config, "version") ?: "")
+    }
+
+    /** A Mali (PanVK) key of the driver config: Wayland, a Wine game, an Arm Mali GPU. [modeOnly] rows need Mali mode on. */
+    private fun maliRow(
+        id: String, key: String, label: String, level: SettingLevel,
+        control: (SettingsEnv, (String) -> String) -> Control,
+        decode: (SettingsEnv, String?) -> String = { _, r -> r ?: "" },
+        decodeConfig: ((SettingsEnv, String?) -> String)? = null,
+        encode: (String, String?) -> String? = { v, _ -> v },
+        also: (String, String) -> Map<String, String?> = { _, _ -> emptyMap() },
+        hint: String? = null,
+        help: String? = null,
+        modeOnly: Boolean = true,
+        disabled: (SettingsEnv, (String) -> String) -> String? = { _, _ -> null },
+        note: (SettingsEnv, (String) -> String) -> String? = { _, _ -> null },
+    ) = packedRow(
+        DRIVER_CFG, id, key, if (level == ADVANCED) "Mali (PanVK)" else "Mali (PanVK) advanced", label, level, control,
+        decode, encode, also, hint, help,
+        visible = { env, values -> waylandGame(env, values) && env.graphics.mali && (!modeOnly || values(ID_MALI_MODE) == "1") },
+        disabled = disabled, note = note, decodeConfig = decodeConfig,
+    )
+
+    /** A PANVK_*_MB field. Empty is Auto: stored empty and not exported, as the classic gear stores it. */
+    private fun mbRow(id: String, key: String, label: String, hint: String, min: Int, max: Int) = maliRow(
+        id, key, label, EXPERT,
+        control = { _, _ ->
+            Control.TextField("Auto / Default") { t ->
+                if (t.isBlank() || MaliPanvk.validMb(t, min, max) != null) null else "Out of range ($min to $max): not used."
+            }
+        },
+        encode = { v, _ -> MaliPanvk.validMb(v, min, max) ?: "" },
+        hint = hint, modeOnly = false,
+    )
+
+    /** Rows of the Wayland driver gear, shown under the compositor driver on Wayland. */
+    fun waylandDefs(): List<SettingDef> = listOf(
+        SettingDef(
+            id = ID_WL_GAME_DRIVER, category = "graphics", group = "GPU driver", level = ADVANCED,
+            label = "Wayland game driver", hint = "The Vulkan driver the game itself renders on with Wayland.",
+            help = WaylandGameDriver.HELP_TEXT + "\n\n" + WAYLAND_DRIVER_SETTINGS_HELP, tech = "waylandGameDriver",
+            control = { env, values ->
+                val g = env.graphics
+                val current = values(ID_WL_GAME_DRIVER)
+                val opts = g.waylandDrivers.map { Opt(it, g.waylandLabel(it)) }
+                // What is stored is always listed (an import that is gone says so; launch uses Auto for it).
+                Control.Select(if (opts.any { it.value == current }) opts else opts + Opt(current, g.waylandLabel(current)))
+            },
+            vm = VmBinding(
+                get = { _, vm -> vm.waylandGameDriver.ifEmpty { Container.WAYLAND_GAME_DRIVER_AUTO } },
+                set = { _, vm, v -> vm.waylandGameDriver = v },
+            ),
+            // Absent: the game follows its container's choice (WaylandGameDriver.effectiveChoice).
+            game = GameBinding(
+                keys = listOf("waylandGameDriver"),
+                read = { e -> e.get("waylandGameDriver")?.takeIf { it.isNotEmpty() } },
+                write = { e, v -> e.put("waylandGameDriver", v) },
+            ),
+            visible = { env, values -> waylandGame(env, values) },
+            note = { env, values -> env.graphics.waylandDriveNote(values(ID_WL_GAME_DRIVER), values(ID_COMPOSITOR)) },
+        ),
+
+        maliRow(
+            ID_MALI_MODE, MaliPanvk.KEY_MODE, "Mali (PanVK) mode", ADVANCED,
+            hint = "PanVK tweaks in the Wayland adapter: hides present_id, present_wait and dynamic_rendering, plus two sync workarounds. On by default with a PanVK driver.",
+            help = "For Arm Mali GPUs. Until it is switched, it follows the driver: on for a PanVK driver, off otherwise.",
+            control = toggle(),
+            decodeConfig = { env, cfg -> if (maliModeOn(env, cfg)) "1" else "0" },
+            // As the classic gear: on sets BCn emulation to None, off gives back the stored choice.
+            also = { v, cfg -> mapOf("bcnEmulation" to if (v == "1") "none" else (DRIVER_CFG.raw(cfg, "bcnEmulation")?.ifEmpty { null } ?: "auto")) },
+            modeOnly = false,
+        ),
+        maliRow(
+            "graphics.wl.bcnEmulation", "bcnEmulation", "BCn texture emulation", ADVANCED,
+            control = { env, _ -> Control.Segmented(env.graphics.bcnEmulations.map { Opt(it, it.replaceFirstChar(Char::uppercase)) }) },
+            // With no stored switch a PanVK driver runs with None, which is what the launch applies.
+            decodeConfig = { env, cfg ->
+                if (DRIVER_CFG.raw(cfg, MaliPanvk.KEY_MODE).isNullOrEmpty() && maliModeOn(env, cfg)) "none"
+                else DRIVER_CFG.raw(cfg, "bcnEmulation")?.ifEmpty { null } ?: "auto"
+            },
+            // A pick stores the mode switch too, so the launch keeps this choice.
+            also = { _, cfg -> if (DRIVER_CFG.raw(cfg, MaliPanvk.KEY_MODE).isNullOrEmpty()) mapOf(MaliPanvk.KEY_MODE to "1") else emptyMap() },
+            note = { _, values ->
+                if (values("graphics.wl.bcnEmulation") == "none") null
+                else "Converting BCn textures to ASTC can freeze or reboot the phone with this driver; only try it if a game shows broken or missing textures."
+            },
+        ),
+        maliRow(
+            "graphics.wl.maliHideExts", MaliPanvk.KEY_HIDE_EXTS, "Hide present-wait / dynamic-rendering extensions", EXPERT,
+            control = toggle(), decode = { _, r -> if (r == "0") "0" else "1" },
+        ),
+        maliRow(
+            ID_MALI_SUBMIT, MaliPanvk.KEY_NO_SUBMIT_WAITS, "Skip GPU submit waits", EXPERT,
+            hint = "For DXVK games: turn off if a DirectX 12 game misbehaves or you see tearing.",
+            control = toggle(), decode = { _, r -> if (r == "0") "0" else "1" },
+        ),
+        maliRow(
+            "graphics.wl.maliNoAcquireSignal", MaliPanvk.KEY_NO_ACQUIRE_SIGNAL, "Skip frame-acquire signal", EXPERT,
+            control = toggle(), decode = { _, r -> if (r == "0") "0" else "1" },
+            disabled = { _, values -> if (values(ID_MALI_SUBMIT) == "1") null else "Needs Skip GPU submit waits on." },
+        ),
+        mbRow("graphics.wl.panvkHeap", MaliPanvk.KEY_HEAP, "PANVK_HEAP_MB", "Default: a quarter of RAM, 1024 to 3072 MB.", MaliPanvk.HEAP_MIN, MaliPanvk.HEAP_MAX),
+        mbRow("graphics.wl.panvkTilerHeap", MaliPanvk.KEY_TILER_HEAP, "PANVK_TILER_HEAP_MB", "Default: 512 MB.", MaliPanvk.TILER_HEAP_MIN, MaliPanvk.TILER_HEAP_MAX),
+        mbRow("graphics.wl.panvkPolyHeap", MaliPanvk.KEY_POLY_HEAP, "PANVK_POLY_HEAP_MB", "Default: 16 MB.", MaliPanvk.POLY_HEAP_MIN, MaliPanvk.POLY_HEAP_MAX),
+        maliRow(
+            "graphics.wl.panvkAtomStride", MaliPanvk.KEY_ATOM_STRIDE, "PANVK_ATOM_STRIDE", EXPERT,
+            hint = "Only if auto-detection fails ([KFAULT] in the log).",
+            control = { _, _ -> Control.Segmented(listOf(Opt("", "Auto")) + MaliPanvk.ATOM_STRIDES.map { Opt(it, it) }) },
+            decode = { _, r -> r?.takeIf { it in MaliPanvk.ATOM_STRIDES } ?: "" },
+            modeOnly = false,
+        ),
+        maliRow(
+            "graphics.wl.panvkTrace", MaliPanvk.KEY_TRACE, "PANVK_TRACE (driver tracing)", EXPERT,
+            control = toggle(), decode = { _, r -> on(r) },
+            // Off is stored empty, as the classic gear stores it.
+            encode = { v, _ -> if (v == "1") "1" else "" },
+            modeOnly = false,
+        ),
+    )
 }
 
 // ── Lists and probes ────────────────────────────────────────────────────────────────────────────
@@ -728,6 +897,17 @@ internal class GraphicsLists(private val context: Context) {
         private set
     var gpuModel by mutableStateOf("")
         private set
+    /** An Arm Mali GPU: the Wayland driver gear's Mali (PanVK) switches apply. */
+    var mali by mutableStateOf(false)
+        private set
+    /** The Wayland game driver choices (adapter, Auto, the bundled Turnips, each imported Linux ICD). */
+    var waylandDrivers by mutableStateOf<List<String>>(emptyList())
+        private set
+    private var waylandLabels by mutableStateOf<Map<String, String>>(emptyMap())
+    private var waylandAuto: String? = null
+    // File reads behind the notes and the Mali mode default, cached per editor (main thread only).
+    private val panvkByDriver = HashMap<String, Boolean>()
+    private val driveNotes = HashMap<String, String?>()
 
     private val probes = mutableStateMapOf<String, ExtensionsProbe>()
     private val capsById = mutableStateMapOf<String, WrapperManager.WrapperCaps>()
@@ -739,6 +919,27 @@ internal class GraphicsLists(private val context: Context) {
     fun extensions(version: String): ExtensionsProbe? = probes[version]
     fun caps(driver: String): WrapperManager.WrapperCaps? = capsById[driver]
     fun isImported(driver: String): Boolean = importedById[driver] == true
+
+    /** A Wayland game driver choice as the classic pickers name it ("Auto (by GPU: …)", an import that is gone…). */
+    fun waylandLabel(choice: String): String =
+        waylandLabels[choice] ?: runCatching { WaylandGameDriver.optionLabel(context, choice, waylandAuto) }.getOrDefault(choice)
+
+    /** Whether a driver id names a PanVK build (MaliPanvk.looksLikePanvk), for Mali mode's default. */
+    fun looksLikePanvk(driver: String): Boolean =
+        panvkByDriver.getOrPut(driver) { runCatching { MaliPanvk.looksLikePanvk(context, driver) }.getOrDefault(false) }
+
+    /** What the Wayland game driver [choice] means with the compositor driver [compositor], as the classic editors say it. */
+    fun waylandDriveNote(choice: String, compositor: String): String? = driveNotes.getOrPut("$choice|$compositor") {
+        val blob = runCatching { WaylandAdapter.isProprietaryBlob(context, compositor) }.getOrDefault(false)
+        val adapter = choice == Container.WAYLAND_GAME_DRIVER_ADAPTER
+        when {
+            blob -> "Qualcomm's own driver can't put Wayland frames on screen, so the screen uses a bundled Turnip" +
+                if (adapter) " and the game renders on the bundled Wayland Turnip (the adapter needs a Turnip driver)." else "."
+            runCatching { WaylandGameDriver.adapterActive(context, choice, compositor) }.getOrDefault(false) ->
+                "The game renders on the graphics driver above, through the Wayland adapter."
+            else -> null
+        }
+    }
 
     /** Reads every list once per editor. */
     suspend fun load(arm64ec: Boolean) {
@@ -752,6 +953,7 @@ internal class GraphicsLists(private val context: Context) {
             gpuNames = names.first
             wined3dGpus = names.second
             reloadDrivers()
+            reloadWaylandDrivers()
             done = true
         } finally {
             pending.remove("lists")
@@ -786,7 +988,7 @@ internal class GraphicsLists(private val context: Context) {
     /** The driver versions (supported bundled + imported) and the GPU facts, e.g. after the wrapper manager. */
     suspend fun reloadDrivers() {
         val bundled = res.getStringArray(R.array.wrapper_graphics_driver_version_entries).toList()
-        class Drivers(val supported: List<String>, val installed: List<String>, val qualcomm: Boolean, val model: String)
+        class Drivers(val supported: List<String>, val installed: List<String>, val qualcomm: Boolean, val model: String, val mali: Boolean)
         val d = withContext(Dispatchers.IO) {
             val installed = runCatching { AdrenotoolsManager(context).enumarateInstalledDrivers().toList() }.getOrDefault(emptyList())
             graphicsProbeMutex.withLock {
@@ -795,6 +997,7 @@ internal class GraphicsLists(private val context: Context) {
                     installed = installed,
                     qualcomm = runCatching { GPUInformation.getVendorID(null, null) == 0x5143 }.getOrDefault(false),
                     model = runCatching { GPUInformation.extractModelName(GPUInformation.getRenderer(null, context)) ?: "" }.getOrDefault(""),
+                    mali = runCatching { MaliPanvk.isMaliGpu() }.getOrDefault(false),
                 )
             }
         }
@@ -802,7 +1005,25 @@ internal class GraphicsLists(private val context: Context) {
         driversOther = bundled.filter { it !in d.supported }
         qualcomm = d.qualcomm
         gpuModel = d.model
+        mali = d.mali
         driversLoaded = true
+        panvkByDriver.clear()
+        driveNotes.clear()
+    }
+
+    /**
+     * The Wayland game driver choices and their labels. "Auto" names the bundled Turnip it picks on this
+     * GPU, a native probe that runs once (waylandAutoVariant, serialized on graphicsProbeMutex).
+     */
+    suspend fun reloadWaylandDrivers() {
+        val auto = runCatching { waylandAutoVariant(context) }.getOrNull()
+        val found = withContext(Dispatchers.IO) {
+            val values = runCatching { WaylandGameDriver.optionValues(context).toList() }.getOrDefault(emptyList())
+            values to values.associateWith { v -> runCatching { WaylandGameDriver.optionLabel(context, v, auto) }.getOrDefault(v) }
+        }
+        waylandAuto = auto
+        waylandDrivers = found.first
+        waylandLabels = found.second
     }
 
     /**
@@ -878,6 +1099,8 @@ internal class DeckGraphicsState(
     var stockSheet by mutableStateOf(false)
     var wrappers by mutableStateOf(false)
     var vegasEditor by mutableStateOf(false)
+    /** The Turnip download sheet, for the Wayland compositor driver. */
+    var turnipSheet by mutableStateOf(false)
     /** Bumped after a download, so an open VEGAS config editor reads its lists again. */
     var refreshKey by mutableIntStateOf(0)
         private set
@@ -924,6 +1147,17 @@ internal class DeckGraphicsState(
         open()
     }
 
+    /** A Turnip was installed: the compositor driver choices and the driver lists are read again. */
+    fun turnipInstalled() {
+        turnipSheet = false
+        // Only a container form looks for a usable compositor driver again; a game's container form is never saved here.
+        if (env.scope != EditorScope.GAME) env.vm?.onCompositorDriversChanged()
+        scope.launch {
+            env.loadAsync()
+            env.graphics.reloadDrivers()
+        }
+    }
+
     fun wrappersClosed() {
         wrappers = false
         env.vm?.refreshGraphicsDriverEntries()
@@ -945,6 +1179,7 @@ internal class DeckGraphicsState(
             if (vegas()) add(Action("stock", Icons.Filled.CloudDownload, "Download stock VEGAS configs", "The config files VEGAS releases ship. They appear under Config file.") { stockSheet = true })
             if (vegas()) add(Action("vegasEditor", Icons.Filled.Description, "Edit the VEGAS config file", "Performance tier, each key of the file, backups, and deleting or installing VEGAS builds.") { vegasEditor = true })
             if (x11()) add(Action("wrappers", Icons.Filled.Inventory2, "Manage graphics wrappers", "Download, import or delete the wrappers listed under Graphics driver.") { wrappers = true })
+            if (!env.isLinuxEntry && env.wayland(this@DeckGraphicsState::value)) add(Action("turnip", Icons.Filled.CloudDownload, "Download a Turnip driver", "Wayland needs an installed Turnip to put the game's frames on screen. New ones appear under Graphics driver.") { turnipSheet = true })
         }
         if (actions.isEmpty()) return emptyList()
         return listOf(PageExtra("graphics-tools-label") { GroupLabel("Downloads and tools") }) +
@@ -1015,6 +1250,12 @@ internal fun DeckGraphicsDialogs(state: DeckGraphicsState) {
     }
     if (state.stockSheet) {
         StockConfigDownloadSheet(onDismiss = { state.stockSheet = false; state.closedSheet() })
+    }
+    if (state.turnipSheet) {
+        AdrenoDriverDownloadSheet(
+            onDismiss = { state.turnipSheet = false },
+            onDriverInstalled = { state.turnipInstalled() },
+        )
     }
     if (state.wrappers) {
         WrapperManagerDialog(onDismiss = { state.wrappersClosed() })

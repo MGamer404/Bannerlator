@@ -682,7 +682,13 @@ fun BigPictureScreen(navController: NavController) {
                 ) {
                     Text("No games yet", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(16.dp))
-                    Button(onClick = { navController.navigate(Screen.Games.route) }) { Text("Add games") }
+                    Button(onClick = {
+                        // The Deck shell adds games in place over Home; Classic adds them on the Games screen.
+                        if (com.winlator.star.ui.theme.AppThemeState.uiStyle.value == com.winlator.star.ui.theme.AppThemeState.UI_STYLE_DECK) {
+                            GamesScreenRequests.pending = GamesScreenRequests.Request(GameMenuAction.ADD_GAME)
+                            navController.popBackStack()
+                        } else navController.navigate(Screen.Games.route)
+                    }) { Text("Add games") }
                 }
             } else {
                 // Hero — fills the band between the rail and the carousel (a weighted sibling, so its
@@ -859,7 +865,10 @@ fun BigPictureScreen(navController: NavController) {
             onDismiss = { activeSheet = null },
             onExit = {
                 activeSheet = null
-                navController.navigate(Screen.Games.route) {
+                // In the Deck shell, back to the page Big Picture was opened from; in Classic, the Games screen.
+                if (com.winlator.star.ui.theme.AppThemeState.uiStyle.value == com.winlator.star.ui.theme.AppThemeState.UI_STYLE_DECK) {
+                    navController.popBackStack()
+                } else navController.navigate(Screen.Games.route) {
                     popUpTo(Screen.BigPicture.route) { inclusive = true }
                 }
             },
@@ -867,7 +876,10 @@ fun BigPictureScreen(navController: NavController) {
                 activeSheet = null
                 PreferenceManager.getDefaultSharedPreferences(context)
                     .edit().putBoolean("enable_big_picture_mode", false).apply()
-                navController.navigate(Screen.Games.route) {
+                // In the Deck shell, back to the page Big Picture was opened from; in Classic, the Games screen.
+                if (com.winlator.star.ui.theme.AppThemeState.uiStyle.value == com.winlator.star.ui.theme.AppThemeState.UI_STYLE_DECK) {
+                    navController.popBackStack()
+                } else navController.navigate(Screen.Games.route) {
                     popUpTo(Screen.BigPicture.route) { inclusive = true }
                 }
             },

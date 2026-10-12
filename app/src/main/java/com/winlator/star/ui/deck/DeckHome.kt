@@ -121,6 +121,13 @@ import com.winlator.star.ui.screens.ShortcutActionDialogs
 import com.winlator.star.ui.screens.ShortcutLaunchDialogs
 import com.winlator.star.ui.screens.ShortcutsViewModel
 import com.winlator.star.ui.screens.rememberShortcutActions
+import com.winlator.star.ui.screens.ShortcutsXmbView
+import com.winlator.star.ui.screens.WrapperManagerDialog
+import com.winlator.star.ui.screens.XmbAction
+import com.winlator.star.ui.screens.XmbGameHost
+import com.winlator.star.ui.screens.XmbSdBadge
+import com.winlator.star.ui.screens.XmbStoreBadges
+import com.winlator.star.ui.screens.xmbGameActions
 import com.winlator.star.ui.screens.rememberShortcutLauncher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -133,6 +140,8 @@ private enum class LibraryMode(val label: String, val icon: ImageVector) {
     GRID("Grid", Icons.Filled.GridView),
     COMPACT("Compact", Icons.Filled.GridOn),
     LIST("List", Icons.AutoMirrored.Filled.List),
+    // The Games screen's XMB (cover row + options column), drawn in Home's library area.
+    XMB("XMB", Icons.Filled.ViewCarousel),
 }
 
 private enum class LibrarySort(val label: String) {
@@ -212,7 +221,6 @@ internal fun DeckHome(
     onOpenContainer: (Int) -> Unit,
     onAddGame: () -> Unit,
     onBigPicture: () -> Unit,
-    onOpenLibrary: () -> Unit,
     vm: ShortcutsViewModel = viewModel(),
 ) {
     val shortcuts by vm.shortcuts.collectAsState(initial = emptyList())
@@ -309,6 +317,17 @@ internal fun DeckHome(
     }
     val emptyFiltered: @Composable () -> Unit = {
         FilteredEmpty(onClear = { filter = LibraryFilter(sort = filter.sort) }, onAddGame = onAddGame)
+    }
+
+    // XMB mode: the Games screen's options column, except Settings opens the Deck editor (as everywhere in the Deck).
+    var showWrapperManager by remember { mutableStateOf(false) }
+    val xmbHost = XmbGameHost(
+        remove = { vm.remove(it, context) },
+        containers = { vm.containers() },
+        openWrapperManager = { showWrapperManager = true },
+    )
+    val xmbActionsFor: (Shortcut) -> List<XmbAction> = { s ->
+        xmbGameActions(context, s, xmbHost, openSettings = { actions.perform(GameMenuAction.SETTINGS, it) }, settingsAsColumns = false)
     }
 
     val shelfScroll = rememberScrollState()
@@ -428,7 +447,39 @@ internal fun DeckHome(
                 )
             }
         }
+        // The XMB fills the library area under the toolbar and takes the D-pad itself: Left/Right pick a game,
+        // Down walks its options, Up from the top option goes back to the toolbar. L1/R1 stay the shell's.
+        LibraryMode.XMB -> Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize().padding(start = gutter, end = gutter, top = 16.dp, bottom = 16.dp),
+        ) {
+            toolbar()
+            if (visible.isEmpty()) emptyFiltered()
+            else Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .border(1.dp, deckLine(), RoundedCornerShape(18.dp)),
+            ) {
+                ShortcutsXmbView(
+                    shortcuts = visible,
+                    selectionMode = false,
+                    selectedPaths = emptySet(),
+                    onToggleSelect = {},
+                    onExitSelection = {},
+                    onPlay = { launcher.requestLaunch(it) },
+                    actionsFor = xmbActionsFor,
+                    storeBadges = { XmbStoreBadges(it) },
+                    sdBadge = { XmbSdBadge(it) },
+                    onReloadGames = { vm.refresh() },
+                    onFocusedChange = onFocus,
+                    inDeckShell = true,
+                )
+            }
+        }
     }
+    if (showWrapperManager) WrapperManagerDialog(onDismiss = { showWrapperManager = false })
 
     if (filterOpen) {
         LibraryFilterDialog(
@@ -475,7 +526,7 @@ private fun LibraryToolbar(
         // Padding inside the scroll keeps the focus glow from being clipped.
         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 6.dp, horizontal = 4.dp),
     ) {
-        // View modes. Wall and console are Big Picture's, so those two open it.
+        // View modes. Big Picture has its own tile at the end of the row.
         Row(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -486,8 +537,6 @@ private fun LibraryToolbar(
                 .padding(5.dp),
         ) {
             LibraryMode.entries.forEach { m -> ModeButton(m.label, m.icon, selected = m == mode) { onMode(m) } }
-            ModeButton("Wall", Icons.Filled.ViewCarousel, selected = false, onClick = onBigPicture)
-            ModeButton("Console", Icons.Filled.Tv, selected = false, onClick = onBigPicture)
         }
         Spacer(Modifier.width(8.dp))
         DeckButton(if (filterCount > 0) "Filters · $filterCount" else "Filter & sort", Icons.Filled.FilterList, onFilter)

@@ -114,6 +114,7 @@ import com.winlator.star.ui.deck.settings.DeckSettingsRoutes
 import com.winlator.star.ui.deck.settings.deckSettingsRoutes
 import com.winlator.star.ui.screens.ContainerDetailViewModel
 import com.winlator.star.ui.screens.GameMenuAction
+import com.winlator.star.ui.screens.DeckGameActionsHost
 import com.winlator.star.ui.screens.GamesScreenRequests
 import com.winlator.star.ui.topBarActionsState
 import kotlinx.coroutines.delay
@@ -304,8 +305,8 @@ private fun DeckShellContent(
     // "Games" means the Deck home unless the Games screen has work waiting: the component-install return reopening a game's settings, or a queued request such as the first-run's "Add a game".
     LaunchedEffect(pendingRoute) {
         if (pendingRoute != null) {
-            val gamesWanted = ComponentReturnBus.openShortcutSettings != null || GamesScreenRequests.pending != null
-            val target = if (pendingRoute == Screen.Games.route && !gamesWanted) DeckRoutes.HOME else pendingRoute
+            // The shell's own DeckGameActionsHost runs any queued request in place.
+            val target = if (pendingRoute == Screen.Games.route) DeckRoutes.HOME else pendingRoute
             nav.open(target)
             onPendingRouteConsumed()
         }
@@ -429,11 +430,8 @@ private fun DeckShellContent(
             val insets = if (rails) WindowInsets.systemBars.union(WindowInsets.displayCutout.only(WindowInsetsSides.Vertical))
                 else WindowInsets.systemBars.union(WindowInsets.displayCutout)
             Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(insets)) {
-                val onAccount = {
-                    // Same as the drawer's account row: the My-account sheet lives on the Games screen.
-                    nav.open(Screen.Games.route)
-                    AccountUiBus.requestMyAccount()
-                }
+                // The My-account sheet opens over the current page (DeckGameActionsHost).
+                val onAccount = { AccountUiBus.requestMyAccount() }
                 val onTabsFocus: (Boolean) -> Unit = { focused ->
                     tabsFocused.value = focused
                     deckActions.navHold.value = focused
@@ -543,12 +541,11 @@ private fun DeckShellContent(
                                             DeckHome(
                                                 onOpenGame = { shortcut -> nav.open(DeckRoutes.game(shortcut.file.path)) },
                                                 onOpenContainer = { id -> nav.open(DeckSettingsRoutes.containerEditorFor(id) ?: "container_detail?id=$id") },
+                                                // "Add games" opens over Home (DeckGameActionsHost).
                                                 onAddGame = {
                                                     GamesScreenRequests.pending = GamesScreenRequests.Request(GameMenuAction.ADD_GAME)
-                                                    nav.open(Screen.Games.route)
                                                 },
                                                 onBigPicture = { nav.open(Screen.BigPicture.route) },
-                                                onOpenLibrary = { nav.open(Screen.Games.route) },
                                             )
                                         }
                                         composable(
@@ -581,6 +578,8 @@ private fun DeckShellContent(
                                     },
                                 )
                             }
+                            // Add games, My account and the game actions the settings pages hand over: dialogs over whatever page is up.
+                            DeckGameActionsHost()
                             // Update pill: over the content, under the title line / top bar (Classic's place relative to its top bar).
                             val upd = pillUpdate
                             if (upd != null && !searchOpen) {

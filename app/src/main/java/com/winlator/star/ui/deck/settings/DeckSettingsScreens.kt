@@ -55,6 +55,7 @@ import com.winlator.star.ui.screens.GameMenuAction
 import com.winlator.star.ui.screens.GamesScreenRequests
 import com.winlator.star.ui.screens.LogManagerScreen
 import com.winlator.star.ui.screens.ShortcutSettingsDialogScreen
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -203,10 +204,15 @@ private fun DeckGameSettings(path: String, navController: NavHostController) {
     }
     // The Graphics page's downloads and tools: a Wine game only, like the components page.
     val graphics = remember(source) { if (env.world != World.WINE) null else DeckGraphicsState(env, source, coroutines) }
-    val extras = remember(components, graphics) { categoryExtras(components, graphics) }
+    // The pages' lists, pickers and actions (each section says where it applies).
+    val sections = remember(source) { deckSections(env, source, coroutines) }
+    val extras = remember(components, graphics, sections) { categoryExtras(components, graphics, sections) }
     LaunchedEffect(components) { components?.load() }
     OnReturn {
-        if (!source.dirty) {
+        // A picker a section opened hands its result to this form, so it is not reloaded under it.
+        val keep = sections.any { it.keepsForm }
+        sections.forEach { it.onReturn() }
+        if (!source.dirty && !keep) {
             generation++
             source.reloadFrom()
         }
@@ -248,8 +254,10 @@ private fun DeckGameSettings(path: String, navController: NavHostController) {
                 // The classic game editor is never opened for an Android game (it has none).
                 SettingsRegistry.TARGET_CLASSIC -> { if (env.world != World.ANDROID) showClassic = true }
                 SettingsRegistry.TARGET_DETAILS -> {
+                    // Game details can rename the game's files, so this page (holding the old path) closes
+                    // and the sheet opens over the page under it (the shell's DeckGameActionsHost).
+                    navController.popBackStack()
                     GamesScreenRequests.pending = GamesScreenRequests.Request(GameMenuAction.GAME_DETAILS, shortcut.file.path)
-                    navController.navigate(Screen.Games.route)
                 }
                 else -> {}
             }
@@ -259,6 +267,7 @@ private fun DeckGameSettings(path: String, navController: NavHostController) {
     )
     components?.let { DeckComponentsDialogs(it) }
     graphics?.let { DeckGraphicsDialogs(it) }
+    sections.forEach { it.Dialogs() }
 
     if (showClassic) {
         val s = shortcutState.value
@@ -268,16 +277,17 @@ private fun DeckGameSettings(path: String, navController: NavHostController) {
                 showClassic = false
                 source.reloadFrom()
             },
-            // The two file operations run from the Games screen, which owns their coordinators.
+            // The two file operations repoint the game, so this page (holding the old one) closes and their
+            // coordinators run over the page under it (the shell's DeckGameActionsHost), as Classic closes its editor first.
             onMoveToDriveC = {
                 showClassic = false
+                navController.popBackStack()
                 GamesScreenRequests.pending = GamesScreenRequests.Request(GameMenuAction.COPY_TO_DRIVE_C, s.file.path)
-                navController.navigate(Screen.Games.route)
             },
             onChangeExe = {
                 showClassic = false
+                navController.popBackStack()
                 GamesScreenRequests.pending = GamesScreenRequests.Request(GameMenuAction.CHANGE_EXE, s.file.path)
-                navController.navigate(Screen.Games.route)
             },
         )
     }
@@ -318,8 +328,13 @@ private fun DeckContainerSettings(id: Int, navController: NavHostController) {
         val c = vm.container
         if (!defaultsMode && c != null && LinuxSettings.isLinuxContainer(c)) null else DeckGraphicsState(env, source, coroutines)
     }
+    // The pages' lists, pickers and actions (each section says where it applies).
+    val sections = remember(source) { deckSections(env, source, coroutines) }
     OnReturn {
-        if (!source.dirty) generation++
+        // A picker a section opened (a drive's folder, a wallpaper) hands its result to this form, so it is not reloaded under it.
+        val keep = sections.any { it.keepsForm }
+        sections.forEach { it.onReturn() }
+        if (!source.dirty && !keep) generation++
         components?.let { coroutines.launch { it.refreshInstalled() } }
         graphics?.reloadContents()
     }
@@ -339,7 +354,7 @@ private fun DeckContainerSettings(id: Int, navController: NavHostController) {
             state.load()
         }
     }
-    val extras = remember(components, graphics) { categoryExtras(components, graphics) }
+    val extras = remember(components, graphics, sections) { categoryExtras(components, graphics, sections) }
 
     val header = if (defaultsMode) {
         EditorHeader(
@@ -386,12 +401,36 @@ private fun DeckContainerSettings(id: Int, navController: NavHostController) {
     )
     components?.let { DeckComponentsDialogs(it) }
     graphics?.let { DeckGraphicsDialogs(it) }
+    sections.forEach { it.Dialogs() }
 }
 
-/** What the Windows components and Graphics pages add besides their rows. */
-private fun categoryExtras(components: DeckComponentsState?, graphics: DeckGraphicsState?): Map<String, CategoryExtra> = buildMap {
-    components?.let { put(SettingsRegistry.CAT_COMPONENTS, it.categoryExtra()) }
-    graphics?.let { put("graphics", it.categoryExtra()) }
+/**
+ * Every section of the game, container and All-containers editors. Each one returns no page items
+ * where it doesn't apply (scope, world), so one list serves all three.
+ */
+private fun deckSections(env: SettingsEnv, source: SettingsSource, scope: CoroutineScope): List<DeckSection> = listOf(
+    DeckIconSection(env, source, scope),
+    DeckWrapperDetectedSection(env, source, scope),
+    DeckPerformanceSection(env, source, scope),
+    DeckTranslatorDownloads(env, source, scope),
+    DeckReshadeSection(env, source, scope),
+    DeckAudioSection(env, source, scope),
+    DeckInputSection(env, source, scope),
+    DeckOverlaySection(env, source, scope),
+    DeckWindowsSection(env, source, scope),
+)
+
+/**
+ * What the pages add besides their rows: the Windows components lists, the Graphics page's tools and
+ * the sections. An imported wrapper's detected settings sit above the Graphics page's downloads.
+ */
+private fun categoryExtras(components: DeckComponentsState?, graphics: DeckGraphicsState?, sections: List<DeckSection>): Map<String, CategoryExtra> {
+    val own = buildMap<String, CategoryExtra> {
+        components?.let { put(SettingsRegistry.CAT_COMPONENTS, it.categoryExtra()) }
+        graphics?.let { put("graphics", it.categoryExtra()) }
+    }
+    val (first, rest) = sections.partition { it is DeckWrapperDetectedSection }
+    return mergeExtras(first.map { it.extras() } + listOf(own) + rest.map { it.extras() })
 }
 
 @Composable

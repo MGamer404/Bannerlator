@@ -166,6 +166,13 @@ internal fun ShortcutsXmbView(
     onReloadGames: () -> Unit = {},
     /** True while a nested menu is open (the Games tab hides its + button). */
     onNestedChange: (Boolean) -> Unit = {},
+    /** The game under the cursor changed (the Deck home tints its backdrop and aims its game menu with it). */
+    onFocusedChange: (Shortcut) -> Unit = {},
+    /**
+     * Drawn inside the Deck shell: the shell keeps Android's bars as it set them, and L1/R1 at the top
+     * level fall through to it (they move its tabs, as on every Deck page) instead of jumping five games.
+     */
+    inDeckShell: Boolean = false,
 ) {
     if (shortcuts.isEmpty()) return
     val context = LocalContext.current
@@ -190,7 +197,10 @@ internal fun ShortcutsXmbView(
         pos.floatValue = idx.toFloat()
     }
     val focused = shortcuts[target.coerceIn(0, n - 1)]
-    LaunchedEffect(focused.file.path) { focusedPath = focused.file.path }
+    LaunchedEffect(focused.file.path) {
+        focusedPath = focused.file.path
+        onFocusedChange(focused)
+    }
 
     // Moving to another game always lands back on Play, so A launches (like tapping a card).
     fun settleTo(i: Int) {
@@ -257,7 +267,8 @@ internal fun ShortcutsXmbView(
     // swipe brings them back briefly). Shown again on rotating to portrait, switching view, or leaving the tab.
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val view = LocalView.current
-    DisposableEffect(landscape, lifecycleOwner) {
+    DisposableEffect(landscape, lifecycleOwner, inDeckShell) {
+        if (inDeckShell) return@DisposableEffect onDispose {}
         val window = context.findActivity()?.window
         val bars = if (landscape && window != null) WindowCompat.getInsetsController(window, view) else null
         val hideNav = {
@@ -342,8 +353,8 @@ internal fun ShortcutsXmbView(
                     when (e.key) {
                         Key.DirectionLeft -> { settleTo(target - 1); true }
                         Key.DirectionRight -> { settleTo(target + 1); true }
-                        Key.ButtonL1 -> { settleTo(target - 5); true }
-                        Key.ButtonR1 -> { settleTo(target + 5); true }
+                        Key.ButtonL1 -> if (inDeckShell) false else { settleTo(target - 5); true }
+                        Key.ButtonR1 -> if (inDeckShell) false else { settleTo(target + 5); true }
                         Key.DirectionDown -> { act = (actIdx + 1).coerceAtMost(actions.lastIndex); true }
                         Key.DirectionUp -> if (actIdx > 0) { act = actIdx - 1; true } else false
                         Key.ButtonA, Key.Enter, Key.NumPadEnter, Key.DirectionCenter -> { runAction(actions[actIdx]); true }

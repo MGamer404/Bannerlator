@@ -349,7 +349,6 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var propertiesShortcut by actions::propertiesShortcut
     var logsShortcut by actions::logsShortcut
     var showCommunityBrowser by actions::showCommunityBrowser
-    var showMyAccount by actions::showMyAccount
     // XMB view: a nested menu is open (hides the + button) / its "Manage wrappers" row asked for the dialog.
     var xmbNested by remember { mutableStateOf(false) }
     var showWrapperManagerXmb by remember { mutableStateOf(false) }
@@ -360,193 +359,13 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // Resume a SteamLite launch that failed inside the container once the library is loaded.
     LaunchedEffect(shortcuts) { launcher.resumePendingRelaunch(shortcuts) }
     var showSortMenu by remember { mutableStateOf(false) }
-    var showImportContainerPicker by remember { mutableStateOf(false) }
-    var pendingImportContainerIndex by remember { mutableStateOf(-1) }
-    // Bulk games-folder import: pick one folder holding many game folders, scan each for its exe,
-    // then confirm the findings before anything is written to the container.
-    var showImportMethodPicker by remember { mutableStateOf(false) }
-    // The + flow asks WHAT to add first; only the two Wine imports then ask for a container, and
-    // this holds which of them the container pick is for (null = none pending).
-    var pendingImportKind by remember { mutableStateOf<ImportKind?>(null) }
-    // "Add Android game": the picker, and the write that follows its Add.
-    var showAndroidPicker by remember { mutableStateOf(false) }
-    var androidAddRunning by remember { mutableStateOf(false) }
-    var folderScanRunning by remember { mutableStateOf(false) }
-    var folderScanResults by remember { mutableStateOf<List<GameFolderScanner.Candidate>>(emptyList()) }
-    var folderScanSelected by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var folderScanRoot by remember { mutableStateOf("") }
-    var folderImportRunning by remember { mutableStateOf(false) }
-    // Manual exe override for a scanned game. The scanner keeps every runner-up, so correcting a
-    // pick is a choice from a list rather than a rescan.
-    var exePickerFor by remember { mutableStateOf<GameFolderScanner.Candidate?>(null) }
-    // Per scanned game: how many components it needs (by exe path), and which rows show them.
-    var scanRecCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
-    var scanRecsOpen by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var exeBrowseForPath by remember { mutableStateOf("") }
-    // When checked, the shortcut import uses the system SAF picker instead of the in-app File Manager.
-    var importUseSystemPicker by remember { mutableStateOf(false) }
-    var showRenameDialog by remember { mutableStateOf(false) }
-    var renameDialogName by remember { mutableStateOf("") }          // current on-disk base (Save's oldName)
-    var renameDialogContainerIndex by remember { mutableStateOf(-1) }
-    // Confirm-game dialog (upgraded rename dialog) state.
-    var confirmNameField by remember { mutableStateOf("") }          // editable name text field
-    var confirmNameEdited by remember { mutableStateOf(false) }      // user typed → stop auto-overwriting
-    var confirmAppId by remember { mutableStateOf<Int?>(null) }      // detected/selected Steam appId
-    var steamSearchResults by remember { mutableStateOf<List<SteamStoreSearch.SteamSuggestion>>(emptyList()) }
-    var steamSearching by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
 
     // The ⋮ items that start a flow rather than open a dialog.
     val scrapeCoverFor: (Shortcut) -> Unit = actions::scrapeCoverFor
     val communityConfigsFor: (Shortcut) -> Unit = actions::communityConfigsFor
 
-
-    fun handleShortcutImport(uri: Uri) {
-        if (pendingImportContainerIndex >= 0) {
-            val result = vm.importShortcut(pendingImportContainerIndex, uri, context)
-            when (result) {
-                is ImportResult.Success -> {
-                    renameDialogContainerIndex = pendingImportContainerIndex
-                    renameDialogName = result.shortcutName
-                    confirmNameField = result.shortcutName
-                    confirmNameEdited = false
-                    confirmAppId = result.appId
-                    steamSearchResults = emptyList()
-                    steamSearching = false
-                    showRenameDialog = true
-                }
-                is ImportResult.Error -> Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
-            }
-            pendingImportContainerIndex = -1
-        }
-    }
-    // System SAF picker (secondary).
-    val importFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) handleShortcutImport(uri)
-    }
-
     fun startSaveBackup(shortcut: Shortcut) = actions.startSaveBackup(shortcut)
     fun startSaveRestore(shortcut: Shortcut) = actions.startSaveRestore(shortcut)
-    // Built-in in-app file picker (primary).
-    val importFileInAppLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data)?.let { handleShortcutImport(it) }
-    }
-    // Games-folder picker. Uses buildDirIntent (a real absolute path, works on SD) rather than SAF,
-    // which hands back /mnt/media_rw/... paths the scanner can't read.
-    val importFolderLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val path = if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedPath(result.data) else null
-        if (path == null) {
-            pendingImportContainerIndex = -1
-            return@rememberLauncherForActivityResult
-        }
-        val containerIndex = pendingImportContainerIndex
-        folderScanRoot = path
-        folderScanRunning = true
-        scope.launch {
-            // Filesystem-heavy: a large library on SD walks a lot of directories.
-            val found = withContext(Dispatchers.IO) { vm.scanGamesFolder(containerIndex, path) }
-            folderScanResults = found
-            // Pre-select everything importable; duplicates stay off and can't be ticked.
-            folderScanSelected = found.filter { !it.alreadyAdded }.map { it.exe.absolutePath }.toSet()
-            folderScanRunning = false
-            // What each game needs (its redistributables, what Steam installs with it), counted for
-            // the list; a row's components open as chips to install right from the list.
-            scanRecCounts = emptyMap()
-            scanRecsOpen = emptySet()
-            launch {
-                val counts = withContext(Dispatchers.IO) {
-                    val catalog = runCatching { ComponentCatalog.load() }.getOrDefault(emptyList()).map { it.name }.toSet()
-                    found.associate { c ->
-                        c.exe.absolutePath to GameRecommendations.detect(c.exe, null, context).count {
-                            it.componentName in catalog && GameRecommendations.group(it) == GameRecommendations.Group.RECOMMENDED
-                        }
-                    }
-                }
-                scanRecCounts = counts.filterValues { it > 0 }
-            }
-            // Games whose files name no Steam app: look each title up on the Steam store (same title
-            // only, remembered per name), so the list shows their art and the import carries the id.
-            // Four at a time, so a big library's list fills in within seconds rather than one by one.
-            launch {
-                found.filter { it.appId == null && !it.alreadyAdded }.chunked(4).forEach { batch ->
-                    batch.map { c ->
-                        async(Dispatchers.IO) {
-                            c to runCatching { SteamStoreSearch.findAppIdByName(context, c.name) }.getOrNull()
-                        }
-                    }.awaitAll().forEach { (c, id) ->
-                        if (id != null) {
-                            folderScanResults = folderScanResults.map {
-                                if (it.exe.absolutePath == c.exe.absolutePath && it.appId == null) {
-                                    it.copy(appId = id, coverUrl = SteamStoreSearch.coverUrl(id))
-                                } else it
-                            }
-                        }
-                    }
-                }
-            }
-            if (found.isEmpty()) {
-                Toast.makeText(context, "No games found in that folder", Toast.LENGTH_LONG).show()
-                pendingImportContainerIndex = -1
-            }
-        }
-    }
-    // Phase 3: the nav-drawer's profile header lands here then flips this one-shot flag — open the sheet.
-    LaunchedEffect(AccountUiBus.openMyAccountRequested) {
-        if (AccountUiBus.openMyAccountRequested) {
-            AccountUiBus.openMyAccountRequested = false
-            showMyAccount = true
-        }
-    }
-    // Tier-2 session-return: after an installer-based component install finishes and MainActivity has
-    // routed us here, re-open the originating shortcut's settings (defaults to the Win Components tab,
-    // where its recommended-components chips live). Keyed on the shortcuts list too, since it loads
-    // async — wait for it, then resolve by container + base name. Best-effort: no match ⇒ stay on Games.
-    LaunchedEffect(ComponentReturnBus.openShortcutSettings, shortcuts) {
-        val target = ComponentReturnBus.openShortcutSettings ?: return@LaunchedEffect
-        if (shortcuts.isEmpty()) return@LaunchedEffect // still loading (or none) — retry when it changes
-        ComponentReturnBus.openShortcutSettings = null
-        shortcuts.firstOrNull {
-            it.container.id == target.containerId && it.name == target.shortcutBase
-        }?.let { settingsShortcut = it }
-    }
-
-    // Deck shell hand-off (see GamesScreenRequests): the Deck home routes the ⋮ menu actions whose dialogs live here, and its "Add a game" card, through this one-shot request.
-    // Keyed on the list too, since it loads async. Never set in the classic shell.
-    LaunchedEffect(GamesScreenRequests.pending, shortcuts) {
-        val req = GamesScreenRequests.pending ?: return@LaunchedEffect
-        if (req.action == GameMenuAction.ADD_GAME) {
-            GamesScreenRequests.pending = null
-            // Same as the + button: ask what to add first (Android games never need a container).
-            showImportMethodPicker = true
-            return@LaunchedEffect
-        }
-        if (shortcuts.isEmpty()) return@LaunchedEffect // still loading — retry when it changes
-        GamesScreenRequests.pending = null
-        val s = shortcuts.firstOrNull { it.file.path == req.shortcutPath } ?: return@LaunchedEffect
-        when (req.action) {
-            GameMenuAction.SETTINGS -> settingsShortcut = s
-            GameMenuAction.REMOVE -> confirmRemove = s
-            GameMenuAction.CLONE -> cloneTarget = s
-            GameMenuAction.COPY_TO_DRIVE_C -> copyToDriveCTarget = s
-            GameMenuAction.CHANGE_EXE -> changeExeTarget = s
-            GameMenuAction.ADD_TO_HOME -> addToHomeScreen(context, s)
-            GameMenuAction.EXPORT -> exportShortcut(context, s)
-            GameMenuAction.GAME_DETAILS -> gameDetailsShortcut = s
-            GameMenuAction.CLOUD_SAVES -> launchSaveManager(context, steamAppIdOf(s))
-            GameMenuAction.BACKUP_SAVES -> startSaveBackup(s)
-            GameMenuAction.RESTORE_SAVES -> startSaveRestore(s)
-            GameMenuAction.SCRAPE_COVER -> scrapeCoverFor(s)
-            GameMenuAction.COMMUNITY_CONFIGS -> communityConfigsFor(s)
-            GameMenuAction.VIEW_LOGS -> logsShortcut = s
-            GameMenuAction.PROPERTIES -> propertiesShortcut = s
-            GameMenuAction.ADD_GAME -> Unit
-        }
-    }
-
     val topBarActions = LocalTopBarActions.current
     // The XMB view draws its own backdrop, so it asks for a see-through top bar (MainActivity only
     // honours that on the Games route). Dropped when leaving XMB or this screen.
@@ -667,46 +486,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         openWrapperManager = { showWrapperManagerXmb = true },
     )
     val xmbActionsFor: (Shortcut) -> List<XmbAction> = { shortcut ->
-        buildList {
-            // An Android game has no Wine side: no settings, saves, configs, logs or container moves.
-            if (AndroidGames.isAndroidEntry(shortcut)) {
-                add(XmbAction("Game Details", Icons.Filled.Edit, "Name, genres, year, description", menu = { xmbGameDetailsMenu(it, shortcut) }))
-                add(XmbAction("Scrape cover", Icons.Filled.Search, menu = { xmbScrapeCoverMenu(it, shortcut) }))
-                add(XmbAction("Add to home screen", Icons.Filled.AddToHomeScreen, "Android's pin prompt") { addToHomeScreen(context, shortcut) })
-                add(XmbAction("Remove", Icons.Filled.Delete, "Asks to confirm first", danger = true, menu = { xmbRemoveMenu(it, shortcut, xmbHost) }))
-                return@buildList
-            }
-            // The Linux Steam entry: its settings are the Linux-side ones only, which the pop-up editor
-            // already knows (the XMB settings columns are Wine rows), and none of the Wine actions apply.
-            if (LinuxShortcuts.isLinuxEntry(shortcut)) {
-                add(XmbAction("Settings", Icons.Filled.Settings, "Steam (Linux) display, driver, controls…") { settingsShortcut = shortcut })
-                add(XmbAction("Game Details", Icons.Filled.Edit, "Name, genres, year, description", menu = { xmbGameDetailsMenu(it, shortcut) }))
-                add(XmbAction("Scrape cover", Icons.Filled.Search, menu = { xmbScrapeCoverMenu(it, shortcut) }))
-                add(XmbAction("Add to home screen", Icons.Filled.AddToHomeScreen, "Android's pin prompt") { addToHomeScreen(context, shortcut) })
-                add(XmbAction("Properties", Icons.Filled.Info, "Times played, playtime", menu = { xmbPropertiesMenu(it, shortcut) }))
-                add(XmbAction("Remove", Icons.Filled.Delete, "Asks to confirm first", danger = true, menu = { xmbRemoveMenu(it, shortcut, xmbHost) }))
-                return@buildList
-            }
-            add(XmbAction("Settings", Icons.Filled.Settings, "Display, graphics, controller…", menu = { xmbSettingsMenu(it, shortcut, xmbHost) }))
-            add(XmbAction("Game Details", Icons.Filled.Edit, "Name, genres, year, description", menu = { xmbGameDetailsMenu(it, shortcut) }))
-            if (isSteamOriginShortcut(shortcut)) {
-                add(XmbAction("Cloud Saves", Icons.Filled.CloudSync, "Steam Cloud sync — opens its own screen") { launchSaveManager(context, steamAppIdOf(shortcut)) })
-            }
-            if (isCustomShortcut(shortcut)) {
-                add(XmbAction("Back up saves", Icons.Filled.Archive, menu = { xmbBackupSavesMenu(it, shortcut) }))
-                add(XmbAction("Restore saves", Icons.Filled.Unarchive, menu = { xmbRestoreSavesMenu(it, shortcut) }))
-            }
-            add(XmbAction("Community configs", Icons.Filled.Public, "Shared settings for this game", menu = { xmbCommunityConfigsMenu(it, shortcut) }))
-            add(XmbAction("Scrape cover", Icons.Filled.Search, menu = { xmbScrapeCoverMenu(it, shortcut) }))
-            add(XmbAction("View logs", Icons.Filled.Description, menu = { xmbLogsMenu(it, shortcut) }))
-            add(XmbAction("Clone to container", Icons.Filled.ContentCopy, menu = { xmbCloneMenu(it, shortcut, xmbHost) }))
-            add(XmbAction("Copy to Drive C…", Icons.Filled.DriveFileMove, menu = { xmbCopyToDriveCMenu(it, shortcut) }))
-            add(XmbAction("Change executable…", Icons.Filled.SwapHoriz, menu = { xmbChangeExeMenu(it, shortcut) }))
-            add(XmbAction("Add to home screen", Icons.Filled.AddToHomeScreen, "Android's pin prompt") { addToHomeScreen(context, shortcut) })
-            add(XmbAction("Export", Icons.Filled.Upload) { exportShortcut(context, shortcut) })
-            add(XmbAction("Properties", Icons.Filled.Info, "Times played, playtime", menu = { xmbPropertiesMenu(it, shortcut) }))
-            add(XmbAction("Remove", Icons.Filled.Delete, "Asks to confirm first", danger = true, menu = { xmbRemoveMenu(it, shortcut, xmbHost) }))
-        }
+        xmbGameActions(context, shortcut, xmbHost, openSettings = { settingsShortcut = it })
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -728,24 +508,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                             onExitSelection = { selectionMode = false; selectedPaths = emptySet() },
                             onPlay = { requestLaunch(it) },
                             actionsFor = xmbActionsFor,
-                            storeBadges = { shortcut ->
-                                ShortcutBadgeOverlay(
-                                    showSteam = remember(shortcut) { isSteamOriginShortcut(shortcut) },
-                                    showEa = remember(shortcut) { EaSupport.isTagged(shortcut) },
-                                    showEpic = remember(shortcut) { shortcut.getExtra("storeSource") == "epic" },
-                                    showEos = rememberEosBadge(shortcut),
-                                    showGog = remember(shortcut) { isGogShortcut(shortcut) },
-                                    showAmazon = remember(shortcut) { isAmazonShortcut(shortcut) },
-                                    showCustom = remember(shortcut) { isCustomOriginShortcut(shortcut) },
-                                    showLinux = remember(shortcut) { LinuxShortcuts.isLinuxEntry(shortcut) },
-                                    showAndroid = remember(shortcut) { AndroidGames.isAndroidEntry(shortcut) },
-                                )
-                            },
-                            sdBadge = { shortcut ->
-                                if (remember(shortcut) { WinePath.isOnRemovableStorage(shortcut.container, shortcut.path) }) {
-                                    SdCardBadge(Modifier.padding(start = 6.dp))
-                                }
-                            },
+                            storeBadges = { XmbStoreBadges(it) },
+                            sdBadge = { XmbSdBadge(it) },
                             onReloadGames = { vm.refresh() },
                             onNestedChange = { xmbNested = it },
                         )
@@ -849,7 +613,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             // menu is open (it would sit on top of the menu's rows).
             if (!(viewMode == ShortcutViewMode.XMB && xmbNested)) DraggableAddButton(
                 prefKey = "games",
-                onClick = { showImportMethodPicker = true },
+                onClick = { GamesScreenRequests.pending = GamesScreenRequests.Request(GameMenuAction.ADD_GAME) },
                 outerPadding = 16.dp,
                 buttonModifier = Modifier
                     .size(56.dp)
@@ -867,600 +631,9 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         }
     }
 
-    /**
-     * Swaps the chosen exe for one scanned game. The user has now made the call explicitly, so the
-     * "check this one" flag is cleared, the previous pick joins the alternatives (in case they want
-     * to go back), and the selection set is re-keyed since it is keyed by exe path.
-     */
-    fun replaceScannedExe(target: GameFolderScanner.Candidate, newExe: File) {
-        val oldKey = target.exe.absolutePath
-        val newKey = newExe.absolutePath
-        folderScanResults = folderScanResults.map { c ->
-            if (c.exe.absolutePath != oldKey) c else c.copy(
-                exe = newExe,
-                uncertain = false,
-                alternatives = (listOf(c.exe) + c.alternatives)
-                    .distinctBy { it.absolutePath }
-                    .filter { it.absolutePath != newKey },
-            )
-        }
-        if (oldKey in folderScanSelected) folderScanSelected = folderScanSelected - oldKey + newKey
-    }
-
-    // "Browse…" result from the exe-override dialog: any file the user points at wins outright.
-    val importExeBrowseLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val path = if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedPath(result.data) else null
-        val target = folderScanResults.firstOrNull { it.exe.absolutePath == exeBrowseForPath }
-        if (path != null && target != null) replaceScannedExe(target, File(path))
-        exeBrowseForPath = ""
-    }
-
-    // Manual exe override — every candidate exe found in that game's folder, best-ranked first.
-    exePickerFor?.let { target ->
-        val options = (listOf(target.exe) + target.alternatives).distinctBy { it.absolutePath }
-        OutlinedAlertDialog(
-            // The platform default width truncates exe names and their subfolder paths, which are
-            // the whole point of this list.
-            modifier = Modifier.fillMaxWidth(0.94f),
-            properties = DialogProperties(usePlatformDefaultWidth = false),
-            onDismissRequest = { exePickerFor = null },
-            title = {
-                Column {
-                    Text("Choose the game's .exe")
-                    Text(
-                        target.name,
-                        color = OnSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            },
-            text = {
-                LazyColumn(modifier = Modifier.heightIn(max = 380.dp)) {
-                    items(options, key = { it.absolutePath }) { exe ->
-                        val current = exe.absolutePath == target.exe.absolutePath
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 3.dp)
-                                .clickable {
-                                    replaceScannedExe(target, exe)
-                                    exePickerFor = null
-                                },
-                            shape = RoundedCornerShape(10.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                        ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = current, onClick = {
-                                replaceScannedExe(target, exe)
-                                exePickerFor = null
-                            })
-                            Spacer(Modifier.width(8.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    exe.name,
-                                    color = OnSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                                // Where it sits inside the game folder — the thing that actually
-                                // distinguishes two same-named exes (x86 vs x64, bin/ vs root).
-                                val rel = exe.absolutePath
-                                    .removePrefix(target.folder.absolutePath)
-                                    .removePrefix("/")
-                                Text(
-                                    if (rel.contains('/')) rel.substringBeforeLast('/') else "(folder root)",
-                                    color = OnSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.labelSmall,
-                                )
-                            }
-                        }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                // Escape hatch: the real exe can be missing from the list if it was filtered as an
-                // installer/helper or sits deeper than the scan goes.
-                TextButton(onClick = {
-                    exeBrowseForPath = target.exe.absolutePath
-                    exePickerFor = null
-                    importExeBrowseLauncher.launch(
-                        InAppFilePicker.buildIntent(context, InAppFilePicker.SHORTCUT, "Select the game's .exe")
-                    )
-                }) { Text("Browse…") }
-            },
-            dismissButton = {
-                TextButton(onClick = { exePickerFor = null }) { Text("Cancel") }
-            },
-        )
-    }
-
-    // Once a container is picked for a Wine import, open the matching file/folder picker. A container
-    // is chosen by then, so hand the in-app picker its C: drive: a game living on C: imports as C:\…
-    // via WinePath and runs FROM the container's C:. Null-safe: only when the C: drive actually
-    // exists on disk. The system picker (SAF) has no C: notion.
-    fun launchImportPicker(kind: ImportKind) {
-        val driveC = pendingImportContainerIndex.takeIf { it >= 0 }
-            ?.let { vm.containers().getOrNull(it) }
-            ?.let { File(it.rootDir, ".wine/drive_c") }
-            ?.takeIf { it.isDirectory }
-        when (kind) {
-            ImportKind.EXE ->
-                if (importUseSystemPicker) importFileLauncher.launch("*/*")
-                else importFileInAppLauncher.launch(
-                    InAppFilePicker.buildIntent(context, InAppFilePicker.SHORTCUT, "Select .exe / .desktop / .lnk", driveCPath = driveC?.absolutePath)
-                )
-            ImportKind.FOLDER -> importFolderLauncher.launch(
-                InAppFilePicker.buildDirIntent(context, "Select your games folder", driveCPath = driveC?.absolutePath)
-            )
-        }
-    }
-
-    // What to add, asked first: one exe (the original flow), a whole folder of game folders — both
-    // then ask for a container — or Android games, which never use one.
-    if (showImportMethodPicker) {
-        OutlinedAlertDialog(
-            onDismissRequest = { showImportMethodPicker = false },
-            title = { Text("Add games") },
-            text = {
-                Column {
-                    MenuOptionCard(
-                        title = "Add game EXE",
-                        subtitle = "Pick one game's .exe file",
-                        icon = Icons.Default.InsertDriveFile,
-                    ) {
-                        showImportMethodPicker = false
-                        pendingImportKind = ImportKind.EXE
-                        showImportContainerPicker = true
-                    }
-                    MenuOptionCard(
-                        title = "Add games folder",
-                        subtitle = "Pick the folder holding all your games — each one is scanned for its .exe",
-                        icon = Icons.Default.Folder,
-                    ) {
-                        showImportMethodPicker = false
-                        pendingImportKind = ImportKind.FOLDER
-                        showImportContainerPicker = true
-                    }
-                    // No container: Android games live in their own home (see AndroidGames).
-                    MenuOptionCard(
-                        title = "Add Android game",
-                        subtitle = "Pick games installed on this phone — they open as normal Android apps",
-                        icon = Icons.Filled.Android,
-                    ) {
-                        showImportMethodPicker = false
-                        showAndroidPicker = true
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showImportMethodPicker = false }) { Text("Cancel") }
-            },
-        )
-    }
-
-    if (showAndroidPicker) {
-        val added = remember(shortcuts) { AndroidGames.addedPackages(shortcuts) }
-        AndroidGamePickerDialog(
-            alreadyAdded = added,
-            adding = androidAddRunning,
-            onDismiss = { showAndroidPicker = false },
-            onAdd = { apps ->
-                androidAddRunning = true
-                scope.launch {
-                    val summary = withContext(Dispatchers.IO) { vm.addAndroidGames(apps, context) }
-                    androidAddRunning = false
-                    showAndroidPicker = false
-                    val message = if (summary.failed == 0) {
-                        "Added ${summary.added} Android game${if (summary.added == 1) "" else "s"}"
-                    } else {
-                        "Added ${summary.added}, ${summary.failed} failed — ${summary.failures.firstOrNull().orEmpty()}"
-                    }
-                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                }
-            },
-        )
-    }
-
-    // Scanning progress — a big library on SD takes a moment.
-    if (folderScanRunning) {
-        OutlinedAlertDialog(
-            onDismissRequest = {},
-            title = { Text("Scanning for games") },
-            text = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Text(folderScanRoot, color = OnSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-            },
-            confirmButton = {},
-        )
-    }
-
-    // Confirm screen — nothing is written until the user accepts this list.
-    if (folderScanResults.isNotEmpty() && !folderScanRunning) {
-        val importable = folderScanResults.filter { !it.alreadyAdded }
-        val selectedCount = folderScanSelected.size
-        OutlinedAlertDialog(
-            // Each row carries art, a checkbox, three lines of text and a Change action; at the
-            // platform default width the titles and the exe name truncate to the point of being
-            // unreadable, which defeats a screen whose whole job is letting the user check them.
-            modifier = Modifier.fillMaxWidth(0.94f),
-            properties = DialogProperties(usePlatformDefaultWidth = false),
-            onDismissRequest = {
-                if (!folderImportRunning) {
-                    folderScanResults = emptyList()
-                    folderScanSelected = emptySet()
-                    pendingImportContainerIndex = -1
-                }
-            },
-            title = {
-                Column {
-                    Text("Found ${importable.size} game${if (importable.size == 1) "" else "s"}")
-                    val skipped = folderScanResults.size - importable.size
-                    if (skipped > 0) {
-                        Text(
-                            "$skipped already added",
-                            color = OnSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-            },
-            text = {
-                LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
-                    items(folderScanResults, key = { it.exe.absolutePath }) { candidate ->
-                        Column(Modifier.fillMaxWidth()) {
-                            ScannedGameRow(
-                                candidate = candidate,
-                                checked = candidate.exe.absolutePath in folderScanSelected,
-                                enabled = !candidate.alreadyAdded && !folderImportRunning,
-                                onToggle = {
-                                    val key = candidate.exe.absolutePath
-                                    folderScanSelected = if (key in folderScanSelected) {
-                                        folderScanSelected - key
-                                    } else {
-                                        folderScanSelected + key
-                                    }
-                                },
-                                onChangeExe = { exePickerFor = candidate },
-                                footer = {
-                                    val recCount = scanRecCounts[candidate.exe.absolutePath] ?: 0
-                                    val scanContainer = vm.containers().getOrNull(pendingImportContainerIndex)
-                                    if (recCount > 0 && scanContainer != null) {
-                                        val key = candidate.exe.absolutePath
-                                        val open = key in scanRecsOpen
-                                        TextButton(
-                                            onClick = { scanRecsOpen = if (open) scanRecsOpen - key else scanRecsOpen + key },
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                                            modifier = Modifier.height(32.dp),
-                                        ) {
-                                            Text(
-                                                (if (open) "▾ " else "▸ ") + "Components ($recCount)",
-                                                fontSize = 13.sp,
-                                            )
-                                        }
-                                        if (open) {
-                                            RecommendedComponentsSection(
-                                                container = scanContainer,
-                                                exeFile = candidate.exe,
-                                                modifier = Modifier.padding(start = 12.dp, end = 4.dp, bottom = 8.dp),
-                                            )
-                                        }
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = selectedCount > 0 && !folderImportRunning,
-                    onClick = {
-                        val containerIndex = pendingImportContainerIndex
-                        val chosen = folderScanResults.filter { it.exe.absolutePath in folderScanSelected }
-                        folderImportRunning = true
-                        scope.launch {
-                            val summary = withContext(Dispatchers.IO) {
-                                vm.importScannedGames(containerIndex, chosen, context)
-                            }
-                            folderImportRunning = false
-                            folderScanResults = emptyList()
-                            folderScanSelected = emptySet()
-                            pendingImportContainerIndex = -1
-                            val message = if (summary.failed == 0) {
-                                "Added ${summary.added} game${if (summary.added == 1) "" else "s"}"
-                            } else {
-                                "Added ${summary.added}, ${summary.failed} failed — ${summary.failures.firstOrNull().orEmpty()}"
-                            }
-                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                        }
-                    },
-                ) {
-                    Text(if (folderImportRunning) "Adding…" else "Add $selectedCount")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    enabled = !folderImportRunning,
-                    onClick = {
-                        folderScanResults = emptyList()
-                        folderScanSelected = emptySet()
-                        pendingImportContainerIndex = -1
-                    },
-                ) { Text("Cancel") }
-            },
-        )
-    }
-
-    // Import container picker
-    if (showImportContainerPicker) {
-        val containers = vm.containers()
-        OutlinedAlertDialog(
-            onDismissRequest = {
-                showImportContainerPicker = false
-                pendingImportKind = null
-            },
-            title = { Text("Select container") },
-            text = {
-                Column {
-                    if (containers.isEmpty()) {
-                        Text("No containers found.", color = OnSurfaceVariant)
-                    } else {
-                        // Scroll the container list so it can't be clipped when there are many
-                        // containers and vertical space is tight (landscape). "Pick via system…"
-                        // stays pinned below the scroll area so it's always reachable.
-                        Column(
-                            modifier = Modifier
-                                .heightIn(max = 420.dp)
-                                .verticalScroll(rememberScrollState()),
-                        ) {
-                            containers.forEachIndexed { index, c ->
-                                MenuOptionCard(
-                                    title = c.name,
-                                    icon = Icons.Default.Folder,
-                                ) {
-                                    showImportContainerPicker = false
-                                    pendingImportContainerIndex = index
-                                    pendingImportKind?.let { launchImportPicker(it) }
-                                    pendingImportKind = null
-                                }
-                            }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                            Checkbox(checked = importUseSystemPicker, onCheckedChange = { importUseSystemPicker = it })
-                            Text("Pick via system…", color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = {
-                    showImportContainerPicker = false
-                    pendingImportKind = null
-                }) { Text("Cancel") }
-            },
-        )
-    }
-
-    // Follow the importer's async Steam-name auto-rename inside an open confirm dialog: keep the
-    // Save target (renameDialogName = the on-disk base) in sync, and update the editable field
-    // unless the user has already typed into it. Race-free — all on the main thread, one file writer.
-    val importedNameUpdate by vm.importedNameUpdate.collectAsState()
-    LaunchedEffect(importedNameUpdate) {
-        val update = importedNameUpdate ?: return@LaunchedEffect
-        if (showRenameDialog && renameDialogName == update.oldBase) {
-            renameDialogName = update.newBase
-            if (!confirmNameEdited) confirmNameField = update.newBase
-        }
-        vm.consumeImportedNameUpdate()
-    }
-
-    // Confirm game after import: editable name + "Search Steam" picker (fixes launcher-named
-    // shortcuts + wrong cover art). Reuses the existing rename mechanism on Save.
-    if (showRenameDialog) {
-        val confirmContainer = vm.containers().getOrNull(renameDialogContainerIndex)
-        // The result this game is linked to: the appId it was given, else the one whose title is
-        // the game's (the rule the import's own Steam lookup uses). Save commits it.
-        val linkedHit = confirmAppId ?: steamSearchResults
-            .map { it to SteamStoreSearch.nameMatch(confirmNameField, it.name) }
-            .filter { it.second >= 2 }.maxByOrNull { it.second }?.first?.appId
-        OutlinedAlertDialog(
-            onDismissRequest = { showRenameDialog = false },
-            title = { Text("Confirm game") },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 460.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    // The search runs by itself when the dialog opens, so the game the import matched
-                    // is already listed (and marked) under the name, as if Search Steam had been tapped.
-                    LaunchedEffect(renameDialogName) {
-                        val query = confirmNameField.trim()
-                        if (query.isNotEmpty() && steamSearchResults.isEmpty() && !steamSearching) {
-                            steamSearching = true
-                            steamSearchResults = withContext(Dispatchers.IO) { SteamStoreSearch.searchByName(query) }
-                            steamSearching = false
-                        }
-                    }
-                    OutlinedTextField(
-                        value = confirmNameField,
-                        onValueChange = { confirmNameField = it; confirmNameEdited = true },
-                        label = { Text("Game name") },
-                        singleLine = true,
-                        trailingIcon = {
-                            if (confirmNameField.isNotEmpty()) {
-                                IconButton(onClick = { confirmNameField = ""; confirmNameEdited = true }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear")
-                                }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-
-                    Button(
-                        onClick = {
-                            val query = confirmNameField.trim()
-                            if (query.isEmpty() || confirmContainer == null) return@Button
-                            steamSearching = true
-                            steamSearchResults = emptyList()
-                            scope.launch(Dispatchers.IO) {
-                                val results = SteamStoreSearch.searchByName(query)
-                                withContext(Dispatchers.Main) {
-                                    steamSearchResults = results
-                                    steamSearching = false
-                                }
-                            }
-                        },
-                        enabled = !steamSearching && confirmNameField.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        if (steamSearching) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Searching…")
-                        } else {
-                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Search Steam")
-                        }
-                    }
-
-                    if (steamSearchResults.isNotEmpty()) {
-                        Text(
-                            "Tap a result to set the name + cover art:",
-                            color = OnSurfaceVariant,
-                            fontSize = 12.sp,
-                        )
-                        // The linked result first, tinted, so the match is the first thing seen.
-                        steamSearchResults.sortedByDescending { it.appId == linkedHit }.forEach { hit ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (hit.appId == linkedHit) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                        else androidx.compose.ui.graphics.Color.Transparent
-                                    )
-                                    .clickable {
-                                        // Set name + record appId; edit-guard off so the async
-                                        // auto-rename won't clobber the user's explicit pick.
-                                        confirmNameField = hit.name
-                                        confirmNameEdited = true
-                                        confirmAppId = hit.appId
-                                        // Apply this appId's cover art to the current on-disk shortcut.
-                                        if (confirmContainer != null) {
-                                            val base = renameDialogName
-                                            scope.launch(Dispatchers.IO) {
-                                                val bmp = applySteamCover(confirmContainer, base, hit.appId)
-                                                if (bmp != null) withContext(Dispatchers.Main) {
-                                                    vm.reloadShortcut(
-                                                        File(confirmContainer.getDesktopDir(), "$base.desktop").path,
-                                                        bmp,
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                    .padding(horizontal = 6.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                SteamResultThumbnail(hit.appId)
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(hit.name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text("App ID: ${hit.appId}", fontSize = 11.sp, color = OnSurfaceVariant)
-                                }
-                                if (hit.appId == linkedHit) {
-                                    Text("✓ Linked", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                        }
-                    } else if (!steamSearching) {
-                        Text(
-                            "Not the right game? Edit the name and tap Search Steam to pick the correct one.",
-                            color = OnSurfaceVariant,
-                            fontSize = 12.sp,
-                        )
-                    }
-
-                    // Recommended components — the redists this game bundles, one-tap installable into
-                    // its container. Detection runs off-main-thread inside the section (Pillar 2/2.2).
-                    if (confirmContainer != null) {
-                        val importedExe = remember(confirmContainer, renameDialogName) {
-                            runCatching {
-                                val sc = Shortcut(
-                                    confirmContainer,
-                                    File(confirmContainer.getDesktopDir(), "$renameDialogName.desktop"),
-                                )
-                                WinePath.resolveAndroidPath(confirmContainer, sc.path)
-                            }.getOrNull()
-                        }
-                        if (importedExe != null) {
-                            Divider(color = DividerColor)
-                            RecommendedComponentsSection(
-                                container = confirmContainer,
-                                exeFile = importedExe,
-                                shortcutBaseName = renameDialogName,
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val name = confirmNameField.trim()
-                    // The linked game (tapped, or the marked match) is committed by Save itself: its id
-                    // goes on the current file first, so it rides through the rename.
-                    val tapped = confirmAppId != null
-                    val linkId = confirmAppId ?: linkedHit
-                    linkId?.let { id ->
-                        confirmContainer?.let { c -> recordSteamAppId(c, renameDialogName, id) }
-                    }
-                    val oldBase = renameDialogName
-                    if (name.isNotEmpty()) {
-                        vm.renameImportedShortcut(renameDialogContainerIndex, renameDialogName, name)
-                    }
-                    if (linkId != null && confirmContainer != null) {
-                        val safe = name.replace(Regex("""[\\/:*?"<>|]"""), "_").trim()
-                        val base = if (safe.isNotBlank() && File(confirmContainer.getDesktopDir(), "$safe.desktop").isFile) safe else oldBase
-                        scope.launch(Dispatchers.IO) {
-                            // Its Steam cover (unless one was just applied by tapping) and its details.
-                            if (!tapped) applySteamCover(confirmContainer, base, linkId)
-                            ExeShortcutImporter.linkSteamApp(confirmContainer, base, linkId)
-                            withContext(Dispatchers.Main) { vm.refresh() }
-                        }
-                    }
-                    showRenameDialog = false
-                    Toast.makeText(context, "Shortcut imported.", Toast.LENGTH_SHORT).show()
-                }) { Text("Save") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showRenameDialog = false
-                    Toast.makeText(context, "Shortcut imported.", Toast.LENGTH_SHORT).show()
-                }) { Text("Skip") }
-            },
-        )
-    }
+    // The add-games flows and the one-shot requests (Deck hand-offs, My account, the component-install
+    // return) live in GameActionsHost, which the Deck shell also mounts on its own.
+    GameActionsHost(vm, actions)
 
     // Bulk remove. Counts rather than names: a list of twenty titles is not something anyone
     // reads, and the number is the part that decides whether you meant it.
@@ -10319,7 +9492,7 @@ private fun ScAdvancedTab(
  * Disk cache is disabled so Coil never serves a cached 404 for a since-published cover.
  */
 @Composable
-private fun SteamResultThumbnail(appId: Int) {
+internal fun SteamResultThumbnail(appId: Int) {
     val context = LocalContext.current
     var useHeader by remember(appId) { mutableStateOf(false) }
     val url = if (useHeader) SteamStoreSearch.headerUrl(appId) else SteamStoreSearch.coverUrl(appId)
@@ -10348,7 +9521,7 @@ private fun SteamResultThumbnail(appId: Int) {
 }
 
 /** Record the resolved Steam [appId] as a shortcut extra (rides with the .desktop through renames). */
-private fun recordSteamAppId(container: Container, base: String, appId: Int) {
+internal fun recordSteamAppId(container: Container, base: String, appId: Int) {
     val f = File(container.getDesktopDir(), "$base.desktop")
     if (!f.isFile) return
     runCatching { Shortcut(container, f).apply { putExtra("steamAppId", appId.toString()); saveData() } }
@@ -10814,7 +9987,7 @@ private val AMAZON_ROOT_RE = Regex("""(^|[\\/])Amazon[\\/]""")
 // The stages of the "Copy to Drive C" flow, in order: confirm the source root, resolve a
 // destination collision, run the background copy, then offer to delete the original.
 // The two "+" imports that run in a Wine container, and so ask for one after being picked.
-private enum class ImportKind { EXE, FOLDER }
+internal enum class ImportKind { EXE, FOLDER }
 
 private enum class CopyToCPhase { CONFIRM, OVERWRITE, COPYING, DELETE_ORIGINAL }
 
@@ -11243,7 +10416,7 @@ private fun EaBadge(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ShortcutBadgeOverlay(
+internal fun ShortcutBadgeOverlay(
     showSteam: Boolean = false,
     showEpic: Boolean,
     showEos: Boolean,
@@ -11282,7 +10455,7 @@ private fun ShortcutBadgeOverlay(
  * true once a scan finds EOS markers. Source-agnostic: works for any store origin.
  */
 @Composable
-private fun rememberEosBadge(shortcut: Shortcut): Boolean {
+internal fun rememberEosBadge(shortcut: Shortcut): Boolean {
     var eos by remember(shortcut.path) { mutableStateOf(shortcut.getExtra("eos") == "1") }
     LaunchedEffect(shortcut.path) {
         if (!shortcut.hasExtra("eos")) {
@@ -11295,7 +10468,7 @@ private fun rememberEosBadge(shortcut: Shortcut): Boolean {
 }
 
 @Composable
-private fun SdCardBadge(modifier: Modifier = Modifier) {
+internal fun SdCardBadge(modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(4.dp))
@@ -11324,7 +10497,7 @@ private fun SdCardBadge(modifier: Modifier = Modifier) {
  * import menus read as part of the same surface rather than as bare dialog text.
  */
 @Composable
-private fun MenuOptionCard(
+internal fun MenuOptionCard(
     title: String,
     subtitle: String? = null,
     icon: ImageVector? = null,
@@ -11371,7 +10544,7 @@ private fun MenuOptionCard(
  * candidate, but the user gets told which ones are worth a second look before committing.
  */
 @Composable
-private fun ScannedGameRow(
+internal fun ScannedGameRow(
     candidate: GameFolderScanner.Candidate,
     checked: Boolean,
     enabled: Boolean,

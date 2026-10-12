@@ -25,10 +25,10 @@ enum class GameMenuAction(val label: String) {
 }
 
 /**
- * One-shot hand-off into the Games screen (ShortcutsScreen). The Deck home routes the menu actions
- * whose dialogs live inside that screen through here: it sets [pending], navigates to the Games route,
- * and the screen opens the matching dialog once its list has loaded, then clears the request.
- * Nothing sets it in the classic shell, so the Games screen behaves exactly as before there.
+ * One-shot request for a game action whose dialogs live in [GameActionsHost]: "Add a game" (the Games
+ * screen's + button, the Deck's Add games) and the game actions the Deck settings pages hand over.
+ * Set [pending]; the host on screen (the Games screen's, or the one the Deck shell mounts over every
+ * page) opens the matching dialog and clears it. Nothing needs to navigate anywhere first.
  */
 object GamesScreenRequests {
     data class Request(val action: GameMenuAction, val shortcutPath: String? = null)

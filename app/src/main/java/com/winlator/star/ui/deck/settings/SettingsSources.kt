@@ -74,6 +74,17 @@ internal class ContainerFormSource(
     override val dirty: Boolean get() = dirtyState.value
 
     override fun save(onDone: (Boolean) -> Unit) {
+        // Two drives on one letter would collide in dosdevices: refused, as the classic ✓ refuses it.
+        val duplicates = vm.duplicateDriveLetters
+        if (duplicates.isNotEmpty()) {
+            Toast.makeText(
+                env.context,
+                "Two drives share " + duplicates.sorted().joinToString(", ") { "$it:" } + ". Give each drive its own letter (Windows › Drives).",
+                Toast.LENGTH_LONG,
+            ).show()
+            onDone(false)
+            return
+        }
         vm.confirm(
             resolvedGraphicsDriverConfig = vm.graphicsDriverConfig,
             resolvedDXWrapperConfig = vm.dxWrapperConfig,

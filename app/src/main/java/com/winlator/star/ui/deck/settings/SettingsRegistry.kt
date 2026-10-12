@@ -98,32 +98,15 @@ internal object SettingsRegistry {
         if (game) {
             m["game"] = listOf(
                 Handoff("Name, cover art and details", "Cover art from your files, Steam or SteamGridDB, the Steam link, genres, year and description (Game Details).", TARGET_DETAILS, ALL_WORLDS),
-                h("Icon, program to run and storage", "Pick an icon, change the .exe or move the game to drive C (General tab)."),
-                h("Icon", "Pick this entry's icon (General tab).", LINUX_ONLY),
+                // The icon is picked on this page now (DeckIconSection); the file operations stay with the Games screen.
+                h("Program to run and storage", "Change the .exe or move the game to drive C (General tab)."),
             )
             m["launch"] = listOf(Handoff("Offline Steam mode, file checks and updates", "Goldberg mode, Verify files and Check for updates live in the launch menu. Turn off \"Skip the launch menu\" to see it on the next start.", TARGET_NONE))
         }
-        m["display"] = listOfNotNull(
-            if (game) h("TV and external display", "Start on the TV, TV picture mode, match the TV resolution (TV tab, shown while a TV is connected).", WINE_LINUX) else null,
-            h("Wayland game driver and its settings", "Which Vulkan driver the game renders with on Wayland, GPU name, memory limit, present mode and the Mali (PanVK) switches (the driver gear)."),
-        )
-        // The DX wrapper config and the X11 driver configuration are rows of this page now (GraphicsRows).
-        // Only an imported wrapper's own switches, read from its files, are still edited there.
-        m["graphics"] = listOf(
-            h("Settings detected in an imported wrapper", "The extra switches an imported graphics wrapper carries, read from its files (X11 driver configuration, Detected settings)."),
-        )
-        m["performance"] = listOfNotNull(
-            h("Services to start and translator presets", "The Custom services list, and editing Box64, WOWBox64 and FEX preset values (Advanced tab)."),
-            if (game) h("FEX preset values", "Edit the FEX preset this entry's games run with (Advanced tab).", LINUX_ONLY) else null,
-            if (game) h("Power and root tweaks", "Per-game power profile, GPU clock lock and root switches (Performance).", WINE_LINUX) else null,
-        )
-        m["visuals"] = listOf(h("ReShade effects", "Pick, order and tune ReShade effects (Advanced tab)."))
-        m["audio"] = listOf(h("Sound latency and microphone", "The latency preset, fine-tune values and the DirectAudio microphone (Audio settings).", WINE_LINUX))
-        m["input"] = listOfNotNull(
-            h("Player slot pins", "Which physical controller is which player (Controller tab).", WINE_LINUX),
-            if (!game) h("XR controller mapping", "The primary XR controller and its button mapping (Advanced tab).") else null,
-        )
-        if (!game) m["hud"] = listOf(h("Overlay style and metrics", "Style, size, metrics and temperature alerts. Also changeable in-game from the side menu."))
+        // Display, Graphics, Performance, Visual effects, Audio, Controls and the overlay have no hand-offs any
+        // more: the TV rows, the Wayland driver gear, an imported wrapper's detected settings, Custom services,
+        // preset values, power and root, ReShade, sound latency and the microphone, player slots, the XR
+        // mapping and the overlay style are rows and sections of their pages (the Deck*Settings files).
         m["windows"] = listOfNotNull(
             // Its own page now: the install lists and the builtin / native DLL rows (CAT_COMPONENTS).
             Handoff(
@@ -132,10 +115,7 @@ internal object SettingsRegistry {
                 else "Install runtimes and libraries into the container, and pick builtin or native DLLs for DirectX, audio and runtimes.",
                 categoryTarget(CAT_COMPONENTS),
             ),
-            if (scope == EditorScope.CONTAINER) h("Drives", "Drive letters D: to Z: and the folders behind them. Duplicate letters are checked there (Drives tab).") else null,
-            if (scope == EditorScope.CONTAINER) h("Wine / Proton version and wallpaper", "The Wine layer and its download gear; the wallpaper and colours are under the Wine config section.") else null,
-            if (scope == EditorScope.DEFAULTS) h("Desktop wallpaper and colours", "Background image or colour, and whether it applies to every container.") else null,
-            if (scope == EditorScope.DEFAULTS) h("Reset to app defaults", "Forgets this architecture's defaults profile, its \"Set as default\" picks and default layer.") else null,
+            // The Wine layer, wallpaper and colours, the drives and Reset to app defaults are this page's own (DeckWindowsSettings).
         )
         // The Linux runtime options live on the Linux Steam client entry only; containers have none.
         if (game && env.isLinuxEntry) {
@@ -270,7 +250,7 @@ internal object SettingsRegistry {
             compositorDriverMaliSystem(version, loaded) -> MALI_SYSTEM_DRIVER_NOTE
             compositorDriverUnusable(version, loaded, true) ->
                 if (env.isLinuxEntry) "This driver cannot show the session. \"System\" or a driver that is no longer installed leaves the compositor on the system Vulkan, which shows a black screen."
-                else "Wayland needs a Turnip driver here. \"System\" or a missing driver cannot import the game's frames and shows a black screen. Download one from the classic editor."
+                else "Wayland needs a Turnip driver here. \"System\" or a missing driver cannot import the game's frames and shows a black screen. Download one below (Download a Turnip driver)."
             vm != null && vm.compositorDriverAutoPicked == version ->
                 if (vm.compositorDriverPickedFromDefaults) "Picked for you: the driver in your New Container Defaults."
                 else "Picked for you: the newest installed Turnip that can import the game's frames."
@@ -625,6 +605,8 @@ internal object SettingsRegistry {
             disabled = { env, _ -> runCatching { WaylandHdr.unavailableReason(env.context) }.getOrNull() },
             worlds = WINE_LINUX,
         ),
+        // A game's TV and external display (the classic TV tab).
+        *TvRows.defs().toTypedArray(),
 
         // Graphics
         SettingDef(
@@ -681,15 +663,20 @@ internal object SettingsRegistry {
         SettingDef(
             id = ID_DRIVER_VERSION, category = "graphics", group = "GPU driver", level = SIMPLE,
             label = "Graphics driver", hint = "The installed Turnip the Wayland compositor puts the game's frames on screen with.", tech = "Compositor driver (graphicsDriverConfig version)",
-            help = "On Wayland the game renders through the embedded compositor, which needs an installed Turnip to import its frames. \"System\" is offered only on Mali GPUs; elsewhere it shows a black screen. The Wayland game driver (what the game itself renders on) is in the classic editor.",
+            help = "On Wayland the game renders through the embedded compositor, which needs an installed Turnip to import its frames. \"System\" is offered only on Mali GPUs; elsewhere it shows a black screen. What the game itself renders on is the Wayland game driver below.",
             control = { env, values -> compositorControl(env, values(ID_DRIVER_VERSION)) },
             vm = compositorVm,
             game = compositorGame,
             visible = { env, values -> !env.isLinuxEntry && env.wayland(values) },
             note = { env, values -> compositorNote(env, values(ID_DRIVER_VERSION)) },
         ),
-        // The X11 driver configuration: driver version, Vulkan, extensions, GPU name, BCn, Turnip.
+        // The Wayland driver gear: the Wayland game driver and the Mali (PanVK) switches.
+        *GraphicsRows.waylandDefs().toTypedArray(),
+        // The X11 driver configuration: driver version, Vulkan, extensions, GPU name, BCn, Turnip (GPU name,
+        // memory, present mode and the OneUI fix also on Wayland).
         *GraphicsRows.driverDefs().toTypedArray(),
+        // The whole driver config, for the switches an imported wrapper carries (DeckWrapperDetectedSection).
+        *WrapperDetectedRows.defs().toTypedArray(),
         SettingDef(
             id = "graphics.fastOpenGL", category = "graphics", group = "OpenGL", level = ADVANCED,
             label = "Fast OpenGL", hint = FastOpenGL.HINT, tech = FastOpenGL.EXTRA,
@@ -928,7 +915,7 @@ internal object SettingsRegistry {
         // The Linux runtime brings its own FEX, but hands this preset to the games the Steam client launches.
         SettingDef(
             id = "performance.fexPreset", category = "performance", group = "FEXCore", level = ADVANCED,
-            label = "FEX preset", hint = "Trade speed for compatibility. Preset values are edited in the classic editor.", tech = "FEXCore Preset",
+            label = "FEX preset", hint = "Trade speed for compatibility. Edit its values under Translator preset values below.", tech = "FEXCore Preset",
             control = { env, _ -> Control.Select(env.fexPresets.map { Opt(it.id, it.name) }) },
             vm = VmBinding(get = { _, vm -> vm.selectedFEXCorePresetId }, set = { _, vm, v -> vm.selectFEXCorePresetById(v) }),
             game = key("fexcorePreset"),
@@ -964,7 +951,7 @@ internal object SettingsRegistry {
             vm = vmString({ it.selectedBox64ECVersion }, { vm, v -> vm.selectedBox64ECVersion = v }),
             game = key("box64ecVersion"),
             visible = { env, _ -> env.arm64ec },
-            disabled = { env, _ -> if (env.box64ECInstalled) null else "No Box64EC installed. Import a Box64EC .wcp with the gear in the classic editor (Advanced tab)." },
+            disabled = { env, _ -> if (env.box64ECInstalled) null else "No Box64EC installed. Download one below (Translator downloads)." },
         ),
         SettingDef(
             id = "performance.startupServices", category = "performance", group = "Windows background services", level = ADVANCED,
@@ -991,6 +978,8 @@ internal object SettingsRegistry {
         perfToggle("performance.power.sustained", "sustainedPerfMode", "Sustained performance mode", "Keeps clocks steady for long sessions instead of short bursts."),
         perfToggle("performance.power.priorityBoost", "perfPriorityBoost", "Boost game thread priority", null),
         perfToggle("performance.power.bigCores", "preferBigCores", "Prefer big CPU cores", null),
+        // Custom services, the GPU clock lock and root switches, and the preset values' hidden rows.
+        *PerformanceRows.defs().toTypedArray(),
 
         // Visual effects (per game only: the container has no vkBasalt setting)
         SettingDef(
@@ -1003,6 +992,8 @@ internal object SettingsRegistry {
         ),
         percentSlider("visuals.vkbasaltLevel", "sharpnessLevel", "vkBasalt strength", "Level") { values -> values("visuals.vkbasalt") != "None" },
         percentSlider("visuals.vkbasaltDenoise", "sharpnessDenoise", "vkBasalt denoise", "Denoise") { values -> values("visuals.vkbasalt") == "DLS" },
+        // ReShade: Solo / Stack and the loadout the section edits.
+        *ReshadeRows.defs().toTypedArray(),
 
         // Audio
         SettingDef(
@@ -1044,6 +1035,8 @@ internal object SettingsRegistry {
             },
             vm = vmInt({ it.selectedMidiIndex }, { vm, v -> vm.selectedMidiIndex = v }),
         ),
+        // Sound latency preset, the microphone, and the env string the fine-tune dialog edits.
+        *AudioRows.defs().toTypedArray(),
 
         // Controls
         SettingDef(
@@ -1291,14 +1284,18 @@ internal object SettingsRegistry {
             visible = { _, values -> values("input.gyro.enabled") == "1" },
             worlds = WINE_LINUX,
         ),
+        // Player slot pins (edited by DeckInputSection) and the XR controller mapping.
+        *InputRows.defs().toTypedArray(),
 
         // Performance overlay: the launch path reads the on/off switch from the container only.
         SettingDef(
             id = "hud.show", category = "hud", group = "Overlay", level = SIMPLE,
-            label = "Show performance overlay", hint = "FPS, CPU/GPU load and temperatures on top of the game. Change its style in-game.", tech = "Show FPS",
+            label = "Show performance overlay", hint = "FPS, CPU/GPU load and temperatures on top of the game. Its style is below, and in-game from the side menu.", tech = "Show FPS",
             control = { _, _ -> Control.Toggle },
             vm = vmBool({ it.showFPS }, { vm, v -> vm.showFPS = v }),
         ),
+        // Every choice of the classic FPS counter dialog.
+        *OverlayRows.defs().toTypedArray(),
 
         // Windows
         SettingDef(
@@ -1348,6 +1345,8 @@ internal object SettingsRegistry {
             vm = vmInt({ it.desktopThemeIndex }, { vm, v -> vm.desktopThemeIndex = v }),
             showInGame = false,
         ),
+        // The Wine layer, the desktop background and colour, the wallpaper's scope.
+        *WindowsRows.defs().toTypedArray(),
 
         // Windows components: the classic Win Components tab's choices. The install lists around them are
         // not settings; the editor's host adds them (DeckComponentsPage).

@@ -91,8 +91,7 @@ private data class SearchDestination(
 
 /** Everything the search lists besides games. Keywords widen the match beyond the title. */
 private val DESTINATIONS = listOf(
-    SearchDestination("Home", "Library", Icons.Filled.SportsEsports, "library games shelf continue playing", route = DeckRoutes.HOME),
-    SearchDestination("All games", "Library › Classic list", Icons.Filled.SportsEsports, "shortcuts add game import folder", route = Screen.Games.route),
+    SearchDestination("Home", "Library", Icons.Filled.SportsEsports, "library games shelf continue playing all games shortcuts add game import folder", route = DeckRoutes.HOME),
     SearchDestination("Stores", "Steam, Epic, GOG, Amazon", Icons.Filled.Storefront, "store sign in library download", route = DeckRoutes.STORES),
     SearchDestination("Steam", "Stores › Steam", Icons.Filled.Storefront, "steam valve store friends", store = Screen.Steam),
     SearchDestination("Epic Games", "Stores › Epic Games", Icons.Filled.Storefront, "epic store free games", store = Screen.Epic),
