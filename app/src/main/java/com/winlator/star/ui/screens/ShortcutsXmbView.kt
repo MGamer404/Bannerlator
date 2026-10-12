@@ -391,7 +391,7 @@ internal fun ShortcutsXmbView(
                             bitmap = remember(bmp) { bmp.asImageBitmap() },
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize().blur(28.dp).alpha(0.30f),
+                            modifier = Modifier.fillMaxSize().blur(14.dp).alpha(0.34f),
                         )
                     }
                 }
@@ -536,7 +536,9 @@ private class XmbMetrics(val w: Float, val h: Float) {
     val gap = (fH * 0.09f).roundToInt().toFloat()
     val pitch = sW + gap
     val grow = fW - sW
-    val top = 34f
+    // Landscape: the row of games sits just above the middle (like the PS3 bar), as low as still
+    // leaves three option rows under the focused cover. Portrait keeps it at the top.
+    val top = if (port) 34f else (h * 0.45f - sH / 2f).coerceAtMost(h - fH - 12f - 3 * 40f - 6f - 12f).coerceAtLeast(34f)
     val cross = if (port) 16f + sW * 0.42f + gap else max(16f + pitch, w * 0.13f)
     val iconBox = 34f
     val rowH = if (port) 46f else 40f

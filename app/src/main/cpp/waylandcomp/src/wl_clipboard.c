@@ -18,6 +18,11 @@
  * once over a pipe on the event loop (non-blocking, 1 MiB cap, 3 s timeout) and hands the text
  * to the app (banner_on_clipboard_text → ClipboardManager). Android → guest: the app's text
  * becomes the HOST selection; receive requests are answered with a non-blocking writer.
+ *
+ * The app normally announces only that Android HAS text (clipboard_host_pending), without
+ * reading it: reading Android's clipboard shows the "pasted from your clipboard" notice, so it
+ * is read only when a program actually asks for the text (banner_on_clipboard_request). The
+ * receive fds wait until the text arrives (clipboard_host_text), or 3 s.
  */
 #define _GNU_SOURCE 1
 #include <stdlib.h>
@@ -49,6 +54,12 @@ static struct source *g_src;                    /* current CLIENT selection */
 
 static char *g_host_text;                       /* current HOST selection */
 static size_t g_host_len;
+static int g_host_pending;                      /* HOST text announced, not yet read from Android */
+#define CLIP_REQUEST_TIMEOUT_MS 3000
+#define MAX_WAITERS 16
+static int g_waiters[MAX_WAITERS];              /* receive fds waiting for the pending text */
+static int g_nwaiters;
+static struct wl_event_source *g_wait_timer;
 static const char *const k_text_mimes[] = {
     "text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "TEXT", "STRING", NULL
 };
@@ -148,6 +159,43 @@ static void writer_start(int fd, const char *data, size_t len) {
     w->src = wl_event_loop_add_fd(loop, fd, WL_EVENT_WRITABLE, on_writer_writable, w);
     w->timer = wl_event_loop_add_timer(loop, on_writer_timeout, w);
     if (w->timer) wl_event_source_timer_update(w->timer, CLIP_WRITE_TIMEOUT_MS);
+}
+
+/* ------------------------------------------------------------------ pending host text */
+
+static void waiters_close(void) {
+    for (int i = 0; i < g_nwaiters; i++) close(g_waiters[i]);
+    g_nwaiters = 0;
+    if (g_wait_timer) wl_event_source_timer_update(g_wait_timer, 0);
+}
+
+static void waiters_serve(void) {
+    for (int i = 0; i < g_nwaiters; i++) writer_start(g_waiters[i], g_host_text, g_host_len);
+    g_nwaiters = 0;
+    if (g_wait_timer) wl_event_source_timer_update(g_wait_timer, 0);
+}
+
+static int on_wait_timeout(void *data) {
+    banner_log("clipboard", "the app never sent Android's clipboard text; %d paste(s) get nothing", g_nwaiters);
+    waiters_close();
+    return 0;
+}
+
+/* Drop the HOST text and any pastes still waiting for it. */
+static void host_clear(void) {
+    free(g_host_text); g_host_text = NULL; g_host_len = 0;
+    g_host_pending = 0;
+    waiters_close();
+}
+
+/* A program wants the pending text: park its fd and ask the app once. */
+static void host_wait(int fd) {
+    if (g_nwaiters >= MAX_WAITERS) { close(fd); return; }
+    g_waiters[g_nwaiters++] = fd;
+    if (g_nwaiters > 1) return;                                     /* already asked */
+    if (!g_wait_timer) g_wait_timer = wl_event_loop_add_timer(wl_display_get_event_loop(g_disp), on_wait_timeout, NULL);
+    if (g_wait_timer) wl_event_source_timer_update(g_wait_timer, CLIP_REQUEST_TIMEOUT_MS);
+    banner_on_clipboard_request();
 }
 
 /* ------------------------------------------------------------------ client → host reader */
@@ -250,7 +298,10 @@ static void offer_receive(struct wl_client *c, struct wl_resource *r, const char
     struct offer *o = wl_resource_get_user_data(r);
     if (!o || o->gen != g_gen) { close(fd); return; }               /* stale offer */
     if (g_owner == OWNER_HOST) {
-        if (is_text_mime(mime)) {
+        if (is_text_mime(mime) && g_host_pending) {
+            banner_log("clipboard", "%s pastes; reading Android's clipboard", banner_client_name(c));
+            host_wait(fd);
+        } else if (is_text_mime(mime)) {
             banner_log("clipboard", "Android clipboard → guest (%zu bytes) for %s", g_host_len, banner_client_name(c));
             writer_start(fd, g_host_text, g_host_len);
         } else {
@@ -386,7 +437,7 @@ static void set_selection(struct wl_client *c, struct wl_resource *source_res) {
     if (s && s == g_src) return;
     if (g_src && g_src != s) source_send_cancelled(g_src);
     if (g_reader) reader_free(g_reader);
-    free(g_host_text); g_host_text = NULL; g_host_len = 0;
+    host_clear();
     g_src = s;
     g_owner = s ? OWNER_CLIENT : OWNER_NONE;
     if (s) {
@@ -497,6 +548,23 @@ static void bind_data_control_manager(struct wl_client *c, void *data, uint32_t 
 
 /* Android's clipboard text (compositor thread, via the host queue). Takes the buffer. */
 void clipboard_host_text(char *utf8, size_t len) {
+    if (g_owner == OWNER_HOST && g_host_pending) {  /* the answer to a paste (or Android cleared) */
+        g_host_pending = 0;
+        if (len) {
+            free(g_host_text);
+            g_host_text = utf8;
+            g_host_len = len;
+            banner_log("clipboard", "Android clipboard → guest (%zu bytes) for %d paste(s)", len, g_nwaiters);
+            waiters_serve();
+            return;                                 /* same selection: the offers stay valid */
+        }
+        free(utf8);
+        host_clear();
+        g_owner = OWNER_NONE;
+        banner_log("clipboard", "Android clipboard has no text; selection cleared");
+        broadcast_selection();
+        return;
+    }
     if (len && g_last_guest_text && len == g_last_guest_len && !memcmp(utf8, g_last_guest_text, len)) {
         free(utf8);                                 /* our own copy coming back: not a change */
         return;
@@ -507,12 +575,23 @@ void clipboard_host_text(char *utf8, size_t len) {
     }
     if (g_src) { source_send_cancelled(g_src); g_src = NULL; }
     if (g_reader) reader_free(g_reader);
-    free(g_host_text);
+    host_clear();
     g_host_text = len ? utf8 : NULL;
     if (!len) free(utf8);
     g_host_len = len;
     g_owner = len ? OWNER_HOST : OWNER_NONE;
     banner_log("clipboard", len ? "Android clipboard → guest (%zu bytes)" : "Android clipboard cleared (%zu bytes)", len);
+    broadcast_selection();
+}
+
+/* Android's clipboard has (new) text, not read yet: offer it, read it when a program pastes. */
+void clipboard_host_pending(void) {
+    if (g_src) { source_send_cancelled(g_src); g_src = NULL; }
+    if (g_reader) reader_free(g_reader);
+    host_clear();
+    g_host_pending = 1;
+    g_owner = OWNER_HOST;
+    banner_log("clipboard", "Android clipboard has text; offered to the guest unread");
     broadcast_selection();
 }
 

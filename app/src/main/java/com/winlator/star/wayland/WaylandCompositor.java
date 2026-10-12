@@ -133,6 +133,24 @@ public final class WaylandCompositor {
         if (l != null && utf8 != null) l.onGuestClipboardText(new String(utf8, java.nio.charset.StandardCharsets.UTF_8));
     }
 
+    /** A program pastes the Android text announced with {@link #setClipboardPending()}. */
+    public interface ClipboardRequestListener {
+        /** Read Android's clipboard now and answer with {@link #setClipboardText}. Compositor thread. */
+        void onClipboardRequest();
+    }
+
+    private static volatile ClipboardRequestListener clipboardRequestListener;
+
+    public static void setClipboardRequestListener(ClipboardRequestListener l) { clipboardRequestListener = l; }
+
+    /** Invoked from native (banner_on_clipboard_request). */
+    @SuppressWarnings("unused")
+    static void onClipboardRequest() {
+        ClipboardRequestListener l = clipboardRequestListener;
+        if (l != null) l.onClipboardRequest();
+        else nativeSetClipboardText(new byte[0]);
+    }
+
     /** Text input (zwp_text_input_v3) state: a program accepts IME text, or stopped. */
     public interface TextInputListener {
         /** {@code enabled}: {@code program} (its exe name) accepts IME text; {@code x,y,w,h} is its caret
@@ -159,6 +177,10 @@ public final class WaylandCompositor {
     /** Android's clipboard text becomes the guest's selection ({@code null}/empty clears it). Any thread. */
     public static void setClipboardText(String text) { nativeSetClipboardText(utf8(text)); }
 
+    /** Android's clipboard has text: offer it to the guest without reading it (reading shows Android's
+     *  "pasted from your clipboard" notice); a paste then calls {@link ClipboardRequestListener}. Any thread. */
+    public static void setClipboardPending() { nativeSetClipboardPending(); }
+
     /** Commit soft-keyboard text to the program accepting text input. Any thread. */
     public static void textInputCommit(String text) { if (text != null && !text.isEmpty()) nativeTextInputCommit(utf8(text)); }
 
@@ -169,6 +191,7 @@ public final class WaylandCompositor {
     public static void textInputDelete(int before, int after) { nativeTextInputDelete(before, after); }
 
     private static native void nativeSetClipboardText(byte[] utf8);
+    private static native void nativeSetClipboardPending();
     private static native void nativeTextInputCommit(byte[] utf8);
     private static native void nativeTextInputPreedit(byte[] utf8, int cursorBegin, int cursorEnd);
     private static native void nativeTextInputDelete(int before, int after);

@@ -48,6 +48,7 @@ static jmethodID g_on_game_frame;    /* static void onGameFrame() */
 static jmethodID g_on_game_program;  /* static void onGameProgram(int, String) */
 static jmethodID g_on_pointer_lock;  /* static void onPointerLock(boolean, int, int) */
 static jmethodID g_on_clipboard;     /* static void onClipboardText(byte[]) */
+static jmethodID g_on_clipboard_request; /* static void onClipboardRequest() */
 static jmethodID g_on_text_input;    /* static void onTextInput(boolean, String, int, int, int, int) */
 static jmethodID g_on_bring_to_front; /* static void onBringToFront(String, long) */
 
@@ -69,6 +70,8 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
             if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); g_on_game_program = NULL; }
             g_on_pointer_lock = (*env)->GetStaticMethodID(env, g_compositor_cls, "onPointerLock", "(ZII)V");
             g_on_clipboard = (*env)->GetStaticMethodID(env, g_compositor_cls, "onClipboardText", "([B)V");
+            g_on_clipboard_request = (*env)->GetStaticMethodID(env, g_compositor_cls, "onClipboardRequest", "()V");
+            if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); g_on_clipboard_request = NULL; }
             g_on_text_input = (*env)->GetStaticMethodID(env, g_compositor_cls, "onTextInput",
                                                         "(ZLjava/lang/String;IIII)V");
             g_on_bring_to_front = (*env)->GetStaticMethodID(env, g_compositor_cls, "onBringToFront",
@@ -164,6 +167,15 @@ void banner_on_clipboard_text(const char *utf8, int len) {
     (*env)->CallStaticVoidMethod(env, g_compositor_cls, g_on_clipboard, arr);
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
     (*env)->DeleteLocalRef(env, arr);
+}
+
+/* A program pastes the Android text announced unread: the app reads the clipboard now and
+ * answers with nativeSetClipboardText. Compositor thread. */
+void banner_on_clipboard_request(void) {
+    JNIEnv *env;
+    if (!g_compositor_cls || !g_on_clipboard_request || !(env = thread_env())) return;
+    (*env)->CallStaticVoidMethod(env, g_compositor_cls, g_on_clipboard_request);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
 }
 
 /* The compositor focused a program window by itself (new window, the focused one closed): the app
@@ -662,6 +674,12 @@ Java_com_winlator_star_wayland_WaylandCompositor_nativeSetClipboardText(JNIEnv *
     char *buf = dup_bytes(env, utf8, &len);
     banner_host_clipboard_text(buf ? buf : "", len);
     free(buf);
+}
+
+/* Android's clipboard has text; the guest gets it offered and it is read only on a paste. */
+JNIEXPORT void JNICALL
+Java_com_winlator_star_wayland_WaylandCompositor_nativeSetClipboardPending(JNIEnv *env, jclass clazz) {
+    banner_host_clipboard_pending();
 }
 
 /* Soft-keyboard text committed to the program accepting text input. */

@@ -31,11 +31,13 @@ void banner_inject_key(uint32_t evdev, int pressed);
 
 /* ---- modules → app (JNI upcalls; waylandcomp_jni.c) */
 void banner_on_clipboard_text(const char *utf8, int len);
+void banner_on_clipboard_request(void);                       /* a program pastes the pending Android text */
 void banner_on_text_input(int enabled, const char *program, int x, int y, int w, int h);
 void banner_on_bring_to_front(const char *exe, uint32_t hwnd);  /* have winhandler.exe raise this window */
 
 /* ---- app → modules (callable from any thread; queued to the compositor thread) */
 void banner_host_clipboard_text(const char *utf8, int len);  /* len 0 = clear */
+void banner_host_clipboard_pending(void);                    /* Android has text; read it on paste */
 void banner_host_text_commit(const char *utf8, int len);
 void banner_host_text_preedit(const char *utf8, int len, int cursor_begin, int cursor_end);
 void banner_host_text_delete(int before, int after);
@@ -45,6 +47,7 @@ void banner_host_hdr_output(int on);                          /* the drawer's HD
 /* ---- module internals reached through the queue (banner_ext.c → modules) */
 void clipboard_init(struct wl_display *display);
 void clipboard_host_text(char *utf8, size_t len);            /* takes ownership of utf8 */
+void clipboard_host_pending(void);
 void text_input_init(struct wl_display *display);
 void text_input_host_commit(const char *utf8, size_t len);
 void text_input_host_preedit(const char *utf8, size_t len, int cursor_begin, int cursor_end);

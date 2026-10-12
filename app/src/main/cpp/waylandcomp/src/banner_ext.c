@@ -17,7 +17,7 @@
 #include "ahb_swapchain.h"
 #include "banner_color.h"
 
-enum host_kind { HOST_CLIPBOARD = 1, HOST_TEXT_COMMIT, HOST_TEXT_PREEDIT, HOST_TEXT_DELETE, HOST_ZERO_COPY, HOST_HDR_OUTPUT };
+enum host_kind { HOST_CLIPBOARD = 1, HOST_CLIPBOARD_PENDING, HOST_TEXT_COMMIT, HOST_TEXT_PREEDIT, HOST_TEXT_DELETE, HOST_ZERO_COPY, HOST_HDR_OUTPUT };
 
 struct host_msg {
     enum host_kind kind;
@@ -56,6 +56,9 @@ static void host_post(enum host_kind kind, const char *text, size_t len, int a, 
 void banner_host_clipboard_text(const char *utf8, int len) {
     host_post(HOST_CLIPBOARD, utf8, len > 0 ? (size_t)len : 0, 0, 0);
 }
+void banner_host_clipboard_pending(void) {
+    host_post(HOST_CLIPBOARD_PENDING, NULL, 0, 0, 0);
+}
 void banner_host_text_commit(const char *utf8, int len) {
     host_post(HOST_TEXT_COMMIT, utf8, len > 0 ? (size_t)len : 0, 0, 0);
 }
@@ -85,6 +88,9 @@ static int on_wake(int fd, uint32_t mask, void *data) {
         case HOST_CLIPBOARD:
             clipboard_host_text(m->text, m->len);   /* takes the buffer */
             m->text = NULL;
+            break;
+        case HOST_CLIPBOARD_PENDING:
+            clipboard_host_pending();
             break;
         case HOST_TEXT_COMMIT:
             text_input_host_commit(m->text ? m->text : "", m->len);
