@@ -1,5 +1,13 @@
 # Star-Compose — Progress Log
 
+## 2026-10-12 — 🚀 3.1.7-pre1 released (tag `3.1.7-pre1` = `7ea67dbb`, versionCode 99, pre-release) — the full Deck style
+> `feat/deck-ui-full` fast-forwarded into main (`c53c060b` → `7ea67dbb`, backup `refs/backup/20261012/main-before-3.1.7-pre1`). Release run 38253355108 green (notes, four flavours, four patch jobs, release). Latest stays 3.1.6.
+> - **Small updates, first real one:** 28 patches in The412Banner/Bannerlator-updates release `3.1.7-pre1`; from 3.1.6 = 19.6 MB (pubg and standard), measured before the cut (bulk: dex 18.5 MB, resources.arsc 1.7 MB, pulseaudio.tzst 0.6 MB, Deck fonts 0.3 MB).
+> - **Deck style complete:** settings editor (every Classic setting, Simple/Advanced/Expert, inherits chain), Linux client page kept separate, onboarding only on a fresh install, hero scroll-to-top, in-game game menu + quick menu (InGameSessionKind, pad navigation after L1/R1, focus outline on hosted Classic sections, d-pad sliders/dropdowns), nav bar hidden behind dialogs/sheets (DeckDialogBars).
+> - **Display sizes:** landscape keeps rails down to 560dp (isDeckCompact), Deck draws at 0.8x (DeckTheme / LocalDeckDensity / DeckDialogScaled for dialog windows), rail glass under camera holes, hero buttons full width, game page side menu from 720dp, rail fits short screens, 40dp legend tap targets. Device-compared at densities 374/440/480.
+> - **Windows components:** a Deck page (DeckComponentsPage), Remove with a per-component undo journal (ComponentUndo / ComponentUninstaller; legacy MSI products via msiexec /x), evidence-ranked recommendations (store lists, Steam install script, PE imports; folder-only finds folded). DiRT Showdown 8 → 6 trusted + 3 folded, device-checked in Classic.
+> - **Not proven yet:** a patch update on a real install (3.1.6 → 3.1.7-pre1), Remove/revert on a device, Steam lookups for unowned added games.
+
 ## 2026-10-11 — 🐧 Wine-only menus and tools kept away from the Linux Steam entry (merged `9c21311a`)
 - Game ⋮ menu (grid/list): clone, Copy to Drive C, change exe, export, community configs, view logs and save backups are Wine-only now; the Steam (Linux) tile keeps Settings, Remove, Add to home screen, Game Details, Scrape cover, Properties.
 - XMB: the Linux entry gets its own short menu, and its Settings opens the Linux-aware editor. Big Picture / Games Wall: no Container settings or Community configs for it.
