@@ -407,35 +407,37 @@ internal fun ShortcutsXmbView(
             // The focus target starts BELOW the see-through top bar: D-pad focus search skips a target that
             // overlaps the bar, so Down from the top-bar buttons could never come back to the XMB.
             Box(Modifier.fillMaxSize().padding(top = topInset).focusRequester(focusRequester).focusable()) {
-                // Top line: controller hints (only with a pad attached) · position · clock.
+                // Top line: controller hints (only with a pad attached) · position · clock. Larger in
+                // landscape, where the game row leaves the space above it free.
+                val hs = m.headerScale
                 Row(
-                    Modifier.align(Alignment.TopStart).padding(start = 16.dp, top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    Modifier.align(Alignment.TopStart).padding(start = 16.dp * hs, top = 8.dp * hs),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp * hs),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (hasPad && nested) {
                         val hi = nav.hint(xmbScope)
-                        XmbHint("A", Color(0xFF3DDC84), hi.a)
-                        XmbHint("B", Color(0xFFFF5252), "Back")
+                        XmbHint("A", Color(0xFF3DDC84), hi.a, hs)
+                        XmbHint("B", Color(0xFFFF5252), "Back", hs)
                         if (!m.port && m.w >= 600f) {
-                            XmbKeyHint("▲ ▼", "Move")
-                            if (hi.change) XmbKeyHint("◀ ▶", "Change")
+                            XmbKeyHint("▲ ▼", "Move", hs)
+                            if (hi.change) XmbKeyHint("◀ ▶", "Change", hs)
                         }
-                        if (hi.sections) XmbKeyHint("L1 R1", "Section")
+                        if (hi.sections) XmbKeyHint("L1 R1", "Section", hs)
                     } else if (hasPad) {
-                        XmbHint("A", Color(0xFF3DDC84), actions[actIdx].label)
-                        XmbHint("B", Color(0xFFFF5252), "Back")
+                        XmbHint("A", Color(0xFF3DDC84), actions[actIdx].label, hs)
+                        XmbHint("B", Color(0xFFFF5252), "Back", hs)
                         if (!m.port && m.w >= 600f) {
-                            XmbKeyHint("◀ ▶", "Games"); XmbKeyHint("▲ ▼", "Options"); XmbKeyHint("L1 R1", "Jump")
+                            XmbKeyHint("◀ ▶", "Games", hs); XmbKeyHint("▲ ▼", "Options", hs); XmbKeyHint("L1 R1", "Jump", hs)
                         }
                     }
                 }
                 Row(
-                    Modifier.align(Alignment.TopEnd).padding(end = 16.dp, top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    Modifier.align(Alignment.TopEnd).padding(end = 16.dp * hs, top = 8.dp * hs),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp * hs),
                 ) {
-                    Text("${target + 1} / $n", color = Color(0xFFAAAAAA), fontSize = 12.sp)
-                    Text(clock, color = Color(0xFFDDDDDD), fontSize = 12.sp, fontWeight = FontWeight.Light)
+                    Text("${target + 1} / $n", color = Color(0xFFAAAAAA), fontSize = 12.sp * hs)
+                    Text(clock, color = Color(0xFFDDDDDD), fontSize = 12.sp * hs, fontWeight = FontWeight.Light)
                 }
 
                 val rootAlpha by animateFloatAsState(if (nested) 0f else 1f, tween(260), label = "xmbRootAlpha")
@@ -542,6 +544,7 @@ private class XmbMetrics(val w: Float, val h: Float) {
     val top = if (port) 34f else (h * 0.25f - sH / 2f).coerceAtMost(h - fH - 12f - 3 * 40f - 6f - 12f).coerceAtLeast(34f)
     val cross = if (port) 16f + sW * 0.42f + gap else max(16f + pitch, w * 0.13f)
     val iconBox = 34f
+    val headerScale = if (port) 1f else 1.4f   // the top line; landscape has room above the row
     val rowH = if (port) 46f else 40f
     val extra = 6f
     val colX = cross + fW / 2f - iconBox / 2f
@@ -732,25 +735,25 @@ private fun XmbInfo(s: Shortcut, playtime: String?, descLines: Int, storeBadges:
 }
 
 @Composable
-private fun XmbHint(glyph: String, color: Color, label: String) {
+private fun XmbHint(glyph: String, color: Color, label: String, s: Float = 1f) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(17.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
-            Text(glyph, color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Box(Modifier.size(17.dp * s).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
+            Text(glyph, color = Color.Black, fontSize = 10.sp * s, fontWeight = FontWeight.Bold)
         }
-        Spacer(Modifier.width(4.dp))
-        Text(label, color = Color(0xFFB0B0B0), fontSize = 11.sp, maxLines = 1)
+        Spacer(Modifier.width(4.dp * s))
+        Text(label, color = Color(0xFFB0B0B0), fontSize = 11.sp * s, maxLines = 1)
     }
 }
 
 @Composable
-private fun XmbKeyHint(keys: String, label: String) {
+private fun XmbKeyHint(keys: String, label: String, s: Float = 1f) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
-            keys, color = Color(0xFFDDDDDD), fontSize = 10.sp,
-            modifier = Modifier.border(1.dp, Color(0xFF555555), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp),
+            keys, color = Color(0xFFDDDDDD), fontSize = 10.sp * s,
+            modifier = Modifier.border(1.dp, Color(0xFF555555), RoundedCornerShape(4.dp * s)).padding(horizontal = 5.dp * s),
         )
-        Spacer(Modifier.width(4.dp))
-        Text(label, color = Color(0xFFB0B0B0), fontSize = 11.sp, maxLines = 1)
+        Spacer(Modifier.width(4.dp * s))
+        Text(label, color = Color(0xFFB0B0B0), fontSize = 11.sp * s, maxLines = 1)
     }
 }
 
