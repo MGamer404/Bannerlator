@@ -55,8 +55,8 @@ import java.io.File
 
 /**
  * "Recommended components" chip row — Pillar 2 / Phase 2.2. Detects the redistributables a game
- * bundles ([DependencyDetector]) and offers each as a one-tap install into the shortcut's container
- * prefix, reusing the EXACT install routing + installed-state tracking of [ComponentsSheet]
+ * needs ([GameRecommendations]: its store, install script and exe, then its folder) and offers each
+ * as a one-tap install into the shortcut's container prefix, reusing the EXACT install routing + installed-state tracking of [ComponentsSheet]
  * (SharedPreferences `"component_installs"`, keyed `"c<id>"`).
  *
  * Surfaced in two places: the "Confirm game" import dialog (pass [exeFile], the game's .exe) and the
@@ -99,6 +99,8 @@ fun RecommendedComponentsSection(
     // Removing an installed chip's component: the one going out, and the one awaiting confirmation.
     var removing by remember { mutableStateOf<String?>(null) }
     var confirmRemove by remember { mutableStateOf<Pair<Component, ComponentUninstaller.Plan>?>(null) }
+    // The "Also in the game's folder" chips are shown.
+    var showFolder by remember { mutableStateOf(false) }
 
     // Installed-state persistence — identical scheme to ComponentsSheet so a component installed there
     // (or on a prior visit) shows as checked here, and vice-versa.
@@ -114,7 +116,7 @@ fun RecommendedComponentsSection(
     LaunchedEffect(container.id, exeFile?.path, gameDir?.path) {
         loading = true
         val found = withContext(Dispatchers.IO) {
-            GameRecommendations.detect(exeFile, gameDir)
+            GameRecommendations.detect(exeFile, gameDir, context)
         }
         if (found.isEmpty()) { recs = emptyList(); loading = false; return@LaunchedEffect }
         val cat = withContext(Dispatchers.IO) {
@@ -285,48 +287,59 @@ fun RecommendedComponentsSection(
     // Nothing detected (or catalog unavailable) → render nothing at all.
     if (recs.isEmpty()) return
 
-    // Split by how each was found: BUNDLED = redist installers the game ships (meant to install);
-    // SHIPPED = loose runtime DLLs that usually already work. When both are present, label the two
-    // groups distinctly so the user knows which are actually worth installing; with a single kind,
-    // show just that one group (no empty header).
-    val bundled = recs.filter { it.kind != DependencyDetector.Kind.SHIPPED }
-    val shipped = recs.filter { it.kind == DependencyDetector.Kind.SHIPPED }
+    // Split by how sure we are (GameRecommendations.group): RECOMMENDED = what the game's store, its
+    // install script or its exe says it needs; OPTIONAL = loose runtime DLLs it ships (usually already
+    // work) and GFWL hints; FOLDER = installers that only sit in its folder (a repack's _Redist),
+    // folded away behind a tap. A group with nothing in it shows no header.
+    val recommended = recs.filter { GameRecommendations.group(it) == GameRecommendations.Group.RECOMMENDED }
+    val optional = recs.filter { GameRecommendations.group(it) == GameRecommendations.Group.OPTIONAL }
+    val inFolder = recs.filter { GameRecommendations.group(it) == GameRecommendations.Group.FOLDER }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        if (bundled.isNotEmpty() && shipped.isNotEmpty()) {
-            RecommendedChipGroup(
-                title = "Recommended",
-                subtitle = "Redistributables this game bundles or Steam installs with it.",
-                recs = bundled, catalog = catalog, installed = installed, installing = installing ?: removing,
-                cs = cs, onChipTap = ::onChipTap,
-            )
-            Spacer(Modifier.height(12.dp))
-            RecommendedChipGroup(
-                title = "Optional",
-                subtitle = "Ships with the game — install only if it misbehaves.",
-                recs = shipped, catalog = catalog, installed = installed, installing = installing ?: removing,
-                cs = cs, onChipTap = ::onChipTap,
-            )
-        } else if (shipped.isNotEmpty()) {
-            RecommendedChipGroup(
-                title = "Optional components",
-                subtitle = "Ships with the game — install only if it misbehaves.",
-                recs = shipped, catalog = catalog, installed = installed, installing = installing ?: removing,
-                cs = cs, onChipTap = ::onChipTap,
-            )
-        } else {
+        var gap = false
+        if (recommended.isNotEmpty()) {
             RecommendedChipGroup(
                 title = "Recommended components",
-                subtitle = "Redistributables this game needs — tap to install into its container, or tap an installed one to remove it.",
-                recs = bundled, catalog = catalog, installed = installed, installing = installing ?: removing,
+                subtitle = "What this game's store, install script or exe says it needs — tap to install into its container, or tap an installed one to remove it.",
+                recs = recommended, catalog = catalog, installed = installed, installing = installing ?: removing,
                 cs = cs, onChipTap = ::onChipTap,
             )
+            gap = true
+        }
+        if (optional.isNotEmpty()) {
+            if (gap) Spacer(Modifier.height(12.dp))
+            RecommendedChipGroup(
+                title = if (recommended.isEmpty()) "Optional components" else "Optional",
+                subtitle = "Ships with the game — install only if it misbehaves.",
+                recs = optional, catalog = catalog, installed = installed, installing = installing ?: removing,
+                cs = cs, onChipTap = ::onChipTap,
+            )
+            gap = true
+        }
+        if (inFolder.isNotEmpty()) {
+            if (gap) Spacer(Modifier.height(4.dp))
+            TextButton(onClick = { showFolder = !showFolder }) {
+                Text(
+                    (if (showFolder) "▾ " else "▸ ") + "Also in the game's folder (${inFolder.size})",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = cs.onSurface,
+                )
+            }
+            if (showFolder) {
+                RecommendedChipGroup(
+                    title = "",
+                    subtitle = GameRecommendations.reason(inFolder.first()),
+                    recs = inFolder, catalog = catalog, installed = installed, installing = installing ?: removing,
+                    cs = cs, onChipTap = ::onChipTap,
+                )
+            }
         }
     }
 }
 
 /** One labeled group of recommendation chips (header + subtitle + wrapping chip row). Extracted so the
- *  BUNDLED / SHIPPED split renders the same chip logic twice without duplication. */
+ *  Recommended / Optional / folder groups render the same chip logic without duplication. An empty
+ *  [title] leaves the header out (the folder group's toggle is its header). */
 @Composable
 private fun RecommendedChipGroup(
     title: String,
@@ -339,7 +352,7 @@ private fun RecommendedChipGroup(
     onChipTap: (Component) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()) {
-        Text(title, style = MaterialTheme.typography.titleSmall, color = cs.onSurface)
+        if (title.isNotEmpty()) Text(title, style = MaterialTheme.typography.titleSmall, color = cs.onSurface)
         Text(subtitle, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
         Spacer(Modifier.height(6.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

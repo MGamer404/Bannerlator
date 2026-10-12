@@ -17,15 +17,25 @@ import java.util.Locale
  */
 object DependencyDetector {
 
-    /** How a recommendation was found — drives the UI's "recommended vs optional" split. */
+    /**
+     * How a recommendation was found — drives the UI's groups ([GameRecommendations.group]): what the
+     * game's source lists, its install script runs or its exe loads is Recommended; a loose DLL it
+     * ships is Optional; an installer that only sits in its folder is "Also in the game's folder".
+     */
     enum class Kind {
-        /** The game bundles the redist installer (in _CommonRedist etc.) — meant to be installed. */
+        /** The game's folder holds the redist installer (in _Redist etc.); nothing says the game needs it. */
         BUNDLED,
         /** A runtime DLL the game ships loose — usually already works from the game folder; install
          *  only if the game misbehaves. */
         SHIPPED,
         /** Steam installs it with the game (the appmanifest's Steamworks Shared depots, [SteamRedists]). */
         STEAM,
+        /** The store the game came from lists it (GOG dependencies, Epic prerequisite, Amazon PostInstall). */
+        STORE,
+        /** The game's Steam install script runs its installer ([InstallScriptRedists]). */
+        SCRIPT,
+        /** The game's exe (or a DLL of its own the exe loads) imports it ([PeImports]). */
+        IMPORT,
     }
 
     /** A recommended component: the catalog [componentName] to install, a display [label], the on-disk
@@ -67,6 +77,9 @@ object DependencyDetector {
         "dotnet48" to ".NET Framework 4.8", "dotnet35" to ".NET Framework 3.5",
         "dotnetcoredesktop6" to ".NET Desktop 6", "dotnetcoredesktop7" to ".NET Desktop 7",
         "dotnetcoredesktop8" to ".NET Desktop 8",
+        "d3dcompiler_42" to "DirectX shader compiler 42", "d3dcompiler_43" to "DirectX shader compiler 43",
+        "xaudio2.7" to "XAudio 2.7", "mfc42" to "MFC 4.2", "vbrun6" to "Visual Basic 6 runtime",
+        "dotnet20" to ".NET Framework 2.0",
     )
 
     /** Preferred install order (runtimes others may depend on first). */
@@ -75,8 +88,28 @@ object DependencyDetector {
         "vcredist2015", "vcredist2019", "vcredist2022",
         "dotnet35", "dotnet40", "dotnet45", "dotnet452", "dotnet46", "dotnet472", "dotnet48",
         "dotnetcoredesktop6", "dotnetcoredesktop7", "dotnetcoredesktop8",
-        "d3dx9", "d3dx11", "xact", "xact_x64", "xna31", "xna40", "physx", "oalinst", "XLiveRedist",
+        "mfc42", "vbrun6", "dotnet20",
+        "d3dx9", "d3dx11", "d3dcompiler_42", "d3dcompiler_43", "xact", "xact_x64", "xaudio2.7",
+        "xna31", "xna40", "physx", "oalinst", "XLiveRedist",
     )
+
+    /** What the lists show for a catalog [name]. */
+    fun labelOf(name: String): String = LABELS[name] ?: name
+
+    /** Where [name] sits in the install-friendly order (unknown ones last). */
+    fun orderOf(name: String): Int = INSTALL_ORDER.indexOf(name).let { if (it < 0) 999 else it }
+
+    /**
+     * The catalog components an installer at [path] (a file path or a store's command line) installs,
+     * by the same rules as the folder scan; a VC++ installer with no year is the latest 14.x.
+     */
+    fun componentsFor(path: String): List<String> = try {
+        val p = path.replace('\\', '/').trim().trim('"').lowercase(Locale.US)
+        val name = p.substringAfterLast('/').substringBefore(' ')
+        classify(p, name, isDir = false).map { if (it == VCREDIST_LOOSE) "vcredist2022" else it }
+    } catch (_: Throwable) {
+        emptyList()
+    }
 
     /**
      * Detect from the .exe the user picked, resolving the game root first: walk up from the exe's
@@ -194,7 +227,14 @@ object DependencyDetector {
         VCRUNTIME_DLL.entries.firstOrNull { name.startsWith(it.key) }?.let { return listOf(it.value) }
         if (path.contains("openal") || name.startsWith("oalinst") || name == "openal32.dll" || name == "wrap_oal.dll") return listOf("oalinst")
         if (path.contains("physx") || name.startsWith("physx")) return listOf("physx")
-        if (path.contains("xact") || name.startsWith("xactengine") || name.startsWith("x3daudio")) return listOf("xact", "xact_x64")
+        if (path.contains("xact") || name.startsWith("xactengine") || name.startsWith("x3daudio")) {
+            // A DirectX cab says its architecture (Jun2010_XACT_x86.cab): only that one.
+            return when {
+                name.contains("x86") -> listOf("xact")
+                name.contains("x64") -> listOf("xact_x64")
+                else -> listOf("xact", "xact_x64")
+            }
+        }
         // Games for Windows Live — the redist folder, OR a GFWL library the game ships (xlive.dll,
         // Codemasters' dbxLive32/64, gfwl*): GFWL titles need XLiveRedist to run even when they don't
         // bundle the redist itself.

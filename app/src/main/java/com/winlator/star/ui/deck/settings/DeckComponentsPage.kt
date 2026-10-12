@@ -73,7 +73,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 // The Deck editor's Windows components page (category CAT_COMPONENTS) for a Wine game or a container:
-// what the game needs (Recommended, Optional), then the builtin / native DLL rows (ordinary settings
+// what the game needs (Recommended, Optional, and folded away "Also in the game's folder": installers its
+// folder carries that nothing says it needs - GameRecommendations), then the builtin / native DLL rows (ordinary settings
 // rows), then every component of the catalog with a search. Installs go into the container's prefix
 // through exactly what the classic ComponentsSheet and RecommendedComponentsSection call, with the same
 // "component_installs" record, so the classic screens and this page agree on what is installed.
@@ -115,6 +116,8 @@ internal class DeckComponentsState(
         private set
     var query by mutableStateOf("")
     var showSession by mutableStateOf(false)
+    /** The "Also in the game's folder" group is open. */
+    var showFolder by mutableStateOf(false)
     var message by mutableStateOf<String?>(null)
     var confirmExec by mutableStateOf<Component?>(null)
     /** The component going back out of the container (its row shows the progress). */
@@ -149,7 +152,7 @@ internal class DeckComponentsState(
         val list = withContext(Dispatchers.IO) { runCatching { ComponentCatalog.load() }.getOrDefault(emptyList()) }
         components = list
         byName = list.associateBy { it.name }
-        if (exeFile != null || gameDir != null) recs = withContext(Dispatchers.IO) { GameRecommendations.detect(exeFile, gameDir) }
+        if (exeFile != null || gameDir != null) recs = withContext(Dispatchers.IO) { GameRecommendations.detect(exeFile, gameDir, context) }
         loadError = list.isEmpty()
         loading = false
     }
@@ -283,20 +286,32 @@ internal class DeckComponentsState(
         focusSearch = { searchFocus.requestFocus() },
     )
 
-    // Recommended and Optional, for a game only.
+    // Recommended and Optional, then folded away what only sits in the game's folder; for a game only.
     private fun topItems(): List<PageExtra> {
         if (!forGame) return emptyList()
         if (loading) return listOf(PageExtra("rec-loading") { StatusLine("Looking for what this game needs…", spinner = true) })
         val picks = recommended()
         if (picks.isEmpty()) return emptyList()
-        val bundled = picks.filter { it.second.kind != DependencyDetector.Kind.SHIPPED }
-        val shipped = picks.filter { it.second.kind == DependencyDetector.Kind.SHIPPED }
+        fun of(g: GameRecommendations.Group) = picks.filter { GameRecommendations.group(it.second) == g }
+        val rec = of(GameRecommendations.Group.RECOMMENDED)
+        val opt = of(GameRecommendations.Group.OPTIONAL)
+        val folder = of(GameRecommendations.Group.FOLDER)
+        fun reasonIn(list: List<Pair<Component, DependencyDetector.Recommendation>>): (Component) -> String? =
+            { c -> list.firstOrNull { it.first.name == c.name }?.second?.let(GameRecommendations::reason) }
         return buildList {
-            section("rec", "Recommended for this game", "Redistributables this game bundles or Steam installs with it.", bundled.map { it.first }) { c ->
-                bundled.firstOrNull { it.first.name == c.name }?.second?.let(GameRecommendations::reason)
-            }
-            section("opt", "Optional", "Ships with the game: install only if it misbehaves.", shipped.map { it.first }) { c ->
-                shipped.firstOrNull { it.first.name == c.name }?.second?.let(GameRecommendations::reason)
+            section("rec", "Recommended for this game", "What the game's store, its install script or its exe says it needs.", rec.map { it.first }, reasonIn(rec))
+            section("opt", "Optional", "Ships with the game: install only if it misbehaves.", opt.map { it.first }, reasonIn(opt))
+            if (folder.isNotEmpty()) {
+                add(PageExtra("folder-toggle") {
+                    GroupCard(first = true, last = !showFolder, highlight = false) {
+                        FoldToggle("Also in the game's folder (${folder.size})", "Installers in its folder that nothing says the game needs.", showFolder) { showFolder = !showFolder }
+                    }
+                })
+                if (showFolder) folder.forEachIndexed { i, (c, r) ->
+                    add(PageExtra("folder:${c.name}") {
+                        GroupCard(first = false, last = i == folder.lastIndex, highlight = false) { ComponentRow(this@DeckComponentsState, c, GameRecommendations.reason(r)) }
+                    })
+                }
             }
         }
     }
@@ -493,7 +508,12 @@ private fun StatePill(label: String, accent: Boolean, dim: Boolean, icon: ImageV
 }
 
 @Composable
-private fun SessionToggle(count: Int, open: Boolean, onClick: () -> Unit) {
+private fun SessionToggle(count: Int, open: Boolean, onClick: () -> Unit) =
+    FoldToggle("Open the container to install ($count)", "These run their own installer on a Windows desktop.", open, onClick)
+
+/** A folded group's header row: [title], [subtitle], and whether it is [open]. The whole row is the focus target; A opens or closes it. */
+@Composable
+private fun FoldToggle(title: String, subtitle: String, open: Boolean, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -504,8 +524,8 @@ private fun SessionToggle(count: Int, open: Boolean, onClick: () -> Unit) {
             .padding(horizontal = 18.dp, vertical = 14.dp),
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text("Open the container to install ($count)", color = cs.onSurface, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            Text("These run their own installer on a Windows desktop.", color = cs.onSurfaceVariant, fontSize = 13.5.sp, modifier = Modifier.padding(top = 2.dp))
+            Text(title, color = cs.onSurface, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text(subtitle, color = cs.onSurfaceVariant, fontSize = 13.5.sp, modifier = Modifier.padding(top = 2.dp))
         }
         Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null, tint = cs.onSurfaceVariant, modifier = Modifier.size(24.dp))
     }

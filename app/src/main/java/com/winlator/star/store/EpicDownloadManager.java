@@ -139,6 +139,11 @@ public class EpicDownloadManager {
         // Parsed manifest also holds CDN URLs for download
         public List<CdnUrl> cdnUrls = new ArrayList<>();
 
+        /** The manifest's prerequisite (usually UE4PrereqSetup_x64.exe: VC++ + DirectX), or "" when none.
+         *  Kept at install for the Windows-components recommendations ({@code StoreRedists}). */
+        public String prereqName = "";
+        public String prereqPath = "";
+
         /**
          * Parse the manifest API JSON, download the manifest binary, and parse it.
          * Returns null on any failure.
@@ -295,6 +300,8 @@ public class EpicDownloadManager {
 
             File installDir  = new File(installDirPath);
             installDir.mkdirs();
+            // Its prerequisite, for the Windows-components recommendations (kept by install folder).
+            com.winlator.star.components.StoreRedists.rememberEpicPrereq(ctx, installDir, manifest.prereqName, manifest.prereqPath);
             File chunkCacheDir = new File(installDir, ".chunks");
             chunkCacheDir.mkdirs();
 
@@ -855,9 +862,11 @@ public class EpicDownloadManager {
 
             ByteBuffer body = ByteBuffer.wrap(bodyBytes).order(ByteOrder.LITTLE_ENDIAN);
 
-            // Skip ManifestMeta section
+            // ManifestMeta section: only its prerequisite is read (best effort), then skipped whole.
+            int metaStart = body.position();
             int metaSize = body.getInt();
-            body.position(body.position() - 4 + metaSize);
+            String[] prereq = readMetaPrereq(body);
+            body.position(metaStart + metaSize);
 
             // ChunkDataList section
             int cdlStart = body.position();
@@ -931,6 +940,8 @@ public class EpicDownloadManager {
             result.chunkDir     = chunkDir;
             result.uniqueChunks = new ArrayList<>(seenMap.values());
             result.files        = files;
+            result.prereqName   = prereq[0];
+            result.prereqPath   = prereq[1];
             return result;
 
         } catch (Exception e) {
@@ -1042,6 +1053,8 @@ public class EpicDownloadManager {
             result.chunkDir     = chunkDir;
             result.uniqueChunks = new ArrayList<>(chunkMap.values());
             result.files        = files;
+            result.prereqName   = root.optString("PrereqName", "");
+            result.prereqPath   = root.optString("PrereqPath", "");
             Log.i(TAG, "JSON manifest: chunkDir=" + chunkDir
                     + " chunks=" + result.uniqueChunks.size()
                     + " files=" + files.size());
@@ -1309,6 +1322,33 @@ public class EpicDownloadManager {
     }
 
     // ── FString ───────────────────────────────────────────────────────────────
+
+    /**
+     * The prerequisite {name, path} from a binary manifest's ManifestMeta, read from just after its
+     * size field: data version, feature level, is-file-data, app id, app name, build version, launch
+     * exe, launch command, prerequisite ids, then the prerequisite's name and path. {"", ""} when it
+     * can't be read; the caller re-positions past the section either way.
+     */
+    private static String[] readMetaPrereq(ByteBuffer body) {
+        try {
+            body.get();      // data version
+            body.getInt();   // feature level
+            body.get();      // is file data
+            body.getInt();   // app id
+            readFString(body); // app name
+            readFString(body); // build version
+            readFString(body); // launch exe
+            readFString(body); // launch command
+            int ids = body.getInt();
+            if (ids < 0 || ids > 64) return new String[] {"", ""};
+            for (int i = 0; i < ids; i++) readFString(body);
+            String name = readFString(body);
+            String path = readFString(body);
+            return new String[] {name != null ? name : "", path != null ? path : ""};
+        } catch (Throwable t) {
+            return new String[] {"", ""};
+        }
+    }
 
     public static String readFString(ByteBuffer buf) {
         int length = buf.getInt();

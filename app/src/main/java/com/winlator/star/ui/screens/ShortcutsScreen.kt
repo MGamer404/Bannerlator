@@ -461,7 +461,9 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 val counts = withContext(Dispatchers.IO) {
                     val catalog = runCatching { ComponentCatalog.load() }.getOrDefault(emptyList()).map { it.name }.toSet()
                     found.associate { c ->
-                        c.exe.absolutePath to GameRecommendations.detect(c.exe, null).count { it.componentName in catalog }
+                        c.exe.absolutePath to GameRecommendations.detect(c.exe, null, context).count {
+                            it.componentName in catalog && GameRecommendations.group(it) == GameRecommendations.Group.RECOMMENDED
+                        }
                     }
                 }
                 scanRecCounts = counts.filterValues { it > 0 }

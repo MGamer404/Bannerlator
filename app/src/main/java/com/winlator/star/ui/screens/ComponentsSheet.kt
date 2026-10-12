@@ -67,6 +67,8 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit, exeFile: File? 
     var confirmExec by remember { mutableStateOf<Component?>(null) }
     var recs by remember { mutableStateOf<List<DependencyDetector.Recommendation>>(emptyList()) }
     var showSession by remember { mutableStateOf(false) }
+    // The "Also in the game's folder" group is open.
+    var showFolder by remember { mutableStateOf(false) }
     // Removing: the component going out (its row shows the progress), and the one awaiting confirmation.
     var removing by remember { mutableStateOf<String?>(null) }
     var confirmRemove by remember { mutableStateOf<Pair<Component, ComponentUninstaller.Plan>?>(null) }
@@ -143,7 +145,7 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit, exeFile: File? 
         installed = recorded + detected
         val list = withContext(Dispatchers.IO) { ComponentCatalog.load() }
         components = list
-        if (exeFile != null || gameDir != null) recs = withContext(Dispatchers.IO) { GameRecommendations.detect(exeFile, gameDir) }
+        if (exeFile != null || gameDir != null) recs = withContext(Dispatchers.IO) { GameRecommendations.detect(exeFile, gameDir, context) }
         loadError = list.isEmpty()
         loading = false
     }
@@ -220,15 +222,22 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit, exeFile: File? 
                                     (query.isBlank() || it.name.contains(query, true) || it.description.contains(query, true))
                             }
                         }
-                        // What the game needs, by the name the list shows (a `_dll` pick shows as its base).
-                        val reasons = remember(recs, byName) {
-                            recs.associate { r ->
+                        // What the game needs, by the name the list shows (a `_dll` pick shows as its base): its
+                        // reason and group (recs come strongest first, so the first per name wins).
+                        val picks = remember(recs, byName) {
+                            val m = LinkedHashMap<String, DependencyDetector.Recommendation>()
+                            recs.forEach { r ->
                                 val base = r.componentName.removeSuffix("_dll").takeIf { byName.containsKey(it) } ?: r.componentName
-                                base to GameRecommendations.reason(r)
+                                if (base !in m) m[base] = r
                             }
+                            m
                         }
+                        val reasons = remember(picks) { picks.mapValues { GameRecommendations.reason(it.value) } }
                         val opensContainer: (Component) -> Boolean = { c -> (byName["${c.name}_dll"] ?: c).let { ComponentExecInstaller.isExecComponent(it) } }
-                        val recommended = shown.filter { it.name in reasons }
+                        fun inGroup(g: GameRecommendations.Group) = shown.filter { c -> picks[c.name]?.let { GameRecommendations.group(it) == g } == true }
+                        val recommended = inGroup(GameRecommendations.Group.RECOMMENDED)
+                        val optional = inGroup(GameRecommendations.Group.OPTIONAL)
+                        val inFolder = inGroup(GameRecommendations.Group.FOLDER)
                         val have = shown.filter { it.name in installed && it.name !in reasons }
                         val rest = shown.filter { it.name !in reasons && it.name !in installed }
                         val others = rest.filterNot(opensContainer)
@@ -296,6 +305,32 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit, exeFile: File? 
                                     }
                                 }
                                 section("Recommended for this game", recommended) { reasons[it.name] }
+                                section("Optional", optional) { reasons[it.name] }
+                                if (inFolder.isNotEmpty()) {
+                                    item(key = "h-folder") {
+                                        SectionHeader(
+                                            (if (showFolder) "▾ " else "▸ ") + "Also in the game's folder (${inFolder.size})",
+                                            Modifier.clickable { showFolder = !showFolder },
+                                        )
+                                    }
+                                    if (showFolder) {
+                                        items(inFolder, key = { it.name }) { c ->
+                                            ComponentRow(
+                                                c = c,
+                                                isInstalled = c.name in installed,
+                                                isInstalling = installing == c.name,
+                                                isRemoving = removing == c.name,
+                                                progress = if (installing == c.name || removing == c.name) progress else null,
+                                                stage = if (installing == c.name || removing == c.name) stage else "",
+                                                note = reasons[c.name],
+                                                enabled = installing == null && removing == null,
+                                                onInstall = { install(c) },
+                                                onRemove = { askRemove(c) },
+                                            )
+                                            Divider(color = DividerColor.copy(alpha = 0.5f))
+                                        }
+                                    }
+                                }
                                 section("Installed in this container", have)
                                 section("All components", others)
                                 if (session.isNotEmpty()) {

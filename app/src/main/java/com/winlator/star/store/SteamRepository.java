@@ -2008,11 +2008,18 @@ public final class SteamRepository {
                         int selectedCount = 0, skippedCount = 0;
                         KeyValue depotsKv = root.get("depots");
                         List<KeyValue> depotChildren = depotsKv.getChildren();
+                        // Steamworks Shared redistributables (VC++, DirectX, … from app 228980) the app
+                        // points at: no manifest of their own here, kept for the Windows-components
+                        // recommendations (SteamRedists).
+                        java.util.List<String> sharedDepots = new java.util.ArrayList<>();
                         if (depotChildren != null) {
                             for (KeyValue d : depotChildren) {
                                 int depotId;
                                 try { depotId = Integer.parseInt(d.getName()); }
                                 catch (NumberFormatException ignored) { continue; } // "branches", "baselanguages", …
+                                if (com.winlator.star.components.SteamRedists.SHARED_APP.equals(kvStr(d.get("depotfromapp")).trim())) {
+                                    sharedDepots.add(String.valueOf(depotId));
+                                }
 
                                 // Must have a public manifest to be downloadable.
                                 KeyValue pub = d.get("manifests").get("public");
@@ -2090,6 +2097,10 @@ public final class SteamRepository {
                                 }
                             }
                         }
+
+                        try {
+                            com.winlator.star.components.SteamRedists.rememberShared(appContext, appId, sharedDepots);
+                        } catch (Throwable ignored) {}
 
                         // Beta branches — depots/branches/* (skipped by the numeric-name depot loop
                         // above). Each child is a branch: name = branch id ("public", "beta", …) with

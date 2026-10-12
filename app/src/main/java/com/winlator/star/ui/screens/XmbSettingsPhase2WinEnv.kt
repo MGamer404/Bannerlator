@@ -22,6 +22,7 @@ import com.winlator.star.components.ComponentExecInstaller
 import com.winlator.star.components.ComponentInstallReturn
 import com.winlator.star.components.ComponentInstaller
 import com.winlator.star.components.DependencyDetector
+import com.winlator.star.components.GameRecommendations
 import com.winlator.star.components.PrefixInstalledDetector
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.KeyValueSet
@@ -69,6 +70,8 @@ internal fun xmbWinComponentsMenu(xmb: XmbScope, shortcut: Shortcut): XmbMenu {
     // ── Recommended components: same detection, catalog, installed-state and install routing ──
     var recLoading by mutableStateOf(true)
     var recs by mutableStateOf<List<DependencyDetector.Recommendation>>(emptyList())
+    // The "Also in the game's folder" rows are shown.
+    var showFolder by mutableStateOf(false)
     var catalog by mutableStateOf<Map<String, Component>>(emptyMap())
     var installed by mutableStateOf<Set<String>>(emptySet())
     var installing by mutableStateOf<String?>(null)
@@ -84,13 +87,7 @@ internal fun xmbWinComponentsMenu(xmb: XmbScope, shortcut: Shortcut): XmbMenu {
         val gameExe = runCatching { WinePath.resolveAndroidPath(container, shortcut.path ?: "") }.getOrNull()
         val gameDir = gameExe?.parentFile
         val found = withContext(Dispatchers.IO) {
-            runCatching {
-                when {
-                    gameExe != null -> DependencyDetector.detectForExe(gameExe)
-                    gameDir != null -> DependencyDetector.detect(gameDir)
-                    else -> emptyList()
-                }
-            }.getOrDefault(emptyList())
+            if (gameExe != null || gameDir != null) GameRecommendations.detect(gameExe, gameDir, ctx) else emptyList()
         }
         if (found.isEmpty()) { recs = emptyList(); recLoading = false; return@launch }
         val cat = withContext(Dispatchers.IO) {
@@ -168,11 +165,14 @@ internal fun xmbWinComponentsMenu(xmb: XmbScope, shortcut: Shortcut): XmbMenu {
         if (recLoading) {
             rows += XmbRow.Info("recLoading", "Looking for recommended components…", Icons.Filled.Search)
         } else if (recs.isNotEmpty()) {
-            // BUNDLED = redist installers the game ships; SHIPPED = loose runtime DLLs (optional).
-            val bundled = recs.filter { it.kind == DependencyDetector.Kind.BUNDLED }
-            val shipped = recs.filter { it.kind == DependencyDetector.Kind.SHIPPED }
-            fun group(key: String, title: String, sub: String, list: List<DependencyDetector.Recommendation>) {
-                rows += XmbRow.Header(key, title)
+            // GameRecommendations.group: what the game's store, install script or exe says it needs;
+            // loose runtime DLLs it ships (optional); installers that only sit in its folder (folded).
+            fun of(g: GameRecommendations.Group) = recs.filter { GameRecommendations.group(it) == g }
+            val recommended = of(GameRecommendations.Group.RECOMMENDED)
+            val optional = of(GameRecommendations.Group.OPTIONAL)
+            val inFolder = of(GameRecommendations.Group.FOLDER)
+            fun group(key: String, title: String?, list: List<DependencyDetector.Recommendation>) {
+                if (title != null) rows += XmbRow.Header(key, title)
                 for (rec in list) {
                     val c = catalog[rec.componentName] ?: continue
                     val isInstalled = c.name in installed
@@ -180,7 +180,7 @@ internal fun xmbWinComponentsMenu(xmb: XmbScope, shortcut: Shortcut): XmbMenu {
                     rows += XmbRow.Action(
                         "rec:${c.name}", rec.label,
                         if (isInstalled) Icons.Filled.CheckCircle else Icons.Filled.Download,
-                        subtitle = sub,
+                        subtitle = GameRecommendations.reason(rec),
                         value = when {
                             isInstalling -> if (progress >= 0f) "Installing ${(progress * 100).toInt()}%" else "Installing…"
                             isInstalled -> "Installed"
@@ -190,13 +190,14 @@ internal fun xmbWinComponentsMenu(xmb: XmbScope, shortcut: Shortcut): XmbMenu {
                     ) { onInstallTap(c) }
                 }
             }
-            when {
-                bundled.isNotEmpty() && shipped.isNotEmpty() -> {
-                    group("hRec", "Recommended", "Redistributable this game bundles", bundled)
-                    group("hOpt", "Optional", "Ships with the game — install only if it misbehaves", shipped)
-                }
-                shipped.isNotEmpty() -> group("hOpt", "Optional components", "Ships with the game — install only if it misbehaves", shipped)
-                else -> group("hRec", "Recommended components", "Installs into this game's container (shared by its games)", bundled)
+            if (recommended.isNotEmpty()) group("hRec", "Recommended components", recommended)
+            if (optional.isNotEmpty()) group("hOpt", if (recommended.isEmpty()) "Optional components" else "Optional", optional)
+            if (inFolder.isNotEmpty()) {
+                rows += XmbRow.Toggle(
+                    "recFolder", "Also in the game's folder (${inFolder.size})", Icons.Filled.Search, showFolder,
+                    subtitle = "Installers in its folder that nothing says the game needs",
+                ) { showFolder = it }
+                if (showFolder) group("hFolder", null, inFolder)
             }
         }
 
