@@ -306,6 +306,7 @@ import com.winlator.star.winhandler.WinHandler
 import android.net.Uri
 import android.os.Build
 import androidx.documentfile.provider.DocumentFile
+import com.winlator.star.ui.DeckDialogBars
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -1924,6 +1925,7 @@ internal fun ShortcutActionDialogs(actions: ShortcutActions) {
                 onDismissRequest = { logsShortcut = null },
                 properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
             ) {
+                DeckDialogBars()
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     LogViewerScreen(entry = entry, onClose = { logsShortcut = null })
                 }
@@ -3816,6 +3818,7 @@ internal fun CommunityCatalogBrowser(
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        DeckDialogBars()
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
@@ -4744,6 +4747,7 @@ private fun CommunityConfigDetailDialog(
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        DeckDialogBars()
         Surface(
             modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.92f),
             shape = MaterialTheme.shapes.large,
@@ -5573,6 +5577,7 @@ private fun GameDetailsSheet(
     }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        DeckDialogBars()
         // The art picker opens from inside this dialog's window: a sheet from outside it would sit
         // under the full-screen dialog, out of sight.
         if (showArtPicker) {
@@ -7151,6 +7156,7 @@ internal fun ShortcutSettingsDialogScreen(
         onDismissRequest = requestClose,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        DeckDialogBars()
         Surface(
             // A DEFINITE height (not fillMaxHeight fraction): inside a Dialog the window height is
             // effectively unbounded, so fillMaxHeight(fraction) silently no-ops and the Surface
@@ -9848,7 +9854,7 @@ private fun ScLinuxComponentsTab(dp: SettingsDpad, onDpadIds: (List<String>) -> 
             onDismissRequest = { confirm = null },
             title = { Text(title) },
             text = { Text(body, fontSize = 14.sp) },
-            confirmButton = { TextButton(onClick = { confirm = null; go() }) { Text(title.substringBefore(' ')) } },
+            confirmButton = { DeckDialogBars(); TextButton(onClick = { confirm = null; go() }) { Text(title.substringBefore(' ')) } },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
         )
     }

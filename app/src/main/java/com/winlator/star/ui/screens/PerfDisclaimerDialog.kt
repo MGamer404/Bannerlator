@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.winlator.star.ui.DeckDialogBars
 
 /** Verbatim risk copy for the hard-gate disclaimers (kept in one place so both surfaces match). */
 object PerfDisclaimerCopy {
@@ -54,6 +55,7 @@ object PerfDisclaimerCopy {
 @Composable
 fun PerfInfoDialog(title: String, body: String, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        DeckDialogBars()
         Surface(
             modifier = Modifier.fillMaxWidth(0.92f).padding(8.dp),
             shape = MaterialTheme.shapes.large,
@@ -98,6 +100,7 @@ fun PerfDisclaimerDialog(
     val canConfirm = reachedBottom && accepted
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        DeckDialogBars()
         Surface(
             modifier = Modifier.fillMaxWidth(0.92f).padding(8.dp),
             shape = MaterialTheme.shapes.large,

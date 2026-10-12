@@ -87,6 +87,7 @@ import com.winlator.star.ui.AccountUiBus
 import com.winlator.star.ui.AppDrawerContent
 import com.winlator.star.ui.AppNavGraph
 import com.winlator.star.ui.AppTopBar
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.PreloaderOverlay
 import com.winlator.star.ui.Screen
 import com.winlator.star.ui.screens.SplashScreen
@@ -954,6 +955,7 @@ private fun AboutDialog(onDismiss: () -> Unit) {
         UpdateManager.check(context) { info -> activity?.runOnUiThread { update = info } }
     }
     Dialog(onDismissRequest = onDismiss) {
+        DeckDialogBars()
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = androidx.compose.material3.MaterialTheme.colorScheme.surface,

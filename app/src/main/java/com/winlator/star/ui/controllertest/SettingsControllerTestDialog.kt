@@ -43,6 +43,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.ExternalController
+import com.winlator.star.ui.DeckDialogBars
 import kotlin.math.min
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -93,6 +94,7 @@ fun SettingsControllerTestDialog(
             dismissOnClickOutside = false,
         )
     ) {
+        DeckDialogBars()
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         SideEffect {
             // Arm the fork gate SYNCHRONOUSLY (test mode only). MainActivity reads ControllerTestBus.active

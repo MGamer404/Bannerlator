@@ -113,6 +113,7 @@ import androidx.preference.PreferenceManager
 import com.winlator.star.androidgames.AndroidGames
 import com.winlator.star.container.Shortcut
 import com.winlator.star.store.SteamFriendsAction
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.screens.GameMenuAction
 import com.winlator.star.ui.screens.gameMenuOffers
 import com.winlator.star.ui.screens.ShortcutActionDialogs
@@ -575,6 +576,7 @@ private fun LibraryFilterDialog(
         runCatching { firstRequester.requestFocus() }
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        DeckDialogBars()
         val shape = RoundedCornerShape(26.dp)
         Column(
             verticalArrangement = Arrangement.spacedBy(8.dp),

@@ -31,6 +31,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
 import androidx.compose.ui.text.style.TextOverflow
+import com.winlator.star.ui.DeckDialogBars
 
 /**
  * Holds info about one downloadable vegas release from GitHub.
@@ -140,7 +141,7 @@ fun VegasDownloadSheet(
             onDismissRequest = { errorMsg = null },
             title = { Text("Download failed", color = MaterialTheme.colorScheme.onSurface) },
             text = { Text(msg, color = MaterialTheme.colorScheme.onSurface) },
-            confirmButton = { TextButton(onClick = { errorMsg = null }) { Text("OK") } },
+            confirmButton = { DeckDialogBars(); TextButton(onClick = { errorMsg = null }) { Text("OK") } },
             dismissButton = { TextButton(onClick = { errorMsg = null; retryKey++ }) { Text("Retry") } }
         )
     }
@@ -285,7 +286,7 @@ Column(modifier = Modifier.weight(1f)) {
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { if (downloadingTag == null && !installing) onDismiss() }) { Text("Close") } },
+        confirmButton = { DeckDialogBars(); TextButton(onClick = { if (downloadingTag == null && !installing) onDismiss() }) { Text("Close") } },
     )
 
     // Full-body release notes dialog — the inline preview stays at 2 lines by design
@@ -311,7 +312,7 @@ Column(modifier = Modifier.weight(1f)) {
                         modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                     )
                 },
-                confirmButton = { TextButton(onClick = { notesDialogTag = null }) { Text("Close") } },
+                confirmButton = { DeckDialogBars(); TextButton(onClick = { notesDialogTag = null }) { Text("Close") } },
             )
         } else {
             notesDialogTag = null

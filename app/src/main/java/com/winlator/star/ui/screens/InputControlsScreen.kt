@@ -92,6 +92,7 @@ import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.ExternalController
 import com.winlator.star.inputcontrols.InputControlsManager
 import com.winlator.star.inputcontrols.SteamControllerBackend
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.components.PlayerSlotsEditor
 import com.winlator.star.ui.controllertest.SettingsControllerTestDialog
 import com.winlator.star.util.InAppFilePicker
@@ -1512,6 +1513,7 @@ private fun MenuButtonCaptureDialog(onResult: (Int) -> Unit) {
         onDismissRequest = { onResult(-1) },
         properties = androidx.compose.ui.window.DialogProperties(dismissOnClickOutside = true),
     ) {
+        DeckDialogBars()
         val window = (androidx.compose.ui.platform.LocalView.current.parent
             as? androidx.compose.ui.window.DialogWindowProvider)?.window
         androidx.compose.runtime.SideEffect {

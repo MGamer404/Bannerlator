@@ -122,6 +122,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import com.winlator.star.ui.DeckDialogBars
 
 // Serializes all native adrenotools probing (isDriverSupported + enumerateExtensions) off the
 // main thread. Serial = no concurrent AdrenoTools hooks (old SIGSEGV); off-main = no ANR.
@@ -5710,7 +5711,7 @@ internal fun DxvkConfigDialog(
                                     }
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { showCatalogDialog = false }) { Text("OK") } }
+                            confirmButton = { DeckDialogBars(); TextButton(onClick = { showCatalogDialog = false }) { Text("OK") } }
                         )
                     }
                     if (showKeyDocSheet) {
@@ -5752,7 +5753,7 @@ internal fun DxvkConfigDialog(
                                     }
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { liveReport = null }) { Text("OK") } }
+                            confirmButton = { DeckDialogBars(); TextButton(onClick = { liveReport = null }) { Text("OK") } }
                         )
                     }
                     // Only meaningful while a config file is actually in play — hidden under
@@ -5791,7 +5792,7 @@ internal fun DxvkConfigDialog(
                                     )
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { showNotes = false }) { Text("OK") } }
+                            confirmButton = { DeckDialogBars(); TextButton(onClick = { showNotes = false }) { Text("OK") } }
                         )
                     }
                     // Option B backup picker: newest-first list of .bak archives beside the live
@@ -5833,7 +5834,7 @@ internal fun DxvkConfigDialog(
                                     }
                                 }
                             },
-                            confirmButton = { TextButton(onClick = { showBackups = false }) { Text("Close") } }
+                            confirmButton = { DeckDialogBars(); TextButton(onClick = { showBackups = false }) { Text("Close") } }
                         )
                     }
                     restoreTarget?.let { backup ->
@@ -5844,6 +5845,7 @@ internal fun DxvkConfigDialog(
                                 Text("The live config file will be replaced by '${backup.name}'. The current state is backed up first — nothing is lost.")
                             },
                             confirmButton = {
+                                DeckDialogBars()
                                 TextButton(onClick = { restoreBackup(backup); restoreTarget = null }) { Text("Restore") }
                             },
                             dismissButton = { TextButton(onClick = { restoreTarget = null }) { Text(stringResource(android.R.string.cancel)) } }
@@ -5858,6 +5860,7 @@ internal fun DxvkConfigDialog(
                             onDismissRequest = { valuePickerRow = null },
                             title = { Text(row.key) },
                             confirmButton = {
+                                DeckDialogBars()
                                 TextButton(onClick = { if (customValueDraft.isNotBlank()) applyValue(row.key, customValueDraft.trim()); valuePickerRow = null }) { Text("Done") }
                             },
                             text = {
@@ -5907,6 +5910,7 @@ internal fun DxvkConfigDialog(
                     // glass delete confirmation: translucent card over a light scrim (config dialog shows through)
                     pendingDeleteKey?.let { delKey ->
                         Dialog(onDismissRequest = { pendingDeleteKey = null }) {
+                            DeckDialogBars()
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -5976,7 +5980,7 @@ internal fun DxvkConfigDialog(
                                     "the option cannot be applied and would be ignored."
                                 )
                             },
-                            confirmButton = { TextButton(onClick = { pendingSchemaBlock = null }) { Text("Got it") } }
+                            confirmButton = { DeckDialogBars(); TextButton(onClick = { pendingSchemaBlock = null }) { Text("Got it") } }
                         )
                     }
                     // (+) add-key dialog: freeform key/value appended to the live file.
@@ -6013,6 +6017,7 @@ internal fun DxvkConfigDialog(
                                 }
                             },
                             confirmButton = {
+                                DeckDialogBars()
                                 TextButton(
                                     enabled = addKeyDraft.isNotBlank() && addValueDraft.isNotBlank() && keyValid,
                                     onClick = {
@@ -6028,6 +6033,7 @@ internal fun DxvkConfigDialog(
             }
         },
         confirmButton = {
+            DeckDialogBars()
             TextButton(onClick = {
                 val cfg = DXVKConfigDialog.parseConfig(initialConfig)
                 cfg.put("version", selectedDxvk)
@@ -6659,6 +6665,7 @@ private fun StockConfigDownloadSheet(
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
+        DeckDialogBars()
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Text("Stock configs", style = MaterialTheme.typography.titleMedium)
             Text(
@@ -6939,6 +6946,7 @@ private fun VGlossarySheet(
         }
     }
     Dialog(onDismissRequest = onDismiss) {
+        DeckDialogBars()
         Box(
             modifier = Modifier
                 .fillMaxSize()

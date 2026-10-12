@@ -57,6 +57,7 @@ import com.winlator.star.reshade.ReshadeCatalog
 import com.winlator.star.reshade.ReshadeCatalogEntry
 import com.winlator.star.reshade.ReshadeDownloader
 import com.winlator.star.reshade.ReshadeManager
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.findActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -203,6 +204,7 @@ private fun ReshadeCatalogSheet(
         containerColor = cs.surface,
         contentColor = cs.onSurface,
     ) {
+        DeckDialogBars()
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(bottom = 12.dp)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -300,6 +302,7 @@ private fun ReshadeCatalogSheet(
             title = { Text("Delete ${entry.name}?") },
             text = { Text("This removes the downloaded effect from storage and takes it out of your loadout. You can re-download it any time.") },
             confirmButton = {
+                DeckDialogBars()
                 TextButton(onClick = {
                     val id = entry.id
                     pendingDelete = null

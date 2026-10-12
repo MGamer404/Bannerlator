@@ -49,6 +49,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.screens.OutlinedAlertDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -118,6 +119,7 @@ internal fun SetAsDefaultSheet(item: SetAsDefault.Item, onDismiss: () -> Unit, o
 
     ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, sheetState = sheetState,
         containerColor = cs.surface, contentColor = cs.onSurface) {
+        DeckDialogBars()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Set as default", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)

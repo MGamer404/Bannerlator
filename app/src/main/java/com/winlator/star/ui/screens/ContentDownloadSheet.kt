@@ -60,6 +60,7 @@ import com.winlator.star.store.download.ContentDownloadState
 import com.winlator.star.store.download.InstallProgressDialog
 import com.winlator.star.store.download.formatEta
 import com.winlator.star.store.download.startContentDownload
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.findActivity
 import com.winlator.star.ui.screens.adrenodownload.AdrenoDriverListPane
 import com.winlator.star.ui.screens.contents.RemoteSourceRepository
@@ -333,6 +334,7 @@ fun ContentDownloadSheet(
         // progress sub-dialogs above overlay it unchanged.
         val cs = MaterialTheme.colorScheme
         Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            DeckDialogBars()
             Surface(
                 modifier = Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.94f),
                 shape = RoundedCornerShape(24.dp),
@@ -484,6 +486,7 @@ fun ContentDownloadSheet(
             containerColor = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface,
         ) {
+            DeckDialogBars()
             Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(bottom = 12.dp)) {
                 // Title + "install from file"
                 Row(

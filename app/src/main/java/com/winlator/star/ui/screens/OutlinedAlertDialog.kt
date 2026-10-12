@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+import com.winlator.star.ui.DeckDialogBars
 
 // Single source of truth for the app's AlertDialogs: a drop-in wrapper around the Material3
 // slot-based AlertDialog that adds a 1dp outline around the whole popup box — matching the
@@ -18,6 +19,8 @@ import androidx.compose.ui.window.DialogProperties
 // mirrors androidx.compose.material3.AlertDialog exactly (compose-bom 2024.02.00 → material3
 // 1.2.0), so every call site can swap AlertDialog( → OutlinedAlertDialog( unchanged. The
 // border shares the dialog's shape so its corner radius follows the rounded dialog.
+// The confirm slot also runs DeckDialogBars (inside the dialog's own window), so landscape Deck
+// keeps Android's navigation bar hidden behind the popup; a no-op in Classic.
 @Composable
 internal fun OutlinedAlertDialog(
     onDismissRequest: () -> Unit,
@@ -37,7 +40,10 @@ internal fun OutlinedAlertDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismissRequest,
-        confirmButton = confirmButton,
+        confirmButton = {
+            DeckDialogBars()
+            confirmButton()
+        },
         modifier = modifier.border(1.dp, MaterialTheme.colorScheme.outline, shape),
         dismissButton = dismissButton,
         icon = icon,

@@ -72,6 +72,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.winlator.star.container.Shortcut
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.Screen
 import com.winlator.star.ui.deck.settings.DeckSettingsRoutes
 import com.winlator.star.ui.screens.ShortcutsViewModel
@@ -146,6 +147,7 @@ internal fun DeckSearchOverlay(
     val compact = deckCompact()
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        DeckDialogBars()
         BackHandler(onBack = onDismiss)
         Box(
             contentAlignment = Alignment.TopCenter,

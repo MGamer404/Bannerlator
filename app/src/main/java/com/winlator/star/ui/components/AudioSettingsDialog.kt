@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.winlator.star.ui.DeckDialogBars
 
 /**
  * Shared audio config used by the editor cog (per-container / per-game) and the in-game side menu.
@@ -332,6 +333,7 @@ fun AudioSettingsDialog(
     helpRes?.let { HelpDialog(it) { helpRes = null } }
 
     Dialog(onDismissRequest = onDismiss) {
+        DeckDialogBars()
         Surface(shape = RoundedCornerShape(22.dp), color = cs.surface,
             modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
             Column(Modifier.fillMaxSize()) {

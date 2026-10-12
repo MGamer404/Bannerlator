@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.screens.OutlinedAlertDialog
 
 /**
@@ -135,6 +136,7 @@ internal fun MoveProgressDialog(
         onDismissRequest = {},
         properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
     ) {
+        DeckDialogBars()
         Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
             Column(modifier = Modifier.padding(22.dp)) {
                 Text(

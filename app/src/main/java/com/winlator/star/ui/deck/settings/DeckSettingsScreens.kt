@@ -44,6 +44,7 @@ import androidx.navigation.navArgument
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.NewContainerDefaults
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.Screen
 import com.winlator.star.ui.screens.ContainerDetailViewModel
 import com.winlator.star.ui.screens.GameMenuAction
@@ -383,6 +384,7 @@ private fun DeckAppSettings(navController: NavHostController, onAbout: () -> Uni
     )
     if (showLogs) {
         Dialog(onDismissRequest = { showLogs = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            DeckDialogBars()
             LogManagerScreen(onClose = { showLogs = false })
         }
     }

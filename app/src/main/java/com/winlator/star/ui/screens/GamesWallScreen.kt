@@ -115,6 +115,7 @@ import com.winlator.star.communityconfigs.CommunityConfigApply
 import com.winlator.star.store.DownloadManagerActivity
 import com.winlator.star.ui.AccountAvatar
 import com.winlator.star.ui.AccountUiBus
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.Screen
 import com.winlator.star.ui.findActivity
 import kotlinx.coroutines.Dispatchers
@@ -521,7 +522,7 @@ fun GamesWallScreen(navController: NavController) {
             onDismissRequest = { applyResult = null },
             title = { Text(if (res.ok) "Config applied" else "Couldn't apply") },
             text = { Text(res.message, color = TXT.copy(alpha = 0.85f)) },
-            confirmButton = { TextButton(onClick = { applyResult = null }) { Text("Done") } },
+            confirmButton = { DeckDialogBars(); TextButton(onClick = { applyResult = null }) { Text("Done") } },
         )
     }
 }
@@ -863,6 +864,7 @@ private fun WallSheetScaffold(title: String, rows: List<WallSheetRow>, onDismiss
         containerColor = cs.surfaceContainer,
         shape = sheetShape,
     ) {
+        DeckDialogBars()
         var focusIndex by remember { mutableStateOf(0) }
         val fr = remember { FocusRequester() }
         LaunchedEffect(Unit) { runCatching { fr.requestFocus() } }

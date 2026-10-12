@@ -83,6 +83,7 @@ import com.winlator.star.store.SteamHostComponent
 import com.winlator.star.store.SteamLiteComponent
 import com.winlator.star.store.SteamPrefs
 import com.winlator.star.store.SteamRepository
+import com.winlator.star.ui.DeckDialogBars
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -385,6 +386,7 @@ fun LaunchMethodSheet(
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        DeckDialogBars()
         if (landscape) {
             LandscapeCard(
                 shortcut, source, appId, isSteam, hasDetails, enabledMethods, accent,

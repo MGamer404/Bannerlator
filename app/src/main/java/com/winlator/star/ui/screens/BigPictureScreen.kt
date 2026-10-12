@@ -152,6 +152,7 @@ import com.winlator.star.store.SteamLoginActivity
 import com.winlator.star.store.SteamPrefs
 import com.winlator.star.store.SteamSessionManager
 import com.winlator.star.store.StarLaunchBridge
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.Screen
 import com.winlator.star.ui.findActivity
 import kotlinx.coroutines.Dispatchers
@@ -978,6 +979,7 @@ fun BigPictureScreen(navController: NavController) {
                 }
             },
             confirmButton = {
+                DeckDialogBars()
                 androidx.compose.material3.TextButton(onClick = { communityApplyResult = null }) { Text("Done") }
             },
         )
@@ -1514,6 +1516,7 @@ private fun GameCommunitySheet(
     LaunchedEffect(rowCount) { if (focusRow > rowCount - 1) focusRow = (rowCount - 1).coerceAtLeast(0) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        DeckDialogBars()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1752,7 +1755,7 @@ private fun GameCommunitySheet(
             onDismissRequest = dismissReplace,
             title = { Text("Replace your shared config?") },
             text = { Text("You've already shared a config for \"${existing.game}\". Replace it with this one?") },
-            confirmButton = { TextButton(onClick = { replacePrompt = null; proceed() }) { Text("Replace") } },
+            confirmButton = { DeckDialogBars(); TextButton(onClick = { replacePrompt = null; proceed() }) { Text("Replace") } },
             dismissButton = { TextButton(onClick = dismissReplace) { Text("Cancel") } },
         )
     }
@@ -1828,6 +1831,7 @@ private fun Modifier.bpSheetDpad(
 @Composable
 private fun BpSheetScaffold(title: String, rows: List<BpRow>, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        DeckDialogBars()
         var focusIndex by remember { mutableStateOf(0) }
         val focusRequester = remember { FocusRequester() }
         LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }

@@ -44,6 +44,7 @@ import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.winlator.star.store.StarLaunchBridge
 import com.winlator.star.store.SteamStoreSearch
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.theme.OnSurfaceVariant
 import com.winlator.star.ui.theme.SurfaceVariant
 import kotlinx.coroutines.Dispatchers
@@ -142,6 +143,7 @@ fun GameArtPickerSheet(
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = cs.surface, contentColor = cs.onSurface) {
+        DeckDialogBars()
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.85f).padding(bottom = 8.dp)) {
             Text(
                 "Game art",

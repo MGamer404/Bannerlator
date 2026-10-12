@@ -40,6 +40,7 @@ import com.winlator.star.store.SteamLoginActivity
 import com.winlator.star.store.SteamPrefs
 import com.winlator.star.store.SteamSessionManager
 import com.winlator.star.store.steamscript.InstallScriptExecutor
+import com.winlator.star.ui.DeckDialogBars
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -362,7 +363,7 @@ fun ShortcutLaunchDialogs(launcher: ShortcutLauncher, onRemove: (Shortcut) -> Bo
                         "It cannot run under Wine on any Android emulator, so Bannerlator won't start the EA setup for it."
                 )
             },
-            confirmButton = { TextButton(onClick = { launcher.eaUnsupportedFor = null }) { Text("OK") } },
+            confirmButton = { DeckDialogBars(); TextButton(onClick = { launcher.eaUnsupportedFor = null }) { Text("OK") } },
         )
     }
     launcher.eaSetupFor?.let { s ->
@@ -379,6 +380,7 @@ fun ShortcutLaunchDialogs(launcher: ShortcutLauncher, onRemove: (Shortcut) -> Bo
                 )
             },
             confirmButton = {
+                DeckDialogBars()
                 TextButton(enabled = !launcher.eaSetupBusy, onClick = {
                     launcher.eaSetupBusy = true
                     launcher.eaScope.launch {

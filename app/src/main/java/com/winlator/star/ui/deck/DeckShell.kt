@@ -316,14 +316,14 @@ private fun DeckShellContent(
         val hide = {
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.navigationBars())
-            DeckWindow.navBarHidden = true
+            DeckWindow.setNavBarHidden(activity)
         }
         hide()
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) hide() }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            DeckWindow.navBarHidden = false
+            DeckWindow.setNavBarHidden(null)
             controller.show(WindowInsetsCompat.Type.navigationBars())
         }
     }

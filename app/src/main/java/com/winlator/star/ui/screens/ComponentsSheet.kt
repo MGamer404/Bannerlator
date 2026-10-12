@@ -26,6 +26,7 @@ import com.winlator.star.components.DependencyDetector
 import com.winlator.star.components.GameRecommendations
 import com.winlator.star.components.PrefixInstalledDetector
 import com.winlator.star.container.Container
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.findActivity
 import com.winlator.star.ui.theme.Divider as DividerColor
 import kotlinx.coroutines.Dispatchers
@@ -142,6 +143,7 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit, exeFile: File? 
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState,
         containerColor = cs.surface, contentColor = cs.onSurface) {
+        DeckDialogBars()
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(bottom = 12.dp)) {
             Text("Components", style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp))

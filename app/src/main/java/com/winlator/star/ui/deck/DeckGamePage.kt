@@ -82,6 +82,7 @@ import com.winlator.star.core.WinePath
 import com.winlator.star.androidgames.AndroidGames
 import com.winlator.star.linux.LinuxShortcuts
 import com.winlator.star.store.SteamAchievementStore
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.screens.GameMenuAction
 import com.winlator.star.ui.screens.ShortcutActionDialogs
 import com.winlator.star.ui.screens.ShortcutLaunchDialogs
@@ -562,6 +563,7 @@ internal fun DeckGameMenuSheet(
         runCatching { firstRequester.requestFocus() }
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        DeckDialogBars()
         BackHandler(onBack = onDismiss)
         Box(
             contentAlignment = if (compact) Alignment.BottomCenter else Alignment.CenterEnd,

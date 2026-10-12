@@ -79,6 +79,7 @@ import com.winlator.star.store.SteamLiteComponent
 import com.winlator.star.store.SteamSessionManager
 import com.winlator.star.store.SteamSessionManager.Step
 import com.winlator.star.store.SteamSessionManager.StepState
+import com.winlator.star.ui.DeckDialogBars
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.delay
 
@@ -531,6 +532,7 @@ private fun LandscapePreflight(
         onDismissRequest = { /* modal — Cancel / a choice closes it */ },
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false, usePlatformDefaultWidth = false),
     ) {
+        DeckDialogBars()
         Surface(
             modifier = Modifier.width(cardW).height(cardH),
             shape = shape,

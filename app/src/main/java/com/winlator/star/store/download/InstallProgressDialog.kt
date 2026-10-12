@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.winlator.star.ui.DeckDialogBars
 
 /**
  * ONE shared install-progress popup used by BOTH the container-create component sheet
@@ -66,6 +67,7 @@ fun InstallProgressDialog(
             usePlatformDefaultWidth = false,
         ),
     ) {
+        DeckDialogBars()
         Card(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
             shape = RoundedCornerShape(10.dp),

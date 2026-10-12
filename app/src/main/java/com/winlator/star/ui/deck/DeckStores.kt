@@ -82,6 +82,7 @@ import com.winlator.star.store.GogMainActivity
 import com.winlator.star.store.SteamMainActivity
 import com.winlator.star.store.SteamPrefs
 import com.winlator.star.store.SteamTab
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.Screen
 import com.winlator.star.ui.screens.ShortcutsViewModel
 import com.winlator.star.ui.screens.isAmazonShortcut
@@ -465,6 +466,7 @@ private fun StoreOptionsDialog(
 ) {
     val cs = MaterialTheme.colorScheme
     Dialog(onDismissRequest = onDismiss) {
+        DeckDialogBars()
         Column(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier

@@ -71,6 +71,7 @@ import com.winlator.star.core.ExitReasonReporter
 import com.winlator.star.core.LogInventory
 import com.winlator.star.core.LogLocation
 import com.winlator.star.core.LogcatCapture
+import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.theme.DangerRed
 import kotlinx.coroutines.launch
 import java.io.File
@@ -492,6 +493,7 @@ fun LogManagerScreen(onClose: () -> Unit) {
             onDismissRequest = { browseDir = null; refreshTick++ },
             properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
         ) {
+            DeckDialogBars()
             // A Dialog window is transparent and the File Manager draws no background of its own —
             // without this Surface it renders on top of whatever is behind the dialog.
             Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -505,6 +507,7 @@ fun LogManagerScreen(onClose: () -> Unit) {
             onDismissRequest = { viewing = null },
             properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
         ) {
+            DeckDialogBars()
             Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 LogViewerScreen(entry = entry, onClose = { viewing = null })
             }
@@ -904,6 +907,7 @@ private fun AllChannelsDialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        DeckDialogBars()
         Surface(
             // Nearly full-bleed. This device is a landscape handheld, and at 0.9 height with the
             // title, search field and chips each on their own row the list got a single visible

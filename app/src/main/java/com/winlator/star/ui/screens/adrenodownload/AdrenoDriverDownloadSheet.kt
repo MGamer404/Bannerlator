@@ -68,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.winlator.star.contents.AdrenotoolsManager
+import com.winlator.star.ui.DeckDialogBars
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -88,6 +89,7 @@ fun AdrenoDriverDownloadSheet(
         containerColor = cs.surface,
         contentColor = cs.onSurface,
     ) {
+        DeckDialogBars()
         Column(
             modifier = Modifier
                 .fillMaxWidth()

@@ -94,6 +94,7 @@ import com.winlator.star.store.SteamPrefs
 import com.winlator.star.store.SteamRegion
 import com.winlator.star.xenvironment.ImageFsInstaller
 import com.winlator.star.MainActivity
+import com.winlator.star.ui.DeckDialogBars
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -1421,6 +1422,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             onDismissRequest = { showPerformanceMenu = false },
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
+            DeckDialogBars()
             PerformanceSettingsScreen(onClose = { showPerformanceMenu = false })
         }
     }
@@ -1443,6 +1445,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                 }
             },
             confirmButton = {
+                DeckDialogBars()
                 TextButton(
                     enabled = consentChecked, // Enable stays disabled until "I understand" is ticked.
                     onClick = {
@@ -1466,6 +1469,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             title = { Text(title) },
             text = { Text(body, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp) },
             confirmButton = {
+                DeckDialogBars()
                 TextButton(onClick = { steamHelp = null }) { Text("Close") }
             }
         )
@@ -1501,6 +1505,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
                 }
             },
             confirmButton = {
+                DeckDialogBars()
                 TextButton(onClick = { showCaptureHelp = false }) { Text("Close") }
             }
         )
@@ -1511,6 +1516,7 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             onDismissRequest = { showLogManager = false },
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
+            DeckDialogBars()
             LogManagerScreen(onClose = { showLogManager = false })
         }
     }

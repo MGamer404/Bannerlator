@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.winlator.star.ui.DeckDialogBars
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Container glossary — a plain-language "what is all this?" compendium for the
@@ -203,6 +204,7 @@ fun ContainerGlossarySheet(onDismiss: () -> Unit, initialQuery: String = "") {
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        DeckDialogBars()
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
             Text(
                 "What is all this?",
