@@ -331,7 +331,7 @@ internal fun DeckHome(
         FilteredEmpty(onClear = { filter = LibraryFilter(sort = filter.sort) }, onAddGame = onAddGame)
     }
 
-    // XMB mode: the Games screen's options column, except Settings opens the Deck editor (as everywhere in the Deck).
+    // XMB mode: the Games screen's options column, with a game's settings as nested XMB columns like the Classic XMB.
     var showWrapperManager by remember { mutableStateOf(false) }
     val xmbHost = XmbGameHost(
         remove = { vm.remove(it, context) },
@@ -339,7 +339,9 @@ internal fun DeckHome(
         openWrapperManager = { showWrapperManager = true },
     )
     val xmbActionsFor: (Shortcut) -> List<XmbAction> = { s ->
-        xmbGameActions(context, s, xmbHost, openSettings = { actions.perform(GameMenuAction.SETTINGS, it) }, settingsAsColumns = false)
+        // The full-screen XMB keeps a game's settings inside it, as nested columns like the Classic XMB; only the
+        // Steam (Linux) entry, whose settings aren't XMB rows, opens the Deck editor.
+        xmbGameActions(context, s, xmbHost, openSettings = { actions.perform(GameMenuAction.SETTINGS, it) }, settingsAsColumns = true)
     }
 
     val shelfScroll = rememberScrollState()
