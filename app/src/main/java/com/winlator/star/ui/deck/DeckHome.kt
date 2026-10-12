@@ -687,38 +687,44 @@ private fun DeckHero(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .fillMaxWidth(if (compact) 1f else 0.62f)
-                .widthIn(max = 620.dp)
+                .fillMaxWidth()
                 .padding(horizontal = if (compact) 18.dp else 26.dp, vertical = if (compact) 18.dp else 24.dp),
         ) {
-            Text(
-                text = eyebrow.uppercase(),
-                color = cs.primary,
-                fontFamily = NunitoSansFamily,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 11.sp,
-                letterSpacing = 1.2.sp,
-            )
-            Text(
-                text = shortcut.name,
-                color = cs.onSurface,
-                fontFamily = SoraFamily,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = if (compact) 26.sp else 36.sp,
-                lineHeight = if (compact) 28.sp else 38.sp,
-                letterSpacing = (-0.5).sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
+            // The title and facts keep to the left of the art; the buttons below take the hero's full width,
+            // so all four fit on a large display size.
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(if (compact) 1f else 0.62f).widthIn(max = 620.dp),
             ) {
-                meta.forEach { (icon, label) ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(icon, contentDescription = null, tint = cs.onSurfaceVariant, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text(label, color = cs.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(
+                    text = eyebrow.uppercase(),
+                    color = cs.primary,
+                    fontFamily = NunitoSansFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 11.sp,
+                    letterSpacing = 1.2.sp,
+                )
+                Text(
+                    text = shortcut.name,
+                    color = cs.onSurface,
+                    fontFamily = SoraFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = if (compact) 26.sp else 36.sp,
+                    lineHeight = if (compact) 28.sp else 38.sp,
+                    letterSpacing = (-0.5).sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                ) {
+                    meta.forEach { (icon, label) ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(icon, contentDescription = null, tint = cs.onSurfaceVariant, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text(label, color = cs.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        }
                     }
                 }
             }

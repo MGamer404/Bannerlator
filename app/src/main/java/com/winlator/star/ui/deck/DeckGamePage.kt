@@ -173,7 +173,8 @@ internal fun DeckGamePage(
     val gutter = deckGutter()
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val wide = maxWidth >= 900.dp
+        // Page and game menu side by side: on any landscape page from 720dp (a large display size), otherwise from 900dp.
+        val wide = maxWidth >= 900.dp || (maxWidth > maxHeight && maxWidth >= 720.dp)
         // Portrait: the art is a clear banner the page starts under, so the chips and stats never sit on top of it.
         // Otherwise it runs across the top behind the page, fading into it.
         val banner = !wide && maxHeight > maxWidth
