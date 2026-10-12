@@ -1,6 +1,7 @@
 package com.winlator.star.ui.deck
 
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.onFocusedBoundsChanged
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,20 +42,30 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -148,12 +160,46 @@ internal fun IgCard(modifier: Modifier = Modifier, content: @Composable ColumnSc
 /** A card that hosts one of the Classic drawer's own sections unchanged, with padding that suits the Deck spacing. */
 @Composable
 internal fun IgHostedCard(content: @Composable ColumnScope.() -> Unit) {
-    // The drawer's helper lines use its dim accent, which is unreadable on the Deck card.
+    // The drawer's helper lines use its dim accent, which is unreadable on the Deck card; its sliders and dropdowns take
+    // the d-pad the way the Deck's own controls do.
     androidx.compose.runtime.CompositionLocalProvider(
         com.winlator.star.ui.LocalDrawerHelperTextColor provides MaterialTheme.colorScheme.onSurfaceVariant,
+        com.winlator.star.ui.LocalDrawerDpadControls provides true,
     ) {
-        IgCard { Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), content = content) }
+        IgCard { Column(Modifier.fillMaxWidth().igFocusOutline().padding(horizontal = 16.dp, vertical = 12.dp), content = content) }
     }
+}
+
+/**
+ * The Deck focus outline around whichever control inside has controller focus. The Classic drawer's switches, chips,
+ * sliders and buttons hosted on the Deck pages don't carry [deckFocusRing], so the outline is drawn over them here.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun Modifier.igFocusOutline(): Modifier {
+    val accent = MaterialTheme.colorScheme.primary
+    var self by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    // Never equal: the same coordinates come back when the focused control moves, and the outline has to follow it.
+    var focused by remember { mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy()) }
+    return this
+        .onPlaced { self = it }
+        .onFocusedBoundsChanged { focused = it }
+        .drawWithContent {
+            drawContent()
+            val s = self
+            val f = focused
+            if (s != null && f != null && s.isAttached && f.isAttached) {
+                val r = s.localBoundingBoxOf(f, clipBounds = false)
+                val gap = 3.dp.toPx()
+                drawRoundRect(
+                    color = accent,
+                    topLeft = Offset(r.left - gap, r.top - gap),
+                    size = Size(r.width + gap * 2, r.height + gap * 2),
+                    cornerRadius = CornerRadius(12.dp.toPx()),
+                    style = Stroke(width = 3.dp.toPx()),
+                )
+            }
+        }
 }
 
 @Composable

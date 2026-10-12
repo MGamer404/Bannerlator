@@ -73,6 +73,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,7 +83,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.ComposeView
@@ -163,7 +166,8 @@ fun DeckInGameOverlay() {
     // Hoisted so both panels share one exit confirmation.
     var confirmExit by remember { mutableStateOf(false) }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    // Tells the activity whether a control in the panels holds focus (see DeckInGameState.hasControlFocus).
+    BoxWithConstraints(Modifier.fillMaxSize().onFocusChanged { DeckInGameState.setControlFocused(it.hasFocus) }) {
         val compact = maxWidth < 600.dp
         // The game menu leaves most of the game in view: about two thirds of the width, at least what its rail and a page need.
         val menuWidth = if (compact) maxWidth else (maxWidth * 0.64f).coerceIn(minOf(560.dp, maxWidth), 900.dp)
@@ -175,6 +179,8 @@ fun DeckInGameOverlay() {
                     Modifier
                         .fillMaxSize()
                         .background(if (menuOpen) Color.Black.copy(alpha = 0.55f) else Color.Transparent)
+                        // Touch only: as a focus target the full-screen catcher could take the pad's focus and keep it.
+                        .focusProperties { canFocus = false }
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { DeckInGameState.close() }
                 )
             }
@@ -215,13 +221,19 @@ fun DeckInGameOverlay() {
     }
 }
 
-/** Puts controller focus on [requester] whenever the panel asks for it (opened, page changed, a stray d-pad press). */
+/**
+ * Puts controller focus on [requester] whenever the panel asks for it (opened, page changed, a stray d-pad press), and
+ * only while [panel] is the open one: during an X swap the panel sliding out must not take focus back from the new one.
+ * [fallback] is focused first, so it keeps focus when nothing under [requester] can take it (a page without a control).
+ */
 @Composable
-private fun FocusOnRequest(requester: FocusRequester) {
+private fun FocusOnRequest(panel: Panel, requester: FocusRequester, fallback: FocusRequester? = null) {
     val tick by DeckInGameState.focusRequest.collectAsState()
     LaunchedEffect(tick) {
         // One frame for a just-switched page to lay out before focus moves.
         delay(60)
+        if (DeckInGameState.panel.value != panel) return@LaunchedEffect
+        if (fallback != null) runCatching { fallback.requestFocus() }
         runCatching { requester.requestFocus() }
     }
 }
@@ -245,12 +257,16 @@ private fun DeckQuickMenu(modifier: Modifier, onExit: () -> Unit) {
     val tabs = DeckInGameState.availableQuickTabs(friendsSource.tabVisible)
     val shown = if (tab in tabs) tab else QuickTab.QUICK
     val tabFocus = remember { FocusRequester() }
-    FocusOnRequest(tabFocus)
+    // L1 / R1 and opening put focus on the page's first control, like the Deck's quick access menu; the tab is the
+    // fallback for a page with nothing to focus.
+    val pageFocus = remember { FocusRequester() }
+    FocusOnRequest(Panel.QUICK, pageFocus, fallback = tabFocus)
 
     Column(
         modifier = modifier
             .background(cs.background.copy(alpha = 0.97f))
             .border(1.dp, deckLine().copy(alpha = 0.4f))
+            .focusProperties { canFocus = false }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { }
             .padding(top = 18.dp),
     ) {
@@ -284,6 +300,7 @@ private fun DeckQuickMenu(modifier: Modifier, onExit: () -> Unit) {
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .then(if (sel) Modifier.focusRequester(tabFocus) else Modifier)
+                        .focusProperties { down = pageFocus }
                         .deckFocusRing(shape)
                         .clip(shape)
                         .background(if (sel) cs.primary else Color.Transparent)
@@ -308,14 +325,19 @@ private fun DeckQuickMenu(modifier: Modifier, onExit: () -> Unit) {
         val bodyMod = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 14.dp)
         if (shown == QuickTab.FRIENDS) {
             // The roster owns its scrolling (a LazyColumn), so it gets the space without a scroll wrapper.
-            Box(bodyMod.padding(bottom = 8.dp)) { FriendsContent(XServerDrawerState) }
+            Box(bodyMod.padding(bottom = 8.dp).igFocusOutline().focusRequester(pageFocus)) { FriendsContent(XServerDrawerState) }
         } else {
-            Column(bodyMod.verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-                when (shown) {
-                    QuickTab.QUICK -> QuickControls(kind)
-                    QuickTab.TOOLS -> QuickTools(kind)
-                    QuickTab.OPENERS -> OpenersPage()
-                    QuickTab.FRIENDS -> Unit
+            // Each page starts at its top rather than at the previous page's scroll offset.
+            val scroll = key(shown) { rememberScrollState() }
+            Column(bodyMod.verticalScroll(scroll).padding(bottom = 12.dp)) {
+                // Inside the scroll container, so the request lands on the page's first control, not the scroll group.
+                Column(Modifier.fillMaxWidth().focusRequester(pageFocus)) {
+                    when (shown) {
+                        QuickTab.QUICK -> QuickControls(kind)
+                        QuickTab.TOOLS -> QuickTools(kind)
+                        QuickTab.OPENERS -> OpenersPage()
+                        QuickTab.FRIENDS -> Unit
+                    }
                 }
             }
         }
@@ -815,7 +837,9 @@ private fun DeckInGameMenu(modifier: Modifier, onExit: () -> Unit) {
     // A page that stops applying (the friends source dropped) falls back to the first page rather than an empty one.
     val shown = if (tab in tabs) tab else tabs.first()
     val tabFocus = remember { FocusRequester() }
-    FocusOnRequest(tabFocus)
+    FocusOnRequest(Panel.MENU, tabFocus)
+    // RIGHT from the rail (DOWN from the compact strip) enters the page at its first control, whatever the rail row.
+    val pageFocus = remember { FocusRequester() }
     // Re-check the friends source each time the menu opens, as the Classic drawer does.
     LaunchedEffect(Unit) { InGameFriendsSource.poke() }
 
@@ -827,6 +851,7 @@ private fun DeckInGameMenu(modifier: Modifier, onExit: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .then(if (sel) Modifier.focusRequester(tabFocus) else Modifier)
+                    .focusProperties { if (compact) down = pageFocus else right = pageFocus }
                     .deckFocusRing(shape, scaleTo = 1.03f)
                     .clip(shape)
                     .background(if (sel) cs.primary.copy(alpha = 0.18f) else Color.Transparent)
@@ -866,25 +891,30 @@ private fun DeckInGameMenu(modifier: Modifier, onExit: () -> Unit) {
             }
             if (shown == MenuTab.FRIENDS) {
                 // The roster owns its scrolling (a LazyColumn), so it gets the space without a scroll wrapper.
-                Column(pageMod.padding(horizontal = 24.dp, vertical = 18.dp)) {
+                Column(pageMod.padding(horizontal = 24.dp, vertical = 18.dp).focusRequester(pageFocus)) {
                     header()
                     Spacer(Modifier.height(12.dp))
                     IgHostedCard { FriendsContent(state) }
                 }
             } else {
-                Column(pageMod.verticalScroll(rememberScrollState()).padding(horizontal = if (compact) 16.dp else 24.dp, vertical = 18.dp)) {
+                // Each page starts at its top rather than at the previous page's scroll offset.
+                val scroll = key(shown) { rememberScrollState() }
+                Column(pageMod.verticalScroll(scroll).padding(horizontal = if (compact) 16.dp else 24.dp, vertical = 18.dp)) {
                     header()
-                    when (shown) {
-                        MenuTab.SCREEN -> ScreenPage(state)
-                        MenuTab.PERFORMANCE -> PerformancePage(state)
-                        MenuTab.EFFECTS -> EffectsPage(state, kind)
-                        MenuTab.OVERLAY -> OverlayPage(state)
-                        MenuTab.CONTROLS -> ControlsPage(state, kind)
-                        MenuTab.AUDIO -> AudioPage(state)
-                        MenuTab.STEAM -> SteamPage(state)
-                        MenuTab.TV -> TvPage(state)
-                        MenuTab.TOOLS -> ToolsPage(state, kind)
-                        MenuTab.FRIENDS -> Unit
+                    // Inside the scroll container, so the request lands on the page's first control, not the scroll group.
+                    Column(Modifier.fillMaxWidth().focusRequester(pageFocus)) {
+                        when (shown) {
+                            MenuTab.SCREEN -> ScreenPage(state)
+                            MenuTab.PERFORMANCE -> PerformancePage(state)
+                            MenuTab.EFFECTS -> EffectsPage(state, kind)
+                            MenuTab.OVERLAY -> OverlayPage(state)
+                            MenuTab.CONTROLS -> ControlsPage(state, kind)
+                            MenuTab.AUDIO -> AudioPage(state)
+                            MenuTab.STEAM -> SteamPage(state)
+                            MenuTab.TV -> TvPage(state)
+                            MenuTab.TOOLS -> ToolsPage(state, kind)
+                            MenuTab.FRIENDS -> Unit
+                        }
                     }
                     Spacer(Modifier.height(12.dp))
                 }
@@ -908,6 +938,7 @@ private fun DeckInGameMenu(modifier: Modifier, onExit: () -> Unit) {
 
     val panelMod = modifier
         .background(cs.background.copy(alpha = 0.97f))
+        .focusProperties { canFocus = false }
         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { }
     if (compact) {
         Column(panelMod) {

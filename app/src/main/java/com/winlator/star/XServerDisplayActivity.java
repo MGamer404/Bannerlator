@@ -7842,8 +7842,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 || kc == KeyEvent.KEYCODE_DPAD_LEFT || kc == KeyEvent.KEYCODE_DPAD_RIGHT
                 || kc == KeyEvent.KEYCODE_DPAD_CENTER;
         if (!nav || deckInGameView == null) return;
-        // Nothing in the panel has focus yet (a touch opened it, or focus was lost): the first press only puts focus on it.
-        if (!deckInGameView.hasFocus()) {
+        // Nothing in the panel has focus yet (a touch opened it, or the focused control went with a page swap): the
+        // first press only puts focus on it.
+        if (!deckInGameView.hasFocus() || !com.winlator.star.ui.deck.DeckInGameState.INSTANCE.hasControlFocus()) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) com.winlator.star.ui.deck.DeckInGameState.INSTANCE.requestFocus();
             return;
         }

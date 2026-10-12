@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -94,10 +95,17 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
@@ -864,7 +872,10 @@ private fun LabeledSlider(
                 activeTickColor = Color.Transparent,
                 inactiveTickColor = Color.Transparent,
             ),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                // Snap stops when it has them, else twenty presses end to end.
+                .dpadSlider(value, valueRange, (valueRange.endInclusive - valueRange.start) / (if (steps > 0) steps + 1 else 20), enabled, onValueChange, onValueChangeFinished)
         )
     }
 }
@@ -1737,6 +1748,63 @@ private fun waylandCompositorEffectsOn(): Boolean {
 
 /** Lets a host that draws these sections on its own surface (the Deck in-game menu) give their helper lines a readable colour. */
 internal val LocalDrawerHelperTextColor = androidx.compose.runtime.compositionLocalOf<Color?> { null }
+
+/**
+ * Set by the Deck in-game menu, which drives these sections with a controller: sliders step with d-pad left / right and
+ * read-only dropdown fields open with A. The Classic drawer leaves it off and behaves exactly as before.
+ */
+internal val LocalDrawerDpadControls = androidx.compose.runtime.compositionLocalOf { false }
+
+/** With [LocalDrawerDpadControls] on, d-pad left / right on the focused slider steps it by [step] and commits at once (the Deck IgSlider's rule). */
+@Composable
+private fun Modifier.dpadSlider(
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    step: Float,
+    enabled: Boolean,
+    onChange: (Float) -> Unit,
+    onFinished: (() -> Unit)?,
+): Modifier {
+    if (!LocalDrawerDpadControls.current) return this
+    return onPreviewKeyEvent { ev ->
+        val dir = when (ev.key) {
+            Key.DirectionLeft -> -1
+            Key.DirectionRight -> 1
+            else -> 0
+        }
+        if (dir == 0 || !enabled) return@onPreviewKeyEvent false
+        if (ev.type == KeyEventType.KeyDown) {
+            onChange((value + dir * step).coerceIn(range.start, range.endInclusive))
+            onFinished?.invoke()
+        }
+        true
+    }
+}
+
+/**
+ * With [LocalDrawerDpadControls] on, A / centre on a read-only dropdown field opens it and the d-pad moves focus on,
+ * where the text field would otherwise keep the d-pad for its cursor (or raise the keyboard on centre).
+ */
+@Composable
+private fun Modifier.dpadDropdown(onOpen: () -> Unit): Modifier {
+    if (!LocalDrawerDpadControls.current) return this
+    val focusManager = LocalFocusManager.current
+    return onPreviewKeyEvent { ev ->
+        val dir = when (ev.key) {
+            Key.DirectionUp -> FocusDirection.Up
+            Key.DirectionDown -> FocusDirection.Down
+            Key.DirectionLeft -> FocusDirection.Left
+            Key.DirectionRight -> FocusDirection.Right
+            else -> null
+        }
+        val confirm = ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter
+        if (dir == null && !confirm) return@onPreviewKeyEvent false
+        if (ev.type == KeyEventType.KeyDown) {
+            if (dir != null) focusManager.moveFocus(dir) else onOpen()
+        }
+        true
+    }
+}
 
 /** Dim one-line explanation under a control (same style as the Controls tab's Wayland note). */
 @Composable
@@ -2735,6 +2803,9 @@ private fun GradientSlider(
                 .background(track)
                 .border(1.dp, ToggleTrackOff, RoundedCornerShape(11.dp))
                 .onSizeChanged { width = it.width }
+                // Touch only in the Classic drawer; the Deck menu also lets the controller focus it and step it.
+                .dpadSlider(value, range, (range.endInclusive - range.start) / 20f, true, onValueChange, null)
+                .then(if (LocalDrawerDpadControls.current) Modifier.focusable() else Modifier)
                 .pointerInput(range) { detectTapGestures { pick(it.x) } }
                 .pointerInput(range) { detectHorizontalDragGestures { ch, _ -> pick(ch.position.x) } }
         ) {
@@ -3196,7 +3267,9 @@ private fun RefreshRateSlider(rates: List<Int>, selected: Int, enabled: Boolean,
             valueRange = 0f..(stops.size - 1).toFloat(),
             steps = (stops.size - 2).coerceAtLeast(0),
             enabled = enabled,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .dpadSlider(idx.toFloat(), 0f..(stops.size - 1).toFloat(), 1f, enabled, { idx = it.roundToInt().coerceIn(stops.indices) }, { onSelect(stops[idx]) })
         )
         // Tick labels under each notch so the snap values are visible, not just anonymous notches.
         // Padded by ~the thumb radius so the end labels line up with the end notches.
@@ -3237,7 +3310,17 @@ private fun IntSlider(label: String, value: Int, valueRange: IntRange, onValueCh
             valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
             steps = sliderSteps,
             enabled = enabled,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                // One snap stop per press; a continuous one moves a twentieth of its range (at least 1).
+                .dpadSlider(
+                    value.toFloat(),
+                    valueRange.first.toFloat()..valueRange.last.toFloat(),
+                    if (steps >= 0) (valueRange.last - valueRange.first).toFloat() / (steps + 1) else ((valueRange.last - valueRange.first) / 20).coerceAtLeast(1).toFloat(),
+                    enabled,
+                    { onValueChange(it.roundToInt()) },
+                    onValueChangeFinished,
+                )
         )
     }
 }
@@ -3927,7 +4010,7 @@ internal fun ControlsContent(
                     onValueChange = {}, readOnly = true,
                     label = { Text("Profile", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
-                    modifier = Modifier.fillMaxWidth().menuAnchor(),
+                    modifier = Modifier.fillMaxWidth().menuAnchor().dpadDropdown { dropdownExpanded = true },
                     singleLine = true,
                 )
                 ExposedDropdownMenu(expanded = dropdownExpanded, onDismissRequest = { dropdownExpanded = false }) {
@@ -4296,7 +4379,7 @@ private fun PlayerSlotRowItem(row: XServerDialogState.PlayerSlotRow) {
                 onValueChange = {}, readOnly = true,
                 label = { Text("Slot", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                modifier = Modifier.fillMaxWidth().menuAnchor(),
+                modifier = Modifier.fillMaxWidth().menuAnchor().dpadDropdown { expanded = true },
                 singleLine = true,
             )
             ExposedDropdownMenu(

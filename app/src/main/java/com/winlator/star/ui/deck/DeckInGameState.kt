@@ -49,6 +49,14 @@ object DeckInGameState {
     private val _focusRequest = MutableStateFlow(0)
     val focusRequest: StateFlow<Int> = _focusRequest
 
+    // Whether a control inside the panels holds Compose focus. The view keeps Android focus when the focused control is
+    // removed (a page swap) or never got focus, so the activity checks this too before handing a d-pad press over.
+    @Volatile private var controlFocused = false
+
+    fun hasControlFocus(): Boolean = controlFocused
+
+    internal fun setControlFocused(v: Boolean) { controlFocused = v }
+
     // Seeded by the activity in setupUI, after the container and shortcut are resolved.
     private val _sessionKind = MutableStateFlow(InGameSessionKind.WINE_X11)
     val sessionKind: StateFlow<InGameSessionKind> = _sessionKind
@@ -186,6 +194,7 @@ object DeckInGameState {
     /** A new game session: forget the previous one's panel, pages and callbacks (the object outlives the activity). */
     fun reset() {
         _panel.value = Panel.NONE
+        controlFocused = false
         _menuTab.value = MenuTab.SCREEN
         _quickTab.value = QuickTab.QUICK
         _sessionKind.value = InGameSessionKind.WINE_X11
