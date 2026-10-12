@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.size
@@ -89,6 +90,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -723,8 +725,8 @@ private fun DeckTopBar(
             horizontalArrangement = Arrangement.Center,
             modifier = Modifier.weight(1f),
         ) {
-            DeckGlyph("L1", GlyphKind.BUMPER, Modifier.clip(RoundedCornerShape(9.dp)).clickable { onCycle(-1) })
-            Spacer(Modifier.width(8.dp))
+            DeckBumperButton("L1") { onCycle(-1) }
+            Spacer(Modifier.width(4.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -747,8 +749,8 @@ private fun DeckTopBar(
                     ) { onTab(t) }
                 }
             }
-            Spacer(Modifier.width(8.dp))
-            DeckGlyph("R1", GlyphKind.BUMPER, Modifier.clip(RoundedCornerShape(9.dp)).clickable { onCycle(1) })
+            Spacer(Modifier.width(4.dp))
+            DeckBumperButton("R1") { onCycle(1) }
         }
         DeckSearchButton(onSearch)
         DeckStatus(avatarUrl = avatarUrl, showBattery = true, onAccount = onAccount)
@@ -950,7 +952,9 @@ private val DECK_RAIL_WIDTH = 68.dp
 /**
  * The landscape main navigation: brand mark, L1, the seven tabs, R1, and at the foot Search, the Steam
  * pill, clock, battery and (when there is room) the account. L1/R1 move along it with focus on the tab;
- * Right enters the page. The tab list scrolls when the screen is too short for all of it.
+ * Right enters the page. On a short screen (under [DECK_RAIL_SHORT]) the mark, the L1/R1 glyphs (the
+ * legend shows them) and the battery go, and the tabs share the height left. The tab list scrolls only
+ * when even that does not fit (a very large font scale).
  */
 @Composable
 private fun DeckSideRail(
@@ -973,47 +977,75 @@ private fun DeckSideRail(
             .drawBehind { drawRect(line, topLeft = Offset(size.width - 1f, 0f), size = Size(1f, size.height)) },
     ) {
         val roomy = maxHeight >= 560.dp
+        val short = maxHeight < DECK_RAIL_SHORT
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxSize().padding(vertical = 8.dp),
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
-            ) {
-                DeckMark()
-                DeckGlyph("L1", GlyphKind.BUMPER, Modifier.padding(top = 4.dp).clip(RoundedCornerShape(9.dp)).clickable { onCycle(-1) })
+            // What the tab list has left after the foot below; on a short screen the tabs are sized from it.
+            BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                val tabHeight = if (short) ((maxHeight - 12.dp) / DeckTab.entries.size).coerceIn(40.dp, 46.dp) else Dp.Unspecified
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                    modifier = Modifier
-                        .onFocusChanged { onTabsFocus(it.hasFocus) }
-                        // Right leaves the rail for the page itself, not whichever control happens to sit beside the tab.
-                        .onPreviewKeyEvent { e ->
-                            if (e.key == Key.DirectionRight && e.type == KeyEventType.KeyDown) { onEnterContent(); true } else false
-                        },
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
                 ) {
-                    DeckTab.entries.forEach { t ->
-                        DeckRailButton(
-                            t,
-                            selected = t == current,
-                            modifier = Modifier.focusRequester(tabRequesters.getValue(t)),
-                        ) { onTab(t) }
+                    if (!short) {
+                        DeckMark()
+                        DeckBumperButton("L1") { onCycle(-1) }
                     }
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier
+                            .onFocusChanged { onTabsFocus(it.hasFocus) }
+                            // Right leaves the rail for the page itself, not whichever control happens to sit beside the tab.
+                            .onPreviewKeyEvent { e ->
+                                if (e.key == Key.DirectionRight && e.type == KeyEventType.KeyDown) { onEnterContent(); true } else false
+                            },
+                    ) {
+                        DeckTab.entries.forEach { t ->
+                            DeckRailButton(
+                                t,
+                                selected = t == current,
+                                fixedHeight = tabHeight,
+                                modifier = Modifier.focusRequester(tabRequesters.getValue(t)),
+                            ) { onTab(t) }
+                        }
+                    }
+                    if (!short) DeckBumperButton("R1") { onCycle(1) }
                 }
-                DeckGlyph("R1", GlyphKind.BUMPER, Modifier.clip(RoundedCornerShape(9.dp)).clickable { onCycle(1) })
             }
             Spacer(Modifier.height(6.dp))
             DeckSearchButton(onSearch)
-            DeckRailStatus(avatarUrl = avatarUrl, showAvatar = roomy, onAccount = onAccount)
+            DeckRailStatus(avatarUrl = avatarUrl, showAvatar = roomy, showBattery = !short, onAccount = onAccount)
         }
     }
 }
 
-/** A main-rail tab: icon over a short label; the current one gets the accent fill and an inset bar on its left edge. */
+/** Below this rail height the rail drops its mark, L1/R1 and battery, and sizes the tabs to fit. */
+private val DECK_RAIL_SHORT = 520.dp
+
+/** An L1/R1 glyph that cycles the tabs when tapped, in a 40dp box so the small glyph is easy to hit. */
 @Composable
-private fun DeckRailButton(tab: DeckTab, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun DeckBumperButton(text: String, onClick: () -> Unit) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .sizeIn(minWidth = 40.dp, minHeight = 40.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick),
+    ) {
+        DeckGlyph(text, GlyphKind.BUMPER)
+    }
+}
+
+/**
+ * A main-rail tab: icon over a short label; the current one gets the accent fill and an inset bar on its left edge.
+ * [fixedHeight] fixes its height (the short rail's share of the space); unspecified, it is at least 44dp.
+ */
+@Composable
+private fun DeckRailButton(tab: DeckTab, selected: Boolean, fixedHeight: Dp = Dp.Unspecified, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(12.dp)
     val accent = cs.primary
@@ -1026,7 +1058,7 @@ private fun DeckRailButton(tab: DeckTab, selected: Boolean, modifier: Modifier =
             .clip(shape)
             .background(if (selected) accent.copy(alpha = 0.16f) else Color.Transparent)
             .clickable(onClick = onClick)
-            .heightIn(min = 44.dp)
+            .then(if (fixedHeight != Dp.Unspecified) Modifier.height(fixedHeight) else Modifier.heightIn(min = 44.dp))
             .drawBehind {
                 if (selected) {
                     val barW = 3.dp.toPx()
@@ -1039,7 +1071,7 @@ private fun DeckRailButton(tab: DeckTab, selected: Boolean, modifier: Modifier =
                     )
                 }
             }
-            .padding(vertical = 5.dp, horizontal = 2.dp),
+            .padding(vertical = if (fixedHeight != Dp.Unspecified) 2.dp else 5.dp, horizontal = 2.dp),
     ) {
         Icon(
             imageVector = tab.icon,
@@ -1059,9 +1091,9 @@ private fun DeckRailButton(tab: DeckTab, selected: Boolean, modifier: Modifier =
     }
 }
 
-/** The rail's foot: Steam pill (signed-in users only), clock, battery and, when there is room, the account. */
+/** The rail's foot: Steam pill (signed-in users only), clock, battery (not on a short rail) and, when there is room, the account. */
 @Composable
-private fun DeckRailStatus(avatarUrl: String?, showAvatar: Boolean, onAccount: () -> Unit) {
+private fun DeckRailStatus(avatarUrl: String?, showAvatar: Boolean, showBattery: Boolean, onAccount: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val clock = rememberDeckClock()
     val battery = rememberDeckBattery()
@@ -1072,7 +1104,7 @@ private fun DeckRailStatus(avatarUrl: String?, showAvatar: Boolean, onAccount: (
     ) {
         com.winlator.star.store.SteamConnectionPill(compact = true)
         Text(clock, color = cs.onSurface, fontFamily = SoraFamily, fontWeight = FontWeight.Bold, fontSize = 11.5.sp, maxLines = 1)
-        if (battery >= 0) {
+        if (showBattery && battery >= 0) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = if (battery <= 20) Icons.Filled.BatteryAlert else Icons.Filled.BatteryFull,
@@ -1357,7 +1389,7 @@ private fun DeckLegend(
         modifier = Modifier
             .fillMaxWidth()
             // Landscape keeps it thin, under the content only.
-            .height(if (thin) 34.dp else 42.dp)
+            .height(if (thin) 40.dp else 42.dp)
             .background(deckGlass())
             .drawBehind { drawRect(line, topLeft = Offset.Zero, size = Size(size.width, 1f)) }
             .padding(horizontal = if (thin) 12.dp else 16.dp),
@@ -1378,6 +1410,8 @@ private fun LegendItem(glyphs: List<Pair<String, GlyphKind>>, label: String, thi
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(if (thin) 5.dp else 6.dp),
         modifier = Modifier
+            // A tappable item takes the bar's full height (at least 40dp) to hit; the glyphs and label stay as they are.
+            .then(if (onClick != null) Modifier.fillMaxHeight().heightIn(min = 40.dp) else Modifier)
             .clip(shape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = if (thin) 6.dp else 8.dp, vertical = if (thin) 3.dp else 5.dp),
