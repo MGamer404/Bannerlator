@@ -73,6 +73,12 @@ internal sealed interface Control {
     class TextField(val placeholder: String = "", val validate: (String) -> String? = { null }) : Control
     /** A tick per CPU core. The value is the comma-separated list the container and shortcut already store. */
     data object Cores : Control
+    /**
+     * Items each switched on or off in a dialog (a driver's Vulkan extensions). The value is the
+     * comma-separated list of the items switched OFF. [items] is null while they are still being read;
+     * [waiting] and [empty] are what the row says then and when there are none.
+     */
+    class Checklist(val items: List<String>?, val title: String, val waiting: String, val empty: String) : Control
 }
 
 /**
@@ -205,6 +211,9 @@ internal class SettingsEnv(
         runCatching { LinuxVulkanDriver.optionValues(context).map { it to LinuxVulkanDriver.optionLabel(context, it) } }
             .getOrDefault(listOf("" to LinuxVulkanDriver.optionLabel(context, "")))
     }
+
+    /** The DX wrapper and GPU driver lists and probes of the Graphics page, read while that page is open. */
+    val graphics: GraphicsLists by lazy { GraphicsLists(context) }
 
     /**
      * What the Wayland compositor driver picker offers (the same list as the classic editors), or null

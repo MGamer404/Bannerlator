@@ -107,9 +107,10 @@ internal object SettingsRegistry {
             if (game) h("TV and external display", "Start on the TV, TV picture mode, match the TV resolution (TV tab, shown while a TV is connected).", WINE_LINUX) else null,
             h("Wayland game driver and its settings", "Which Vulkan driver the game renders with on Wayland, GPU name, memory limit, present mode and the Mali (PanVK) switches (the driver gear)."),
         )
+        // The DX wrapper config and the X11 driver configuration are rows of this page now (GraphicsRows).
+        // Only an imported wrapper's own switches, read from its files, are still edited there.
         m["graphics"] = listOf(
-            h("DXVK, VKD3D and VEGAS versions", "Versions, async shaders, feature level, the VEGAS config and the WineD3D options (DX Wrapper Config)."),
-            h("Driver version and tuning", "Turnip / Adreno version, Vulkan version, extensions, GPU name, memory limit, BCn textures (X11 driver configuration and wrapper manager)."),
+            h("Settings detected in an imported wrapper", "The extra switches an imported graphics wrapper carries, read from its files (X11 driver configuration, Detected settings)."),
         )
         m["performance"] = listOfNotNull(
             h("Services to start and translator presets", "The Custom services list, and editing Box64, WOWBox64 and FEX preset values (Advanced tab)."),
@@ -659,6 +660,8 @@ internal object SettingsRegistry {
                 },
             ),
         ),
+        // Every choice of the DX Wrapper Config dialogs (DXVK, VEGAS, WineD3D), for the wrapper picked above.
+        *GraphicsRows.dxDefs().toTypedArray(),
         SettingDef(
             id = "graphics.unrealHdr", category = "graphics", group = "Unreal Engine", level = ADVANCED,
             label = "Unreal Engine HDR fix", hint = "The DirectX 11 fix pretends to be an NVIDIA GPU.", tech = "Unreal Engine HDR",
@@ -685,6 +688,8 @@ internal object SettingsRegistry {
             visible = { env, values -> !env.isLinuxEntry && env.wayland(values) },
             note = { env, values -> compositorNote(env, values(ID_DRIVER_VERSION)) },
         ),
+        // The X11 driver configuration: driver version, Vulkan, extensions, GPU name, BCn, Turnip.
+        *GraphicsRows.driverDefs().toTypedArray(),
         SettingDef(
             id = "graphics.fastOpenGL", category = "graphics", group = "OpenGL", level = ADVANCED,
             label = "Fast OpenGL", hint = FastOpenGL.HINT, tech = FastOpenGL.EXTRA,

@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -1081,6 +1082,7 @@ private fun labelFor(control: Control, v: String): String = when (control) {
     is Control.Slider -> v.toFloatOrNull()?.let(control.display) ?: v
     is Control.TextField -> v.ifEmpty { "empty" }
     Control.Cores -> if (v.isEmpty()) "all cores" else "cores $v"
+    is Control.Checklist -> v.split(',').count { it.isNotEmpty() }.let { if (it == 0) "all on" else "$it off" }
 }
 
 // ── Controls ────────────────────────────────────────────────────────────────────────────────────
@@ -1100,6 +1102,7 @@ private fun ControlView(control: Control, value: String, enabled: Boolean, align
         is Control.Slider -> SliderControl(control, value, enabled, onPick)
         is Control.TextField -> TextControl(control, value, enabled, onPick)
         Control.Cores -> CoresControl(value, enabled, onPick)
+        is Control.Checklist -> ChecklistControl(control, value, enabled, onPick)
     }
 }
 
@@ -1312,6 +1315,110 @@ private fun TextControl(control: Control.TextField, value: String, enabled: Bool
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
         modifier = Modifier.fillMaxWidth(),
     )
+}
+
+/** A Checklist row: how many items are on, and A opens the list to switch them. */
+@Composable
+private fun ChecklistControl(control: Control.Checklist, value: String, enabled: Boolean, onPick: (String) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(14.dp)
+    val items = control.items
+    val off = value.split(',').filter { it.isNotEmpty() }.toSet()
+    var open by remember { mutableStateOf(false) }
+    val usable = enabled && !items.isNullOrEmpty()
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .deckFocusRing(shape, scaleTo = 1f)
+            .clip(shape)
+            .background(cs.surfaceVariant.copy(alpha = 0.55f))
+            .border(1.dp, deckLine(), shape)
+            .clickable(enabled = usable) { open = true }
+            .padding(start = 16.dp, end = 10.dp, top = 11.dp, bottom = 11.dp),
+    ) {
+        Text(
+            text = when {
+                items == null -> control.waiting
+                items.isEmpty() -> control.empty
+                else -> "${items.count { it !in off }} of ${items.size} on"
+            },
+            color = if (usable) cs.onSurface else cs.onSurface.copy(alpha = 0.5f),
+            fontSize = 15.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Spacer(Modifier.width(10.dp))
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = cs.onSurfaceVariant, modifier = Modifier.size(20.dp))
+    }
+    if (open && items != null) {
+        ChecklistDialog(
+            title = control.title,
+            all = items,
+            off = off,
+            onDismiss = { open = false },
+            // Only the listed items are kept, as the classic picker does: one no longer offered is dropped.
+            onDone = { picked ->
+                open = false
+                val next = items.filter { it in picked }.joinToString(",")
+                if (next != value) onPick(next)
+            },
+        )
+    }
+}
+
+/** Every item with a tick; the whole line is the focus target and A switches it. OK hands back the ones switched off. */
+@Composable
+private fun ChecklistDialog(title: String, all: List<String>, off: Set<String>, onDismiss: () -> Unit, onDone: (Set<String>) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var picked by remember(all, off) { mutableStateOf(all.filter { it in off }.toSet()) }
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        runCatching { first.requestFocus() }
+    }
+    OutlinedAlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = { onDone(picked) }) { Text("OK") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        title = { Text(title) },
+        text = {
+            Column {
+                Text(
+                    "${all.size - picked.size} of ${all.size} on. Games don't see an extension that is off.",
+                    color = cs.onSurfaceVariant,
+                    fontSize = 13.5.sp,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
+                    item(key = "all") {
+                        ChecklistLine("All on", checked = picked.isEmpty(), modifier = Modifier.focusRequester(first)) { picked = emptySet() }
+                    }
+                    items(all, key = { it }) { ext ->
+                        ChecklistLine(ext, checked = ext !in picked) { picked = if (ext in picked) picked - ext else picked + ext }
+                    }
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun ChecklistLine(label: String, checked: Boolean, modifier: Modifier = Modifier, onToggle: () -> Unit) {
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .deckFocusRing(shape, scaleTo = 1f)
+            .clip(shape)
+            .clickable(onClick = onToggle)
+            .padding(end = 8.dp),
+    ) {
+        Checkbox(checked = checked, onCheckedChange = null)
+        Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)

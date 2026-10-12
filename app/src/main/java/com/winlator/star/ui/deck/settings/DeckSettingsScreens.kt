@@ -201,9 +201,9 @@ private fun DeckGameSettings(path: String, navController: NavHostController) {
             DeckComponentsState(context, loaded.container, loaded.name, exe, exe?.parentFile, coroutines) { latestSource.dirty }
         }
     }
-    val extras = remember(components) {
-        components?.let { mapOf(SettingsRegistry.CAT_COMPONENTS to it.categoryExtra()) } ?: emptyMap()
-    }
+    // The Graphics page's downloads and tools: a Wine game only, like the components page.
+    val graphics = remember(source) { if (env.world != World.WINE) null else DeckGraphicsState(env, source, coroutines) }
+    val extras = remember(components, graphics) { categoryExtras(components, graphics) }
     LaunchedEffect(components) { components?.load() }
     OnReturn {
         if (!source.dirty) {
@@ -211,6 +211,7 @@ private fun DeckGameSettings(path: String, navController: NavHostController) {
             source.reloadFrom()
         }
         components?.let { coroutines.launch { it.refreshInstalled() } }
+        graphics?.reloadContents()
     }
     if (!ready) {
         Loading()
@@ -257,6 +258,7 @@ private fun DeckGameSettings(path: String, navController: NavHostController) {
         extras = extras,
     )
     components?.let { DeckComponentsDialogs(it) }
+    graphics?.let { DeckGraphicsDialogs(it) }
 
     if (showClassic) {
         val s = shortcutState.value
@@ -311,9 +313,15 @@ private fun DeckContainerSettings(id: Int, navController: NavHostController) {
     // The Windows components page's install lists: an existing Wine container only. All containers has no
     // prefix (its page is just the DLL rows), and the Linux Steam client's home is never a Wine container.
     var components by remember { mutableStateOf<DeckComponentsState?>(null) }
+    // The Graphics page's downloads and tools: every Wine container and All containers, never the Linux Steam client's home.
+    val graphics = remember(source, vm.container) {
+        val c = vm.container
+        if (!defaultsMode && c != null && LinuxSettings.isLinuxContainer(c)) null else DeckGraphicsState(env, source, coroutines)
+    }
     OnReturn {
         if (!source.dirty) generation++
         components?.let { coroutines.launch { it.refreshInstalled() } }
+        graphics?.reloadContents()
     }
     if (!ready) {
         Loading()
@@ -331,9 +339,7 @@ private fun DeckContainerSettings(id: Int, navController: NavHostController) {
             state.load()
         }
     }
-    val extras = remember(components) {
-        components?.let { mapOf(SettingsRegistry.CAT_COMPONENTS to it.categoryExtra()) } ?: emptyMap()
-    }
+    val extras = remember(components, graphics) { categoryExtras(components, graphics) }
 
     val header = if (defaultsMode) {
         EditorHeader(
@@ -379,6 +385,13 @@ private fun DeckContainerSettings(id: Int, navController: NavHostController) {
         extras = extras,
     )
     components?.let { DeckComponentsDialogs(it) }
+    graphics?.let { DeckGraphicsDialogs(it) }
+}
+
+/** What the Windows components and Graphics pages add besides their rows. */
+private fun categoryExtras(components: DeckComponentsState?, graphics: DeckGraphicsState?): Map<String, CategoryExtra> = buildMap {
+    components?.let { put(SettingsRegistry.CAT_COMPONENTS, it.categoryExtra()) }
+    graphics?.let { put("graphics", it.categoryExtra()) }
 }
 
 @Composable

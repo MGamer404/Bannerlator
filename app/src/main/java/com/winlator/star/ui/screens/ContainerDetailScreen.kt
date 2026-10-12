@@ -6638,7 +6638,7 @@ private fun HudToggleRow(label: String, checked: Boolean, onCheckedChange: (Bool
 
 // ─── VEGAS stock config download sheet ──────────────────────────────────────────
 @Composable
-private fun StockConfigDownloadSheet(
+internal fun StockConfigDownloadSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
