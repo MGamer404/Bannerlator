@@ -67,6 +67,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -300,10 +301,21 @@ internal fun DeckHome(
 
     val onFocus: (Shortcut) -> Unit = { focusedPath = it.file.path }
     val onMenu: (Shortcut) -> Unit = { menuFor = it }
+    // The view to return to when Back leaves the XMB (opening straight into the XMB returns to the shelf).
+    var beforeXmb by remember { mutableStateOf(LibraryMode.SHELF) }
     val setMode: (LibraryMode) -> Unit = { m ->
+        if (m == LibraryMode.XMB && mode != LibraryMode.XMB) beforeXmb = mode
         mode = m
         prefs.edit().putString(PREF_MODE, m.name).apply()
     }
+    // The XMB is full screen, like the Classic one: the shell hides its rails, bars and legend while it shows.
+    // Back (or B on the XMB's first option) leaves it for the previous view.
+    val xmbFull = mode == LibraryMode.XMB && visible.isNotEmpty()
+    DisposableEffect(xmbFull, deckActions) {
+        deckActions.fullscreen.value = xmbFull
+        onDispose { deckActions.fullscreen.value = false }
+    }
+    BackHandler(enabled = xmbFull) { setMode(beforeXmb) }
     val toolbar: @Composable () -> Unit = {
         LibraryToolbar(
             mode = mode,
@@ -449,19 +461,14 @@ internal fun DeckHome(
         }
         // The XMB fills the library area under the toolbar and takes the D-pad itself: Left/Right pick a game,
         // Down walks its options, Up from the top option goes back to the toolbar. L1/R1 stay the shell's.
-        LibraryMode.XMB -> Column(
+        LibraryMode.XMB -> if (visible.isEmpty()) Column(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize().padding(start = gutter, end = gutter, top = 16.dp, bottom = 16.dp),
         ) {
             toolbar()
-            if (visible.isEmpty()) emptyFiltered()
-            else Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .border(1.dp, deckLine(), RoundedCornerShape(18.dp)),
-            ) {
+            emptyFiltered()
+        } else {
+            Box(modifier = Modifier.fillMaxSize()) {
                 ShortcutsXmbView(
                     shortcuts = visible,
                     selectionMode = false,
@@ -474,7 +481,8 @@ internal fun DeckHome(
                     sdBadge = { XmbSdBadge(it) },
                     onReloadGames = { vm.refresh() },
                     onFocusedChange = onFocus,
-                    inDeckShell = true,
+                    // Full screen: the XMB hides the system bars in landscape and keeps L1/R1 for its jumps.
+                    inDeckShell = false,
                 )
             }
         }

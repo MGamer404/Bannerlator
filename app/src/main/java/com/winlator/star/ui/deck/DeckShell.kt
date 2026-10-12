@@ -321,7 +321,9 @@ private fun DeckShellContent(
     // and it is hidden again whenever this one resumes. The status bar stays.
     val activity = context as? android.app.Activity
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(rails, activity, lifecycleOwner) {
+    // Re-run when the full-screen XMB closes: it shows the system bars again on its way out.
+    val xmbShown = deckActions.fullscreen.value
+    DisposableEffect(rails, activity, lifecycleOwner, xmbShown) {
         val window = activity?.window
         if (!rails || window == null) return@DisposableEffect onDispose {}
         val controller = WindowCompat.getInsetsController(window, window.decorView)
@@ -437,9 +439,11 @@ private fun DeckShellContent(
                     deckActions.navHold.value = focused
                 }
                 val goBack = { if (backDispatcher != null) backDispatcher.onBackPressed() else nav.back() }
+                // Home's XMB view takes the whole screen; the XMB has its own hints, menus and game row.
+                val full = deckActions.fullscreen.value && currentRoute == DeckRoutes.HOME
                 // Landscape is rails | content; portrait keeps the top bar over the content. The NavHost stays in one slot either way.
                 Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    if (rails) {
+                    if (rails && !full) {
                         DeckSideRail(
                             cutoutStart = cutoutStart,
                             current = tab,
@@ -473,7 +477,9 @@ private fun DeckShellContent(
                         }
                     }
                     Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                        if (compact) {
+                        if (full) {
+                            // No top bar over the XMB.
+                        } else if (compact) {
                             DeckCompactTopBar(tab = tab, avatarUrl = account?.displayAvatarUrl, onAccount = onAccount, onSearch = openSearch)
                         } else if (!rails) {
                             DeckTopBar(
@@ -491,7 +497,9 @@ private fun DeckShellContent(
                         }
 
                         val pageTitle = deckActions.pageInfo.value
-                        if (rails) {
+                        if (full) {
+                            // No title line over the XMB.
+                        } else if (rails) {
                             // One slim line: the page's title (description behind the info button) and the screen's own actions.
                             // Home and the game page draw their own hero instead.
                             if (!isDeckPage(currentRoute)) {
@@ -605,7 +613,7 @@ private fun DeckShellContent(
                         // App-wide minimized progress pill for a running archive unpack (renders nothing when idle).
                         com.winlator.star.ui.UnpackProgressPill()
 
-                        if (!compact) {
+                        if (!compact && !full) {
                             DeckLegend(
                                 thin = rails,
                                 endInset = cutoutEnd,
@@ -621,7 +629,7 @@ private fun DeckShellContent(
                         }
                     }
                 }
-                if (compact) {
+                if (compact && !full) {
                     DeckBottomBar(current = tab, onTab = { nav.goTab(it) })
                 }
             }

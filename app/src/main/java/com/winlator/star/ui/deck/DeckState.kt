@@ -54,6 +54,8 @@ internal class DeckActions {
     val pageInfo: MutableState<DeckPageInfo?> = mutableStateOf(null)
     /** Landscape: the page's tabs, drawn by the shell as the second rail ([DeckTabStrip] registers them). */
     val pageTabs: MutableState<DeckPageTabs?> = mutableStateOf(null)
+    /** True while Home shows the full-screen XMB: the shell drops its rails, bars and legend (the XMB has its own). */
+    val fullscreen: MutableState<Boolean> = mutableStateOf(false)
 }
 
 /** A Deck page's title and one-line description, shown by the shell's title line in landscape. */
