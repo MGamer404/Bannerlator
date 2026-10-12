@@ -125,14 +125,15 @@ internal class PageExtra(val key: String, val content: @Composable () -> Unit)
 /**
  * What a category shows besides its setting rows: items above them ([top]) and below them ([bottom]),
  * built while the page draws so they follow the state they read. A category with an extra is listed
- * at every level. With [searchKey] set, Y on that page scrolls to that item and calls [focusSearch]
- * instead of searching every setting.
+ * from [level] up (every level by default), as well as wherever its rows are. With [searchKey] set, Y
+ * on that page scrolls to that item and calls [focusSearch] instead of searching every setting.
  */
 internal class CategoryExtra(
     val top: () -> List<PageExtra> = { emptyList() },
     val bottom: () -> List<PageExtra> = { emptyList() },
     val searchKey: String? = null,
     val focusSearch: () -> Unit = {},
+    val level: SettingLevel = SettingLevel.SIMPLE,
 )
 
 // The Simple / Advanced / Expert choice is remembered across editors.
@@ -186,7 +187,7 @@ internal fun DeckSettingsEditor(
     val rowsByCat = categories.associate { c -> c.id to defs.filter { it.category == c.id && applies(it) } }
     val shownByCat = rowsByCat.mapValues { (_, rows) -> rows.filter { it.level <= level } }
     val visibleCats = categories.filter { c ->
-        shownByCat[c.id].orEmpty().isNotEmpty() || extras.containsKey(c.id) ||
+        shownByCat[c.id].orEmpty().isNotEmpty() || extras[c.id]?.let { it.level <= level } == true ||
             (level != SettingLevel.SIMPLE && worldHandoffs[c.id].orEmpty().isNotEmpty())
     }
     val tracksOverrides = env.scope == EditorScope.GAME || env.scope == EditorScope.CONTAINER

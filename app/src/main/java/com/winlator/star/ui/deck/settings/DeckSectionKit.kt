@@ -67,6 +67,7 @@ internal fun mergeExtras(parts: List<Map<String, CategoryExtra>>): Map<String, C
                 bottom = { list.flatMap { it.bottom() } },
                 searchKey = search?.searchKey,
                 focusSearch = search?.focusSearch ?: {},
+                level = list.minOf { it.level },
             )
         }
     }

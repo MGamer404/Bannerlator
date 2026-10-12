@@ -259,6 +259,15 @@ private fun DeckGameSettings(path: String, navController: NavHostController) {
                     navController.popBackStack()
                     GamesScreenRequests.pending = GamesScreenRequests.Request(GameMenuAction.GAME_DETAILS, shortcut.file.path)
                 }
+                // Same for a new .exe or a copy to drive C: both repoint the entry this page holds.
+                SettingsRegistry.TARGET_CHANGE_EXE -> {
+                    navController.popBackStack()
+                    GamesScreenRequests.pending = GamesScreenRequests.Request(GameMenuAction.CHANGE_EXE, shortcut.file.path)
+                }
+                SettingsRegistry.TARGET_DRIVE_C -> {
+                    navController.popBackStack()
+                    GamesScreenRequests.pending = GamesScreenRequests.Request(GameMenuAction.COPY_TO_DRIVE_C, shortcut.file.path)
+                }
                 else -> {}
             }
         },
@@ -418,6 +427,8 @@ private fun deckSections(env: SettingsEnv, source: SettingsSource, scope: Corout
     DeckInputSection(env, source, scope),
     DeckOverlaySection(env, source, scope),
     DeckWindowsSection(env, source, scope),
+    DeckLinuxSection(env, source, scope),
+    DeckEnvVarsSection(env, source, scope),
 )
 
 /**

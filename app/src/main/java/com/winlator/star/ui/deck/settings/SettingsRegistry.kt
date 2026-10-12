@@ -79,6 +79,10 @@ internal object SettingsRegistry {
     const val TARGET_CLASSIC = "classic"
     /** A game's Game Details sheet (name, cover art, Steam link, genres), run by the Games screen. */
     const val TARGET_DETAILS = "details"
+    /** Change the program a game runs, over the current Deck page (the shell's game-actions host). */
+    const val TARGET_CHANGE_EXE = "change_exe"
+    /** Copy a game to drive C, over the current Deck page. */
+    const val TARGET_DRIVE_C = "drive_c"
     /** Information only, nothing to open. */
     const val TARGET_NONE = "none"
     /** Another category of this editor (see [categoryTarget]). */
@@ -89,17 +93,21 @@ internal object SettingsRegistry {
 
     fun categoryTarget(id: String) = TARGET_CATEGORY + id
 
-    /** Rows that open the classic editor (or another screen) for what is not edited here. Each names its worlds. */
+    /**
+     * Rows that open another screen (or say where something lives) for what is not edited here. Each
+     * names its worlds. None opens the classic editor any more ([TARGET_CLASSIC] stays handled by the
+     * screens for a hand-off that may need it again).
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun handoffs(scope: EditorScope, env: SettingsEnv): Map<String, List<Handoff>> {
         val game = scope == EditorScope.GAME
-        val where = if (game) "the classic game editor" else if (scope == EditorScope.DEFAULTS) "the classic defaults editor" else "the classic container editor"
-        fun h(label: String, hint: String, worlds: Set<World> = WINE_ONLY) = Handoff(label, "$hint Opens $where.", TARGET_CLASSIC, worlds)
         val m = linkedMapOf<String, List<Handoff>>()
         if (game) {
             m["game"] = listOf(
                 Handoff("Name, cover art and details", "Cover art from your files, Steam or SteamGridDB, the Steam link, genres, year and description (Game Details).", TARGET_DETAILS, ALL_WORLDS),
                 // The icon is picked on this page now (DeckIconSection); the file operations stay with the Games screen.
-                h("Program to run and storage", "Change the .exe or move the game to drive C (General tab)."),
+                Handoff("Change the program to run", "Pick another .exe in the game's folder for this entry.", TARGET_CHANGE_EXE, WINE_ONLY),
+                Handoff("Copy the game to drive C", "Copy the game's folder into the container's drive C and run it from there.", TARGET_DRIVE_C, WINE_ONLY),
             )
             m["launch"] = listOf(Handoff("Offline Steam mode, file checks and updates", "Goldberg mode, Verify files and Check for updates live in the launch menu. Turn off \"Skip the launch menu\" to see it on the next start.", TARGET_NONE))
         }
@@ -117,15 +125,9 @@ internal object SettingsRegistry {
             ),
             // The Wine layer, wallpaper and colours, the drives and Reset to app defaults are this page's own (DeckWindowsSettings).
         )
-        // The Linux runtime options live on the Linux Steam client entry only; containers have none.
-        if (game && env.isLinuxEntry) {
-            m["linux"] = listOf(h("Cores, Games folders and component swaps", "Steam client cores and game cores (Advanced tab), Games folders, and the FEX / DXVK / VKD3D-Proton swaps (Components tab).", LINUX_ONLY))
-        }
-        m["expert"] = listOf(
-            if (game) h("Environment variables", "Raw environment variables, merged over the container's, and game-folder DLL overrides (Env Vars tab).")
-            else h("Environment variables", "Raw environment variables every game in this container starts with (Env Vars tab)."),
-            h("Environment variables", "Raw environment variables for the session, and game-folder DLL preferences (Env Vars tab).", LINUX_ONLY),
-        )
+        // The Linux entry's cores, Games folders and component swaps are the Linux runtime page's own
+        // (LinuxRuntimeRows, DeckLinuxSection), and the environment variables the Expert page's
+        // (DeckEnvVarsSection), for every scope and world that had the classic Env Vars tab.
         return m
     }
 
@@ -1037,6 +1039,8 @@ internal object SettingsRegistry {
         ),
         // Sound latency preset, the microphone, and the env string the fine-tune dialog edits.
         *AudioRows.defs().toTypedArray(),
+        // Expert: the same env string, every variable of it (DeckEnvVarsSection).
+        *EnvVarRows.defs().toTypedArray(),
 
         // Controls
         SettingDef(
@@ -1494,6 +1498,8 @@ internal object SettingsRegistry {
             visible = { env, _ -> gameScope(env) },
             worlds = LINUX_ONLY,
         ),
+        // The Steam client and game core lists, and the Games folders' hidden row (DeckLinuxSettings).
+        *LinuxRuntimeRows.defs().toTypedArray(),
         linuxToggle("linux.appGames", LinuxTuning.EXTRA_APP_GAMES, "Your games in Steam", "Show my Games-tab games in Steam", ADVANCED,
             hint = "Games you added in the Games tab show in Steam's library under Non-Steam and run with Steam's Proton."),
         linuxToggle("linux.shareSaves", LinuxTuning.EXTRA_SHARE_SAVES, "Your games in Steam", "Share saves with the app", ADVANCED,

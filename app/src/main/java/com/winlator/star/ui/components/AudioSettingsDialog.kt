@@ -269,7 +269,10 @@ private fun engTag(driverId: String) = when (driverId) {
  *  audio keys and all non-audio env — so setting ALSA never disturbs the scope's Pulse config. */
 fun audioConfigToEnv(existingEnv: String, c: AudioConfig, driverId: String): String {
     val pfx = "BANNER_AUDIO_${engTag(driverId)}_"
-    val keep = existingEnv.split(" ").filter { it.isNotBlank() && !it.startsWith(pfx) }
+    // Only the keys this dialog writes are replaced: DirectAudio's prefix also covers the microphone
+    // switch (BANNER_AUDIO_DIRECT_MIC) and hand-set tuning keys, which must survive a save.
+    val owned = setOf("PRESET", "PERF", "ADAPTIVE", "LAT", "BF", "MBF").map { "$pfx$it=" }
+    val keep = existingEnv.split(" ").filter { t -> t.isNotBlank() && owned.none { t.startsWith(it) } }
     val add = mutableListOf(
         "${pfx}PRESET=${c.preset}", "${pfx}PERF=${c.perfMode}",
         "${pfx}ADAPTIVE=${if (c.adaptive) 1 else 0}", "${pfx}LAT=${c.latencyMsec}"
