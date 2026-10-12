@@ -122,6 +122,12 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.union
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.outlined.Info
@@ -414,7 +420,15 @@ private fun DeckShellContent(
                     )
                 },
         ) {
-            Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
+            // Landscape: a camera hole on a short edge is not left as an empty strip. The side rail's glass runs under it with its
+            // icons clear of it; on the other side the page background runs under it and only the page, not the legend, keeps clear.
+            val dir = LocalLayoutDirection.current
+            val cutout = WindowInsets.displayCutout.asPaddingValues()
+            val cutoutStart = if (rails) cutout.calculateStartPadding(dir) else 0.dp
+            val cutoutEnd = if (rails) cutout.calculateEndPadding(dir) else 0.dp
+            val insets = if (rails) WindowInsets.systemBars.union(WindowInsets.displayCutout.only(WindowInsetsSides.Vertical))
+                else WindowInsets.systemBars.union(WindowInsets.displayCutout)
+            Column(modifier = Modifier.fillMaxSize().windowInsetsPadding(insets)) {
                 val onAccount = {
                     // Same as the drawer's account row: the My-account sheet lives on the Games screen.
                     nav.open(Screen.Games.route)
@@ -429,6 +443,7 @@ private fun DeckShellContent(
                 Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     if (rails) {
                         DeckSideRail(
+                            cutoutStart = cutoutStart,
                             current = tab,
                             tabRequesters = tabRequesters,
                             avatarUrl = account?.displayAvatarUrl,
@@ -483,6 +498,7 @@ private fun DeckShellContent(
                             // Home and the game page draw their own hero instead.
                             if (!isDeckPage(currentRoute)) {
                                 DeckTitleLine(
+                                    endInset = cutoutEnd,
                                     title = deckPageTitle(context, currentRoute, backstackEntry?.arguments?.getInt("id") ?: -1),
                                     description = null,
                                     showBack = currentRoute != tab.root && !settingsPages,
@@ -491,6 +507,7 @@ private fun DeckShellContent(
                                 )
                             } else if (pageTitle != null && currentRoute != DeckRoutes.HOME && !currentRoute.startsWith("deck_game")) {
                                 DeckTitleLine(
+                                    endInset = cutoutEnd,
                                     title = pageTitle.title,
                                     description = pageTitle.description,
                                     showBack = false,
@@ -511,7 +528,7 @@ private fun DeckShellContent(
                             )
                         }
 
-                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth().padding(end = cutoutEnd)) {
                             CompositionLocalProvider(
                                 LocalHostedInDeck provides rails,
                                 LocalDeckSideLists provides sideLists,
@@ -592,6 +609,7 @@ private fun DeckShellContent(
                         if (!compact) {
                             DeckLegend(
                                 thin = rails,
+                                endInset = cutoutEnd,
                                 atHome = currentRoute == DeckRoutes.HOME,
                                 subTabLabel = if (deckActions.subTab.value != null) deckActions.subTabLabel.value else null,
                                 optionsLabel = if (deckActions.options.value != null) deckActions.optionsLabel.value else null,
@@ -961,6 +979,7 @@ private val DECK_RAIL_WIDTH = 68.dp
  */
 @Composable
 private fun DeckSideRail(
+    cutoutStart: Dp,
     current: DeckTab,
     tabRequesters: Map<DeckTab, FocusRequester>,
     avatarUrl: String?,
@@ -974,10 +993,11 @@ private fun DeckSideRail(
     val line = deckLine()
     BoxWithConstraints(
         modifier = Modifier
-            .width(DECK_RAIL_WIDTH)
+            .width(DECK_RAIL_WIDTH + cutoutStart)
             .fillMaxHeight()
             .background(deckGlass())
-            .drawBehind { drawRect(line, topLeft = Offset(size.width - 1f, 0f), size = Size(1f, size.height)) },
+            .drawBehind { drawRect(line, topLeft = Offset(size.width - 1f, 0f), size = Size(1f, size.height)) }
+            .padding(start = cutoutStart),
     ) {
         val roomy = maxHeight >= 560.dp
         val short = maxHeight < DECK_RAIL_SHORT
@@ -1230,6 +1250,7 @@ private fun DeckPageTabRail(
  */
 @Composable
 private fun DeckTitleLine(
+    endInset: Dp,
     title: String,
     description: String?,
     showBack: Boolean,
@@ -1245,7 +1266,7 @@ private fun DeckTitleLine(
             .fillMaxWidth()
             .heightIn(min = 40.dp)
             .drawBehind { drawRect(line, topLeft = Offset(0f, size.height - 1f), size = Size(size.width, 1f)) }
-            .padding(start = if (showBack) 4.dp else 18.dp, end = 8.dp),
+            .padding(start = if (showBack) 4.dp else 18.dp, end = 8.dp + endInset),
     ) {
         if (showBack) {
             Box(
@@ -1376,6 +1397,7 @@ private fun DeckPageBar(
 @Composable
 private fun DeckLegend(
     thin: Boolean,
+    endInset: Dp,
     atHome: Boolean,
     subTabLabel: String?,
     optionsLabel: String?,
@@ -1395,7 +1417,7 @@ private fun DeckLegend(
             .height(if (thin) 40.dp else 42.dp)
             .background(deckGlass())
             .drawBehind { drawRect(line, topLeft = Offset.Zero, size = Size(size.width, 1f)) }
-            .padding(horizontal = if (thin) 12.dp else 16.dp),
+            .padding(start = if (thin) 12.dp else 16.dp, end = (if (thin) 12.dp else 16.dp) + endInset),
     ) {
         LegendItem(listOf("L1" to GlyphKind.BUMPER, "R1" to GlyphKind.BUMPER), "Menu", thin, onCycle)
         if (subTabLabel != null) LegendItem(listOf("L2" to GlyphKind.BUMPER, "R2" to GlyphKind.BUMPER), subTabLabel, thin, onSubCycle)

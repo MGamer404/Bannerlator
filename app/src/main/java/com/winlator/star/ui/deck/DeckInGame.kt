@@ -165,7 +165,8 @@ fun DeckInGameOverlay() {
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxWidth < 600.dp
-        val menuWidth = if (compact) maxWidth else (maxWidth * 0.86f).coerceAtMost(1100.dp)
+        // The game menu leaves most of the game in view: about two thirds of the width, at least what its rail and a page need.
+        val menuWidth = if (compact) maxWidth else (maxWidth * 0.64f).coerceIn(minOf(560.dp, maxWidth), 900.dp)
         val quickWidth = if (compact) maxWidth else (maxWidth * 0.42f).coerceIn(340.dp, 470.dp)
         CompositionLocalProvider(LocalIgCompact provides compact) {
             // Behind a panel: the full menu dims the game, the quick menu leaves it visible. A tap there closes either one.

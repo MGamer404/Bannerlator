@@ -13,6 +13,10 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,13 +86,25 @@ internal fun DeckTheme(content: @Composable () -> Unit) {
         large      = RoundedCornerShape(18.dp),
         extraLarge = RoundedCornerShape(24.dp),
     )
-    MaterialTheme(
-        colorScheme = MaterialTheme.colorScheme,
-        typography = typography,
-        shapes = shapes,
-        content = content,
-    )
+    // The Deck style is drawn DECK_UI_SCALE smaller than the rest of the app (on top of the interface-size setting),
+    // so a phone or handheld at its stock display size has room for the console layout. Once only: a dialog's
+    // DeckTheme inside a Deck screen inherits the scaled density.
+    val outer = LocalDensity.current
+    val density = if (LocalDeckScaled.current) outer else Density(outer.density * DECK_UI_SCALE, outer.fontScale)
+    CompositionLocalProvider(LocalDensity provides density, LocalDeckScaled provides true) {
+        MaterialTheme(
+            colorScheme = MaterialTheme.colorScheme,
+            typography = typography,
+            shapes = shapes,
+            content = content,
+        )
+    }
 }
+
+/** How much smaller the Deck style draws than the rest of the app. */
+internal const val DECK_UI_SCALE = 0.8f
+
+private val LocalDeckScaled = staticCompositionLocalOf { false }
 
 /** Translucent bar fill (top strip, legend, bottom bar): the theme background at 72%. */
 @Composable
