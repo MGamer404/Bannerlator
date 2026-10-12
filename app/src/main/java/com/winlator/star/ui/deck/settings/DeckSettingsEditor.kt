@@ -90,7 +90,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.preference.PreferenceManager
-import com.winlator.star.ui.deck.DECK_COMPACT_WIDTH_DP
+import com.winlator.star.ui.deck.isDeckCompact
 import com.winlator.star.ui.deck.DeckGlyph
 import com.winlator.star.ui.deck.GlyphKind
 import com.winlator.star.ui.deck.LocalDeckActions
@@ -143,7 +143,7 @@ internal fun DeckSettingsEditor(
 ) {
     val context = LocalContext.current
     val env = source.env
-    val compact = LocalConfiguration.current.screenWidthDp < DECK_COMPACT_WIDTH_DP
+    val compact = isDeckCompact(LocalConfiguration.current)
     val prefs = remember { PreferenceManager.getDefaultSharedPreferences(context) }
     var level by remember {
         mutableStateOf(runCatching { SettingLevel.valueOf(prefs.getString(LEVEL_PREF, null) ?: "") }.getOrDefault(SettingLevel.SIMPLE))
@@ -330,7 +330,7 @@ internal fun DeckSettingsEditor(
                     )
                 }
             } else {
-                val listWidth = (LocalConfiguration.current.screenWidthDp * 0.28f).dp.coerceIn(210.dp, 300.dp)
+                val listWidth = (LocalConfiguration.current.screenWidthDp * 0.28f).dp.coerceIn(180.dp, 300.dp)
                 Row(modifier = Modifier.fillMaxSize()) {
                     CategoryList(
                         categories = visibleCats,

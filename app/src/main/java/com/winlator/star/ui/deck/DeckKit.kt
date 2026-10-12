@@ -57,11 +57,19 @@ import androidx.compose.ui.unit.sp
 /** Page side gutter: 16 dp on a phone, 24 dp in landscape. */
 @Composable
 internal fun deckGutter(): Dp =
-    if (LocalConfiguration.current.screenWidthDp < DECK_COMPACT_WIDTH_DP) 16.dp else 24.dp
+    if (deckCompact()) 16.dp else 24.dp
 
-/** True below the phone breakpoint, where pages stack instead of splitting into columns. */
+/**
+ * The phone layout: a portrait screen narrower than [DECK_COMPACT_WIDTH_DP], or a landscape one narrower than
+ * [DECK_RAILS_MIN_WIDTH_DP]. A 1080p phone or handheld at the stock or a larger display size is 640-700 dp wide in
+ * landscape, so landscape keeps the console layout well below the portrait breakpoint.
+ */
+internal fun isDeckCompact(cfg: Configuration): Boolean =
+    cfg.screenWidthDp < if (cfg.orientation == Configuration.ORIENTATION_LANDSCAPE) DECK_RAILS_MIN_WIDTH_DP else DECK_COMPACT_WIDTH_DP
+
+/** True in the phone layout ([isDeckCompact]), where pages stack instead of splitting into columns. */
 @Composable
-internal fun deckCompact(): Boolean = LocalConfiguration.current.screenWidthDp < DECK_COMPACT_WIDTH_DP
+internal fun deckCompact(): Boolean = isDeckCompact(LocalConfiguration.current)
 
 /**
  * The landscape frame: main tabs and page tabs as side rails, one slim title line, no page headers.
@@ -70,7 +78,7 @@ internal fun deckCompact(): Boolean = LocalConfiguration.current.screenWidthDp <
 @Composable
 internal fun deckRails(): Boolean {
     val cfg = LocalConfiguration.current
-    return cfg.screenWidthDp >= DECK_COMPACT_WIDTH_DP && cfg.orientation == Configuration.ORIENTATION_LANDSCAPE
+    return cfg.orientation == Configuration.ORIENTATION_LANDSCAPE && !isDeckCompact(cfg)
 }
 
 /**

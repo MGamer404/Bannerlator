@@ -217,7 +217,7 @@ internal fun DeckHome(
     val shortcuts by vm.shortcuts.collectAsState(initial = emptyList())
     val context = LocalContext.current
     val cfg = LocalConfiguration.current
-    val compact = cfg.screenWidthDp < DECK_COMPACT_WIDTH_DP
+    val compact = isDeckCompact(cfg)
     val rails = deckRails()
     val launcher = rememberShortcutLauncher()
     val actions = rememberShortcutActions(vm)

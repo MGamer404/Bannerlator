@@ -137,8 +137,11 @@ import com.winlator.star.ui.DeckWindow
 import com.winlator.star.ui.LocalDeckSideLists
 import com.winlator.star.ui.LocalHostedInDeck
 
-/** Below this width (dp) the Deck shell uses the phone layout: bottom bar, no legend. */
+/** Below this width (dp) a portrait Deck shell uses the phone layout: bottom bar, no legend. */
 internal const val DECK_COMPACT_WIDTH_DP = 720
+
+/** Below this width (dp) a landscape Deck shell uses the phone layout too; above it, rails and legend (see isDeckCompact). */
+internal const val DECK_RAILS_MIN_WIDTH_DP = 560
 
 /** Below this width (dp) only the selected tab keeps its label in the top strip. */
 private const val DECK_WIDE_TABS_DP = 1100
@@ -210,7 +213,7 @@ private fun DeckShellContent(
     val context = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val cfg = LocalConfiguration.current
-    val compact = cfg.screenWidthDp < DECK_COMPACT_WIDTH_DP
+    val compact = isDeckCompact(cfg)
     // Landscape: side rails instead of the top bar (deckRails).
     val rails = deckRails()
     val railsNow by rememberUpdatedState(rails)
