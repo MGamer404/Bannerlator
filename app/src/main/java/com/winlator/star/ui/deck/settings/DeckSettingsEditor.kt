@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Add
@@ -117,6 +118,22 @@ internal class EditorHeader(
     val meta: String? = null,
 )
 
+/** One item a category page shows that is not a setting row. [key] is unique on the page. */
+internal class PageExtra(val key: String, val content: @Composable () -> Unit)
+
+/**
+ * What a category shows besides its setting rows: items above them ([top]) and below them ([bottom]),
+ * built while the page draws so they follow the state they read. A category with an extra is listed
+ * at every level. With [searchKey] set, Y on that page scrolls to that item and calls [focusSearch]
+ * instead of searching every setting.
+ */
+internal class CategoryExtra(
+    val top: () -> List<PageExtra> = { emptyList() },
+    val bottom: () -> List<PageExtra> = { emptyList() },
+    val searchKey: String? = null,
+    val focusSearch: () -> Unit = {},
+)
+
 // The Simple / Advanced / Expert choice is remembered across editors.
 private const val LEVEL_PREF = "deck_settings_level"
 
@@ -128,6 +145,7 @@ private const val LEVEL_PREF = "deck_settings_level"
  * whose rows are all handed off still list them, each opening the classic editor via [onHandoff].
  *
  * [onExit] is null when the editor is a tab's root page; Back then belongs to the Deck shell.
+ * [extras] adds content that is not a setting to a category's page (the Windows components lists).
  */
 @Composable
 internal fun DeckSettingsEditor(
@@ -140,6 +158,7 @@ internal fun DeckSettingsEditor(
     onHandoff: (Handoff) -> Unit,
     onChainLink: ((ChainLink) -> Unit)? = null,
     headerExtra: (@Composable () -> Unit)? = null,
+    extras: Map<String, CategoryExtra> = emptyMap(),
 ) {
     val context = LocalContext.current
     val env = source.env
@@ -166,7 +185,8 @@ internal fun DeckSettingsEditor(
     val rowsByCat = categories.associate { c -> c.id to defs.filter { it.category == c.id && applies(it) } }
     val shownByCat = rowsByCat.mapValues { (_, rows) -> rows.filter { it.level <= level } }
     val visibleCats = categories.filter { c ->
-        shownByCat[c.id].orEmpty().isNotEmpty() || (level != SettingLevel.SIMPLE && worldHandoffs[c.id].orEmpty().isNotEmpty())
+        shownByCat[c.id].orEmpty().isNotEmpty() || extras.containsKey(c.id) ||
+            (level != SettingLevel.SIMPLE && worldHandoffs[c.id].orEmpty().isNotEmpty())
     }
     val tracksOverrides = env.scope == EditorScope.GAME || env.scope == EditorScope.CONTAINER
     fun overrides(catId: String): List<SettingDef> =
@@ -184,6 +204,10 @@ internal fun DeckSettingsEditor(
     var saving by remember { mutableStateOf(false) }
     var jumpTo by remember { mutableStateOf<String?>(null) }
     var flash by remember { mutableStateOf<String?>(null) }
+    // The category whose own search field Y asked for (its CategoryExtra.searchKey).
+    var extraSearchFor by remember { mutableStateOf<String?>(null) }
+    // Bumped when a hand-off opens another category, so the controller lands on it in the list.
+    var listFocus by remember { mutableStateOf(0) }
 
     val pick: (SettingDef, String) -> Unit = { def, v ->
         val ask = def.confirm?.invoke(v)
@@ -209,6 +233,18 @@ internal fun DeckSettingsEditor(
         phonePage = true
     }
 
+    // A hand-off to another category of this editor opens it here (raising the level when it has nothing at this one).
+    val handoff: (Handoff) -> Unit = { h ->
+        if (h.target.startsWith(SettingsRegistry.TARGET_CATEGORY)) {
+            val id = h.target.removePrefix(SettingsRegistry.TARGET_CATEGORY)
+            if (visibleCats.none { it.id == id } && level == SettingLevel.SIMPLE) changeLevel(SettingLevel.ADVANCED)
+            openCategory(id)
+            listFocus++
+        } else {
+            guard { onHandoff(h) }
+        }
+    }
+
     BackHandler(enabled = query != null || (compact && phonePage) || onExit != null) {
         when {
             query != null -> query = null
@@ -229,7 +265,11 @@ internal fun DeckSettingsEditor(
         }
         onDispose { if (deckActions.options.value === act) deckActions.options.value = null }
     }
-    val searchNow by rememberUpdatedState { query = query ?: "" }
+    val searchNow by rememberUpdatedState {
+        // A page with a search of its own (Windows components) takes Y; everywhere else it searches every setting.
+        val own = current?.takeIf { query == null && (!compact || phonePage) && extras[it.id]?.searchKey != null }
+        if (own != null) extraSearchFor = own.id else query = query ?: ""
+    }
     val stepNow by rememberUpdatedState { delta: Int ->
         if (visibleCats.isNotEmpty()) {
             val i = visibleCats.indexOfFirst { it.id == current?.id }.coerceAtLeast(0)
@@ -289,7 +329,7 @@ internal fun DeckSettingsEditor(
                             jumpTo = def.id
                             flash = def.id
                         },
-                        onHandoff = { h -> guard { onHandoff(h) } },
+                        onHandoff = handoff,
                         modifier = mod,
                     )
                 } else if (current != null) {
@@ -310,8 +350,11 @@ internal fun DeckSettingsEditor(
                         onCustom = { customFor = it },
                         onHelp = { helpFor = it },
                         onResetAll = { over.forEach { source.reset(it) } },
-                        onHandoff = { h -> guard { onHandoff(h) } },
+                        onHandoff = handoff,
                         onBack = if (compact) ({ phonePage = false }) else null,
+                        extra = extras[current.id],
+                        searchRequested = extraSearchFor == current.id,
+                        onSearchDone = { extraSearchFor = null },
                         modifier = mod,
                     )
                 }
@@ -338,6 +381,7 @@ internal fun DeckSettingsEditor(
                         badge = { overrides(it).size },
                         compact = false,
                         onSelect = { selected = it.id; query = null },
+                        focusKey = listFocus,
                         modifier = Modifier.width(listWidth).fillMaxHeight(),
                     )
                     page(Modifier.weight(1f).fillMaxHeight())
@@ -601,11 +645,12 @@ private fun CategoryList(
     badge: (String) -> Int,
     compact: Boolean,
     onSelect: (SettingsCategory) -> Unit,
+    focusKey: Int = 0,
     modifier: Modifier,
 ) {
     val requester = remember { FocusRequester() }
-    // The controller starts on the list, on the category being shown.
-    DeckEntryFocus { requester.requestFocus() }
+    // The controller starts on the list, on the category being shown (and comes back to it when [focusKey] changes).
+    DeckEntryFocus(focusKey) { requester.requestFocus() }
     LazyColumn(
         modifier = modifier,
         contentPadding = PaddingValues(start = if (compact) 16.dp else 20.dp, end = if (compact) 16.dp else 8.dp, top = 6.dp, bottom = 24.dp),
@@ -696,6 +741,7 @@ private class ResetAllItem(val count: Int) : PageItem { override val key = "rese
 private class GroupItem(val label: String) : PageItem { override val key = "group:$label" }
 private class RowItem(val def: SettingDef, val first: Boolean, val last: Boolean) : PageItem { override val key = "row:${def.id}" }
 private class HandoffItem(val handoff: Handoff, val first: Boolean, val last: Boolean) : PageItem { override val key = "handoff:${handoff.label}" }
+private class ExtraItem(val extra: PageExtra) : PageItem { override val key = "extra:${extra.key}" }
 
 @Composable
 private fun CategoryPage(
@@ -716,15 +762,20 @@ private fun CategoryPage(
     onResetAll: () -> Unit,
     onHandoff: (Handoff) -> Unit,
     onBack: (() -> Unit)?,
+    extra: CategoryExtra?,
+    searchRequested: Boolean,
+    onSearchDone: () -> Unit,
     modifier: Modifier,
 ) {
     val pageItems = buildList<PageItem> {
         add(HeaderItem)
         if (overrideCount > 0) add(ResetAllItem(overrideCount))
+        extra?.top?.invoke()?.forEach { add(ExtraItem(it)) }
         rows.groupBy { it.group }.forEach { (group, defs) ->
             add(GroupItem(group))
             defs.forEachIndexed { i, d -> add(RowItem(d, first = i == 0, last = i == defs.lastIndex)) }
         }
+        extra?.bottom?.invoke()?.forEach { add(ExtraItem(it)) }
         if (handoffs.isNotEmpty()) {
             add(GroupItem(if (rows.isEmpty()) "In the classic editor" else "More settings"))
             handoffs.forEachIndexed { i, h -> add(HandoffItem(h, first = i == 0, last = i == handoffs.lastIndex)) }
@@ -736,6 +787,18 @@ private fun CategoryPage(
         val index = pageItems.indexOfFirst { it.key == "row:$id" }
         if (index >= 0) listState.animateScrollToItem(index)
         onJumpDone()
+    }
+    // Y on a page with its own search: bring the field into view, then focus it.
+    LaunchedEffect(searchRequested, category.id) {
+        if (!searchRequested) return@LaunchedEffect
+        val key = extra?.searchKey
+        val index = if (key == null) -1 else pageItems.indexOfFirst { it.key == "extra:$key" }
+        if (index >= 0) {
+            listState.scrollToItem(index)
+            withFrameNanos { }
+            runCatching { extra?.focusSearch?.invoke() }
+        }
+        onSearchDone()
     }
     BoxWithConstraints(modifier = modifier) {
         val wideRows = maxWidth >= 560.dp
@@ -767,6 +830,7 @@ private fun CategoryPage(
                     is HandoffItem -> GroupCard(item.first, item.last, highlight = false) {
                         HandoffRow(item.handoff, onHandoff)
                     }
+                    is ExtraItem -> item.extra.content()
                 }
             }
         }
@@ -812,7 +876,7 @@ private fun ResetAllButton(count: Int, onClick: () -> Unit) {
 }
 
 @Composable
-private fun GroupLabel(label: String) {
+internal fun GroupLabel(label: String) {
     Text(
         text = label.uppercase(),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -825,7 +889,7 @@ private fun GroupLabel(label: String) {
 
 /** One slice of a rounded group card: rows stack into a single card, with a hairline between them. */
 @Composable
-private fun GroupCard(first: Boolean, last: Boolean, highlight: Boolean, content: @Composable () -> Unit) {
+internal fun GroupCard(first: Boolean, last: Boolean, highlight: Boolean, content: @Composable () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val top = if (first) 18.dp else 0.dp
     val bottom = if (last) 18.dp else 0.dp
@@ -1273,6 +1337,7 @@ private fun CoresControl(value: String, enabled: Boolean, onPick: (String) -> Un
 private fun HandoffRow(handoff: Handoff, onHandoff: (Handoff) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val opens = handoff.target != "none"
+    val here = handoff.target.startsWith(SettingsRegistry.TARGET_CATEGORY)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -1281,7 +1346,11 @@ private fun HandoffRow(handoff: Handoff, onHandoff: (Handoff) -> Unit) {
             .padding(horizontal = 18.dp, vertical = 14.dp),
     ) {
         Icon(
-            imageVector = if (opens) Icons.AutoMirrored.Filled.OpenInNew else Icons.Filled.Info,
+            imageVector = when {
+                here -> Icons.AutoMirrored.Filled.ArrowForward
+                opens -> Icons.AutoMirrored.Filled.OpenInNew
+                else -> Icons.Filled.Info
+            },
             contentDescription = null,
             tint = cs.primary,
             modifier = Modifier.size(22.dp),
@@ -1360,7 +1429,8 @@ private fun SearchPane(
                 )
             }
             items(handoffResults, key = { "h:${it.first}:${it.second.label}" }) { (cat, h) ->
-                SearchResult(title = h.label, path = "${catLabel[cat] ?: cat} › Classic editor", value = null, badge = null, onClick = { onHandoff(h) })
+                val where = if (h.target.startsWith(SettingsRegistry.TARGET_CATEGORY)) "Opens its page" else "Classic editor"
+                SearchResult(title = h.label, path = "${catLabel[cat] ?: cat} › $where", value = null, badge = null, onClick = { onHandoff(h) })
             }
         }
     }

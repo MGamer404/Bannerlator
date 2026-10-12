@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.WebAsset
+import androidx.compose.material.icons.filled.Widgets
 import com.winlator.star.FeatureFlags
 import com.winlator.star.container.Container
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
@@ -66,7 +67,8 @@ internal object SettingsRegistry {
         SettingsCategory("audio", "Audio", "Sound driver and MIDI music.", Icons.AutoMirrored.Filled.VolumeUp),
         SettingsCategory("input", "Controls", "Controllers, on-screen controls, mouse and touch, rumble and motion aim.", Icons.Filled.Gamepad),
         SettingsCategory("hud", "Performance overlay", "The on-screen FPS and temperature readout.", Icons.Filled.MonitorHeart),
-        SettingsCategory("windows", "Windows", "Container name, language, media codecs, desktop and session behaviour.", Icons.Filled.WebAsset),
+        SettingsCategory("windows", "Windows", "Container name, language, desktop and session behaviour.", Icons.Filled.WebAsset),
+        SettingsCategory(CAT_COMPONENTS, "Windows components", "Install runtimes and libraries into the container, and pick Wine's or Microsoft's DLLs.", Icons.Filled.Widgets),
         SettingsCategory("linux", "Linux runtime", "Only for the Linux Steam client entry: its drivers, Steam client options and speed tweaks.", Icons.Filled.Terminal),
         SettingsCategory("expert", "Expert", "Raw environment variables and translator variables.", Icons.Filled.Build),
     )
@@ -79,6 +81,13 @@ internal object SettingsRegistry {
     const val TARGET_DETAILS = "details"
     /** Information only, nothing to open. */
     const val TARGET_NONE = "none"
+    /** Another category of this editor (see [categoryTarget]). */
+    const val TARGET_CATEGORY = "category:"
+
+    /** The Windows components page: install lists (DeckComponentsPage) above and below its DLL rows. */
+    const val CAT_COMPONENTS = "components"
+
+    fun categoryTarget(id: String) = TARGET_CATEGORY + id
 
     /** Rows that open the classic editor (or another screen) for what is not edited here. Each names its worlds. */
     fun handoffs(scope: EditorScope, env: SettingsEnv): Map<String, List<Handoff>> {
@@ -115,8 +124,13 @@ internal object SettingsRegistry {
         )
         if (!game) m["hud"] = listOf(h("Overlay style and metrics", "Style, size, metrics and temperature alerts. Also changeable in-game from the side menu."))
         m["windows"] = listOfNotNull(
-            if (game) h("Windows components", "Builtin or native DLLs for DirectX, audio and runtimes, and the recommended components to install (Win Components tab).")
-            else h("Windows components", "Builtin or native DLLs for DirectX, audio and runtimes (Win Components tab), and Browse & install components for an existing container."),
+            // Its own page now: the install lists and the builtin / native DLL rows (CAT_COMPONENTS).
+            Handoff(
+                "Windows components",
+                if (scope == EditorScope.DEFAULTS) "Builtin or native DLLs for DirectX, audio and runtimes, and the media codecs."
+                else "Install runtimes and libraries into the container, and pick builtin or native DLLs for DirectX, audio and runtimes.",
+                categoryTarget(CAT_COMPONENTS),
+            ),
             if (scope == EditorScope.CONTAINER) h("Drives", "Drive letters D: to Z: and the folders behind them. Duplicate letters are checked there (Drives tab).") else null,
             if (scope == EditorScope.CONTAINER) h("Wine / Proton version and wallpaper", "The Wine layer and its download gear; the wallpaper and colours are under the Wine config section.") else null,
             if (scope == EditorScope.DEFAULTS) h("Desktop wallpaper and colours", "Background image or colour, and whether it applies to every container.") else null,
@@ -1308,10 +1322,6 @@ internal object SettingsRegistry {
             vm = vmString({ it.lcAll }, { vm, v -> vm.lcAll = v }),
             game = key("lc_all"),
         ),
-        codecRow("windows.codecBackend", MediaDecoder.KEY_BACKEND, "Video decoder",
-            "Which backend Media Foundation plays cutscenes with. FFmpeg needs an arm64ec layer built with it (Proton 11.0-2 vc12+); elsewhere it falls back to GStreamer."),
-        codecRow("windows.softwareDecoding", MediaDecoder.KEY_SOFTWARE_DECODING, "Software video decoding",
-            "Keeps video frames off the GPU. Try it for black video with sound."),
         SettingDef(
             id = "windows.closeOnExit", category = "windows", group = "System", level = ADVANCED,
             label = "Close the session when the game exits", tech = "Close when game exits",
@@ -1333,6 +1343,20 @@ internal object SettingsRegistry {
             vm = vmInt({ it.desktopThemeIndex }, { vm, v -> vm.desktopThemeIndex = v }),
             showInGame = false,
         ),
+
+        // Windows components: the classic Win Components tab's choices. The install lists around them are
+        // not settings; the editor's host adds them (DeckComponentsPage).
+        dllRow("components.direct3d", "direct3d", "Direct3D", "DirectX"),
+        dllRow("components.directsound", "directsound", "DirectSound", "DirectX"),
+        dllRow("components.directmusic", "directmusic", "DirectMusic", "DirectX"),
+        dllRow("components.directshow", "directshow", "DirectShow", "DirectX"),
+        dllRow("components.directplay", "directplay", "DirectPlay", "DirectX"),
+        dllRow("components.xaudio", "xaudio", "XAudio", "Audio and runtimes"),
+        dllRow("components.vcrun2010", "vcrun2010", "Visual C++ 2010", "Audio and runtimes"),
+        codecRow("windows.codecBackend", MediaDecoder.KEY_BACKEND, "Video decoder",
+            "Which backend Media Foundation plays cutscenes with. FFmpeg needs an arm64ec layer built with it (Proton 11.0-2 vc12+); elsewhere it falls back to GStreamer."),
+        codecRow("windows.softwareDecoding", MediaDecoder.KEY_SOFTWARE_DECODING, "Software video decoding",
+            "Keeps video frames off the GPU. Try it for black video with sound."),
 
         // Linux runtime: the Linux Steam client entry only (the classic game editor's isLinuxEntry rows).
         SettingDef(
@@ -1509,15 +1533,28 @@ internal object SettingsRegistry {
         visible = { env, values -> gameScope(env) && show(values) },
     )
 
+    /** A builtin-or-native DLL row of the Win Components string (index 0 = Wine's, 1 = Microsoft's), as the classic tab offers it. */
+    private fun dllRow(id: String, key: String, label: String, group: String) = wcRow(
+        id, key, label, group, hint = null,
+        help = "Builtin (Wine) uses Wine's own $label. Native (Windows) puts Microsoft's DLLs in the container and uses those instead. Change it only for a game that needs it.",
+        options = listOf("Builtin (Wine)", "Native (Windows)"),
+    )
+
     /**
      * A Codecs row. Codecs are two keys of the Win Components string, but media backends rather than
-     * DLL overrides, so they get their own options (MediaDecoder). A game keeps a components string of
-     * its own only while it differs from the container's.
+     * DLL overrides, so they get their own options (MediaDecoder).
      */
-    private fun codecRow(id: String, key: String, label: String, hint: String) = SettingDef(
-        id = id, category = "windows", group = "Media codecs", level = ADVANCED,
-        label = label, hint = hint, tech = "$WINCOMPONENTS › $key",
-        control = { _, _ -> Control.Segmented(MediaDecoder.optionsFor(key).mapIndexed { i, name -> Opt("$i", name) }) },
+    private fun codecRow(id: String, key: String, label: String, hint: String) =
+        wcRow(id, key, label, "Media codecs", hint = hint, help = null, options = MediaDecoder.optionsFor(key).toList())
+
+    /**
+     * One key of the Win Components string ("key=index,..."). A game keeps a components string of its
+     * own only while it differs from the container's.
+     */
+    private fun wcRow(id: String, key: String, label: String, group: String, hint: String?, help: String?, options: List<String>) = SettingDef(
+        id = id, category = CAT_COMPONENTS, group = group, level = ADVANCED,
+        label = label, hint = hint, help = help, tech = "$WINCOMPONENTS › $key",
+        control = { _, _ -> Control.Segmented(options.mapIndexed { i, name -> Opt("$i", name) }) },
         vm = VmBinding(
             get = { _, vm -> (vm.winComponents.firstOrNull { it.key == key }?.selectedIndex ?: 0).toString() },
             set = { _, vm, v ->
@@ -1537,7 +1574,7 @@ internal object SettingsRegistry {
                 if (e.get(WINCOMPONENTS) != null) e.put(WINCOMPONENTS, wcGameWith(e, key, wcIndex(e.container.getWinComponents(), key) ?: 0))
             },
         ),
-        // Shown where the components list carries the key, as the classic Codecs section is.
+        // Shown where the components list carries the key, as the classic Win Components tab shows it.
         visible = { env, _ ->
             env.vm?.winComponents?.any { it.key == key } == true ||
                 wcIndex(env.shortcut?.getExtra(WINCOMPONENTS), key) != null

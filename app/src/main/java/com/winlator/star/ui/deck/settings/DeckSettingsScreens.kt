@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -44,6 +45,8 @@ import androidx.navigation.navArgument
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.NewContainerDefaults
+import com.winlator.star.core.WinePath
+import com.winlator.star.linux.LinuxSettings
 import com.winlator.star.ui.DeckDialogBars
 import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.Screen
@@ -52,6 +55,7 @@ import com.winlator.star.ui.screens.GameMenuAction
 import com.winlator.star.ui.screens.GamesScreenRequests
 import com.winlator.star.ui.screens.LogManagerScreen
 import com.winlator.star.ui.screens.ShortcutSettingsDialogScreen
+import kotlinx.coroutines.launch
 import java.io.File
 
 /** The Deck settings editor's routes, registered by the Deck shell on top of AppNavGraph's. */
@@ -187,11 +191,26 @@ private fun DeckGameSettings(path: String, navController: NavHostController) {
         SettingsEnv(context, EditorScope.GAME, containerVm, shortcutState.value)
     }
     val source = remember(env, defaultsVm) { GameSource(env, shortcutState, containerVm, defaultsVm) }
+    val latestSource by rememberUpdatedState(source)
+    // The Windows components page: a Wine game only, never the Linux Steam client entry or an Android game.
+    val coroutines = rememberCoroutineScope()
+    val components = remember(path) {
+        if (env.world != World.WINE) null else {
+            // The game's .exe on the Android side, for its recommendations (as the classic Win Components tab finds it).
+            val exe = runCatching { WinePath.resolveAndroidPath(loaded.container, loaded.path) }.getOrNull()
+            DeckComponentsState(context, loaded.container, loaded.name, exe, exe?.parentFile, coroutines) { latestSource.dirty }
+        }
+    }
+    val extras = remember(components) {
+        components?.let { mapOf(SettingsRegistry.CAT_COMPONENTS to it.categoryExtra()) } ?: emptyMap()
+    }
+    LaunchedEffect(components) { components?.load() }
     OnReturn {
         if (!source.dirty) {
             generation++
             source.reloadFrom()
         }
+        components?.let { coroutines.launch { it.refreshInstalled() } }
     }
     if (!ready) {
         Loading()
@@ -235,7 +254,9 @@ private fun DeckGameSettings(path: String, navController: NavHostController) {
             }
         },
         onChainLink = { link -> link.onClick?.invoke() },
+        extras = extras,
     )
+    components?.let { DeckComponentsDialogs(it) }
 
     if (showClassic) {
         val s = shortcutState.value
@@ -285,7 +306,15 @@ private fun DeckContainerSettings(id: Int, navController: NavHostController) {
     val scope = if (defaultsMode) EditorScope.DEFAULTS else EditorScope.CONTAINER
     val env = remember(vm) { SettingsEnv(context, scope, vm, null) }
     val source = remember(env, defaultsVm) { ContainerFormSource(env, vm, defaultsVm) { generation++ } }
-    OnReturn { if (!source.dirty) generation++ }
+    val latestSource by rememberUpdatedState(source)
+    val coroutines = rememberCoroutineScope()
+    // The Windows components page's install lists: an existing Wine container only. All containers has no
+    // prefix (its page is just the DLL rows), and the Linux Steam client's home is never a Wine container.
+    var components by remember { mutableStateOf<DeckComponentsState?>(null) }
+    OnReturn {
+        if (!source.dirty) generation++
+        components?.let { coroutines.launch { it.refreshInstalled() } }
+    }
     if (!ready) {
         Loading()
         return
@@ -293,6 +322,17 @@ private fun DeckContainerSettings(id: Int, navController: NavHostController) {
     if (!defaultsMode && vm.container == null) {
         Loading("This container no longer exists.")
         return
+    }
+    val container = vm.container
+    LaunchedEffect(id, container != null) {
+        if (components == null && !defaultsMode && container != null && !LinuxSettings.isLinuxContainer(container)) {
+            val state = DeckComponentsState(context, container, null, null, null, coroutines) { latestSource.dirty }
+            components = state
+            state.load()
+        }
+    }
+    val extras = remember(components) {
+        components?.let { mapOf(SettingsRegistry.CAT_COMPONENTS to it.categoryExtra()) } ?: emptyMap()
     }
 
     val header = if (defaultsMode) {
@@ -336,7 +376,9 @@ private fun DeckContainerSettings(id: Int, navController: NavHostController) {
                 }
             }
         }),
+        extras = extras,
     )
+    components?.let { DeckComponentsDialogs(it) }
 }
 
 @Composable
