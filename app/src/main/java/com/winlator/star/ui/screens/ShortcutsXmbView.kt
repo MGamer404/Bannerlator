@@ -536,9 +536,10 @@ private class XmbMetrics(val w: Float, val h: Float) {
     val gap = (fH * 0.09f).roundToInt().toFloat()
     val pitch = sW + gap
     val grow = fW - sW
-    // Landscape: the row of games sits just above the middle (like the PS3 bar), as low as still
-    // leaves three option rows under the focused cover. Portrait keeps it at the top.
-    val top = if (port) 34f else (h * 0.45f - sH / 2f).coerceAtMost(h - fH - 12f - 3 * 40f - 6f - 12f).coerceAtLeast(34f)
+    // Landscape: the row of games sits three quarters up the screen (its middle a quarter down),
+    // never so low that fewer than three option rows fit under the focused cover. Portrait keeps it
+    // at the top.
+    val top = if (port) 34f else (h * 0.25f - sH / 2f).coerceAtMost(h - fH - 12f - 3 * 40f - 6f - 12f).coerceAtLeast(34f)
     val cross = if (port) 16f + sW * 0.42f + gap else max(16f + pitch, w * 0.13f)
     val iconBox = 34f
     val rowH = if (port) 46f else 40f
