@@ -153,6 +153,7 @@ import com.winlator.star.store.SteamPrefs
 import com.winlator.star.store.SteamSessionManager
 import com.winlator.star.store.StarLaunchBridge
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.Screen
 import com.winlator.star.ui.findActivity
 import kotlinx.coroutines.Dispatchers
@@ -980,7 +981,9 @@ fun BigPictureScreen(navController: NavController) {
             },
             confirmButton = {
                 DeckDialogBars()
-                androidx.compose.material3.TextButton(onClick = { communityApplyResult = null }) { Text("Done") }
+                DeckDialogScaled {
+                    androidx.compose.material3.TextButton(onClick = { communityApplyResult = null }) { Text("Done") }
+                }
             },
         )
     }
@@ -1517,227 +1520,229 @@ private fun GameCommunitySheet(
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         DeckDialogBars()
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 560.dp)
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp)
-                .verticalScroll(rememberScrollState())
-                .focusRequester(focusRequester)
-                .focusable()
-                .onPreviewKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    // Effective column for the CURRENT row (focusCol is the remembered desire).
-                    val col = focusCol.coerceIn(0, colsOf(focusRow) - 1)
-                    when (event.key) {
-                        Key.DirectionUp -> { if (focusRow > 0) focusRow--; true }
-                        Key.DirectionDown -> { if (focusRow < rowCount - 1) focusRow++; true }
-                        Key.DirectionLeft -> { if (col > 0) focusCol = col - 1; true }
-                        Key.DirectionRight -> { if (col < colsOf(focusRow) - 1) focusCol = col + 1; true }
-                        Key.ButtonA, Key.Enter, Key.DirectionCenter -> {
-                            when (focusRow) {
-                                0 -> if (col == 0) shareConfig() else onImport()
-                                rowUpload -> if (!uploading) uploadConfig()
-                                rowSearch -> { searchFocus.requestFocus(); keyboard?.show() }
-                                closeRow -> onDismiss()
-                                else -> cards.getOrNull(focusRow - firstCardRow)?.let { onApply(it.pick) }
+        DeckDialogScaled {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 560.dp)
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp)
+                    .verticalScroll(rememberScrollState())
+                    .focusRequester(focusRequester)
+                    .focusable()
+                    .onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        // Effective column for the CURRENT row (focusCol is the remembered desire).
+                        val col = focusCol.coerceIn(0, colsOf(focusRow) - 1)
+                        when (event.key) {
+                            Key.DirectionUp -> { if (focusRow > 0) focusRow--; true }
+                            Key.DirectionDown -> { if (focusRow < rowCount - 1) focusRow++; true }
+                            Key.DirectionLeft -> { if (col > 0) focusCol = col - 1; true }
+                            Key.DirectionRight -> { if (col < colsOf(focusRow) - 1) focusCol = col + 1; true }
+                            Key.ButtonA, Key.Enter, Key.DirectionCenter -> {
+                                when (focusRow) {
+                                    0 -> if (col == 0) shareConfig() else onImport()
+                                    rowUpload -> if (!uploading) uploadConfig()
+                                    rowSearch -> { searchFocus.requestFocus(); keyboard?.show() }
+                                    closeRow -> onDismiss()
+                                    else -> cards.getOrNull(focusRow - firstCardRow)?.let { onApply(it.pick) }
+                                }
+                                true
                             }
-                            true
+                            // First B closes the keyboard (and returns focus to the sheet for D-pad nav);
+                            // once the field no longer holds focus, B dismisses the sheet.
+                            Key.ButtonB, Key.Back -> {
+                                if (searchFieldFocused) { keyboard?.hide(); focusRequester.requestFocus() } else onDismiss()
+                                true
+                            }
+                            else -> false
                         }
-                        // First B closes the keyboard (and returns focus to the sheet for D-pad nav);
-                        // once the field no longer holds focus, B dismisses the sheet.
-                        Key.ButtonB, Key.Back -> {
-                            if (searchFieldFocused) { keyboard?.hide(); focusRequester.requestFocus() } else onDismiss()
-                            true
-                        }
-                        else -> false
-                    }
-                },
-        ) {
-            SheetTitle("Community configs")
-            Text(
-                shortcut.name,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
-            Spacer(Modifier.height(12.dp))
-            // Actions row: Share + Import; Upload full-width below.
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                DpadHighlight(focused = focusRow == 0 && curCol == 0, modifier = Modifier.weight(1f)) {
-                    OutlinedButton(onClick = shareConfig, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Filled.Share, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Share")
-                    }
-                }
-                DpadHighlight(focused = focusRow == 0 && curCol == 1, modifier = Modifier.weight(1f)) {
-                    OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Filled.FileUpload, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Import")
-                    }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            DpadHighlight(focused = focusRow == rowUpload) {
-                OutlinedButton(onClick = { if (!uploading) uploadConfig() }, enabled = !uploading, modifier = Modifier.fillMaxWidth()) {
-                    if (uploading) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (uploadStarted) "Uploading…" else "Preparing…")
-                    } else {
-                        Icon(Icons.Filled.CloudUpload, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Upload to community")
-                    }
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            DpadHighlight(focused = focusRow == rowSearch) {
-                OutlinedTextField(
-                    value = search,
-                    onValueChange = { q ->
-                        search = q
-                        if (q.trim().length >= 2) vm.searchCommunityGames(q) { searchResults = it }
-                        else searchResults = emptyList()
                     },
-                    label = { Text("Search all games") },
-                    leadingIcon = { Icon(Icons.Filled.Search, null) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                        .focusRequester(searchFocus)
-                        .onFocusChanged { searchFieldFocused = it.isFocused }
-                        // Guaranteed B handling while the field holds focus (in case the parent's preview
-                        // doesn't fire): close the keyboard and hand focus back to the sheet.
-                        .onPreviewKeyEvent { e ->
-                            if (e.type == KeyEventType.KeyDown && (e.key == Key.ButtonB || e.key == Key.Back)) {
-                                keyboard?.hide(); focusRequester.requestFocus(); true
-                            } else false
-                        },
+            ) {
+                SheetTitle("Community configs")
+                Text(
+                    shortcut.name,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp),
                 )
-            }
-            Spacer(Modifier.height(10.dp))
-            when {
-                // Search results (touch-select) replace the match list while a query is active.
-                searching -> {
-                    if (searchResults.isEmpty()) {
-                        Text("No games match \"$search\".", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else {
-                        searchResults.forEach { cg ->
-                            CommunityCard(onClick = {
-                                // Manually correcting the game also sticks for next time (issue #167).
-                                vm.rememberCommunityGame(shortcut, cg)
-                                vm.selectCommunityGame(cg) { match = it }
-                                search = ""
-                                searchResults = emptyList()
-                            }) {
-                                Text(
-                                    cg.name,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                CommunityStoreBadge(isSteam = cg.isSteam)
-                            }
-                            Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
+                // Actions row: Share + Import; Upload full-width below.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    DpadHighlight(focused = focusRow == 0 && curCol == 0, modifier = Modifier.weight(1f)) {
+                        OutlinedButton(onClick = shareConfig, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Filled.Share, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Share")
+                        }
+                    }
+                    DpadHighlight(focused = focusRow == 0 && curCol == 1, modifier = Modifier.weight(1f)) {
+                        OutlinedButton(onClick = onImport, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Filled.FileUpload, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Import")
                         }
                     }
                 }
-                matchLoading -> Text("Matching \"${shortcut.name}\"…", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                game == null -> Text("No auto-match for \"${shortcut.name}\" — search above to pick one.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                else -> {
-                    // Genuine tie (e.g. "Dragon Age" → Inquisition vs Veilguard): offer the alternatives
-                    // so the user picks the right game instead of silently trusting the top candidate.
-                    // Touch-select (not wired into the D-pad row model — kept simple); the choice is
-                    // remembered per shortcut so it only asks once. (issue #167)
-                    val tieOptions = match?.alternatives.orEmpty()
-                    if (tieOptions.size > 1) {
-                        Text(
-                            "Which game is this?",
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        tieOptions.forEach { alt ->
-                            CommunityCard(onClick = {
-                                vm.rememberCommunityGame(shortcut, alt)
-                                vm.selectCommunityGame(alt) { match = it }
-                            }) {
-                                Text(
-                                    alt.name,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                CommunityStoreBadge(isSteam = alt.isSteam)
-                            }
-                            Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(8.dp))
+                DpadHighlight(focused = focusRow == rowUpload) {
+                    OutlinedButton(onClick = { if (!uploading) uploadConfig() }, enabled = !uploading, modifier = Modifier.fillMaxWidth()) {
+                        if (uploading) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (uploadStarted) "Uploading…" else "Preparing…")
+                        } else {
+                            Icon(Icons.Filled.CloudUpload, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Upload to community")
                         }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            game.name,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        CommunityStoreBadge(isSteam = game.isSteam)
-                    }
-                    val devWord = if (game.devices.size == 1) "device" else "devices"
-                    val cfgWord = if (game.configCount == 1) "config" else "configs"
-                    Text("${game.configCount} $cfgWord · ${game.devices.size} $devWord", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                    Text("Your device: ${deviceHeaderLabel(DeviceIdentity.deviceModel(), match?.userHardwareLabel)}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                    Spacer(Modifier.height(6.dp))
-                    FilterChip(
-                        selected = matchesMine,
-                        onClick = { matchesMine = !matchesMine },
-                        label = { Text("Matches my device") },
-                        enabled = hwEnabled,
+                }
+                Spacer(Modifier.height(12.dp))
+                DpadHighlight(focused = focusRow == rowSearch) {
+                    OutlinedTextField(
+                        value = search,
+                        onValueChange = { q ->
+                            search = q
+                            if (q.trim().length >= 2) vm.searchCommunityGames(q) { searchResults = it }
+                            else searchResults = emptyList()
+                        },
+                        label = { Text("Search all games") },
+                        leadingIcon = { Icon(Icons.Filled.Search, null) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                            .focusRequester(searchFocus)
+                            .onFocusChanged { searchFieldFocused = it.isFocused }
+                            // Guaranteed B handling while the field holds focus (in case the parent's preview
+                            // doesn't fire): close the keyboard and hand focus back to the sheet.
+                            .onPreviewKeyEvent { e ->
+                                if (e.type == KeyEventType.KeyDown && (e.key == Key.ButtonB || e.key == Key.Back)) {
+                                    keyboard?.hide(); focusRequester.requestFocus(); true
+                                } else false
+                            },
                     )
-                    Spacer(Modifier.height(8.dp))
-                    if (cards.isEmpty()) {
-                        Text(
-                            if (matchesMine) "No uploaded configs match your device." else "No configs listed.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                }
+                Spacer(Modifier.height(10.dp))
+                when {
+                    // Search results (touch-select) replace the match list while a query is active.
+                    searching -> {
+                        if (searchResults.isEmpty()) {
+                            Text("No games match \"$search\".", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            searchResults.forEach { cg ->
+                                CommunityCard(onClick = {
+                                    // Manually correcting the game also sticks for next time (issue #167).
+                                    vm.rememberCommunityGame(shortcut, cg)
+                                    vm.selectCommunityGame(cg) { match = it }
+                                    search = ""
+                                    searchResults = emptyList()
+                                }) {
+                                    Text(
+                                        cg.name,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    CommunityStoreBadge(isSteam = cg.isSteam)
+                                }
+                                Spacer(Modifier.height(8.dp))
+                            }
+                        }
+                    }
+                    matchLoading -> Text("Matching \"${shortcut.name}\"…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    game == null -> Text("No auto-match for \"${shortcut.name}\" — search above to pick one.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else -> {
+                        // Genuine tie (e.g. "Dragon Age" → Inquisition vs Veilguard): offer the alternatives
+                        // so the user picks the right game instead of silently trusting the top candidate.
+                        // Touch-select (not wired into the D-pad row model — kept simple); the choice is
+                        // remembered per shortcut so it only asks once. (issue #167)
+                        val tieOptions = match?.alternatives.orEmpty()
+                        if (tieOptions.size > 1) {
+                            Text(
+                                "Which game is this?",
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            tieOptions.forEach { alt ->
+                                CommunityCard(onClick = {
+                                    vm.rememberCommunityGame(shortcut, alt)
+                                    vm.selectCommunityGame(alt) { match = it }
+                                }) {
+                                    Text(
+                                        alt.name,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    CommunityStoreBadge(isSteam = alt.isSteam)
+                                }
+                                Spacer(Modifier.height(8.dp))
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                game.name,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            CommunityStoreBadge(isSteam = game.isSteam)
+                        }
+                        val devWord = if (game.devices.size == 1) "device" else "devices"
+                        val cfgWord = if (game.configCount == 1) "config" else "configs"
+                        Text("${game.configCount} $cfgWord · ${game.devices.size} $devWord", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        Text("Your device: ${deviceHeaderLabel(DeviceIdentity.deviceModel(), match?.userHardwareLabel)}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        Spacer(Modifier.height(6.dp))
+                        FilterChip(
+                            selected = matchesMine,
+                            onClick = { matchesMine = !matchesMine },
+                            label = { Text("Matches my device") },
+                            enabled = hwEnabled,
                         )
-                    } else {
-                        cards.forEachIndexed { i, c ->
-                            DpadHighlight(focused = focusRow == firstCardRow + i) {
-                                val entry = c.entry
-                                val device = c.device
-                                if (entry != null) {
-                                    CommunityConfigEntryCard(entry = entry, isMatch = c.isMatch) { onApply(c.pick) }
-                                } else if (device != null) {
-                                    CommunityCard(onClick = { onApply(c.pick) }) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                device.model.ifBlank { "Unknown device" },
-                                                color = if (c.isMatch) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            val sub = listOf(device.gpu, device.soc).filter { it.isNotBlank() }.joinToString(" · ")
-                                            if (sub.isNotEmpty()) Text(sub, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(8.dp))
+                        if (cards.isEmpty()) {
+                            Text(
+                                if (matchesMine) "No uploaded configs match your device." else "No configs listed.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            cards.forEachIndexed { i, c ->
+                                DpadHighlight(focused = focusRow == firstCardRow + i) {
+                                    val entry = c.entry
+                                    val device = c.device
+                                    if (entry != null) {
+                                        CommunityConfigEntryCard(entry = entry, isMatch = c.isMatch) { onApply(c.pick) }
+                                    } else if (device != null) {
+                                        CommunityCard(onClick = { onApply(c.pick) }) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    device.model.ifBlank { "Unknown device" },
+                                                    color = if (c.isMatch) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                                val sub = listOf(device.gpu, device.soc).filter { it.isNotBlank() }.joinToString(" · ")
+                                                if (sub.isNotEmpty()) Text(sub, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            }
                                         }
                                     }
                                 }
+                                Spacer(Modifier.height(8.dp))
                             }
-                            Spacer(Modifier.height(8.dp))
                         }
                     }
                 }
-            }
-            Spacer(Modifier.height(8.dp))
-            DpadHighlight(focused = focusRow == closeRow) {
-                OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Close") }
+                Spacer(Modifier.height(8.dp))
+                DpadHighlight(focused = focusRow == closeRow) {
+                    OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Close") }
+                }
             }
         }
     }
@@ -1832,25 +1837,27 @@ private fun Modifier.bpSheetDpad(
 private fun BpSheetScaffold(title: String, rows: List<BpRow>, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         DeckDialogBars()
-        var focusIndex by remember { mutableStateOf(0) }
-        val focusRequester = remember { FocusRequester() }
-        LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 24.dp)
-                .bpSheetDpad(
-                    focusRequester = focusRequester,
-                    index = focusIndex,
-                    count = rows.size,
-                    onMove = { focusIndex = it },
-                    onActivate = { rows.getOrNull(focusIndex)?.onClick?.invoke() },
-                    onDismiss = onDismiss,
-                ),
-        ) {
-            SheetTitle(title)
-            rows.forEachIndexed { i, r ->
-                SheetRow(icon = r.icon, label = r.label, focused = i == focusIndex, onClick = r.onClick)
+        DeckDialogScaled {
+            var focusIndex by remember { mutableStateOf(0) }
+            val focusRequester = remember { FocusRequester() }
+            LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp)
+                    .bpSheetDpad(
+                        focusRequester = focusRequester,
+                        index = focusIndex,
+                        count = rows.size,
+                        onMove = { focusIndex = it },
+                        onActivate = { rows.getOrNull(focusIndex)?.onClick?.invoke() },
+                        onDismiss = onDismiss,
+                    ),
+            ) {
+                SheetTitle(title)
+                rows.forEachIndexed { i, r ->
+                    SheetRow(icon = r.icon, label = r.label, focused = i == focusIndex, onClick = r.onClick)
+                }
             }
         }
     }

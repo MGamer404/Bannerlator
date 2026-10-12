@@ -123,6 +123,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 
 // Serializes all native adrenotools probing (isDriverSupported + enumerateExtensions) off the
 // main thread. Serial = no concurrent AdrenoTools hooks (old SIGSEGV); off-main = no ANR.
@@ -5846,7 +5847,9 @@ internal fun DxvkConfigDialog(
                             },
                             confirmButton = {
                                 DeckDialogBars()
-                                TextButton(onClick = { restoreBackup(backup); restoreTarget = null }) { Text("Restore") }
+                                DeckDialogScaled {
+                                    TextButton(onClick = { restoreBackup(backup); restoreTarget = null }) { Text("Restore") }
+                                }
                             },
                             dismissButton = { TextButton(onClick = { restoreTarget = null }) { Text(stringResource(android.R.string.cancel)) } }
                         )
@@ -5861,7 +5864,9 @@ internal fun DxvkConfigDialog(
                             title = { Text(row.key) },
                             confirmButton = {
                                 DeckDialogBars()
-                                TextButton(onClick = { if (customValueDraft.isNotBlank()) applyValue(row.key, customValueDraft.trim()); valuePickerRow = null }) { Text("Done") }
+                                DeckDialogScaled {
+                                    TextButton(onClick = { if (customValueDraft.isNotBlank()) applyValue(row.key, customValueDraft.trim()); valuePickerRow = null }) { Text("Done") }
+                                }
                             },
                             text = {
                                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
@@ -5911,48 +5916,50 @@ internal fun DxvkConfigDialog(
                     pendingDeleteKey?.let { delKey ->
                         Dialog(onDismissRequest = { pendingDeleteKey = null }) {
                             DeckDialogBars()
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f))
-                            ) {
-                                Card(
+                            DeckDialogScaled {
+                                Box(
                                     modifier = Modifier
-                                        .align(Alignment.Center)
-                                        .padding(24.dp)
-                                        .fillMaxWidth(0.92f),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
-                                    ),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                                    elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+                                        .fillMaxSize()
+                                        .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f))
                                 ) {
-                                    Column(modifier = Modifier.padding(20.dp)) {
-                                        Text(
-                                            "Remove key?",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Spacer(Modifier.height(8.dp))
-                                        Text(
-                                            "Are you sure you want '$delKey' removed? You can get it back via Backup → Restore or Add key.",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(Modifier.height(16.dp))
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                            TextButton(onClick = { pendingDeleteKey = null }) {
-                                                Text("Cancel")
-                                            }
-                                            Button(
-                                                onClick = {
-                                                    applyDeleteKey(delKey)
-                                                    pendingDeleteKey = null
-                                                    Toast.makeText(activity, "Removed $delKey — Restore to undo", Toast.LENGTH_SHORT).show()
-                                                },
-                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                                            ) {
-                                                Text("Remove")
+                                    Card(
+                                        modifier = Modifier
+                                            .align(Alignment.Center)
+                                            .padding(24.dp)
+                                            .fillMaxWidth(0.92f),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
+                                        ),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+                                    ) {
+                                        Column(modifier = Modifier.padding(20.dp)) {
+                                            Text(
+                                                "Remove key?",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Spacer(Modifier.height(8.dp))
+                                            Text(
+                                                "Are you sure you want '$delKey' removed? You can get it back via Backup → Restore or Add key.",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(Modifier.height(16.dp))
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                                TextButton(onClick = { pendingDeleteKey = null }) {
+                                                    Text("Cancel")
+                                                }
+                                                Button(
+                                                    onClick = {
+                                                        applyDeleteKey(delKey)
+                                                        pendingDeleteKey = null
+                                                        Toast.makeText(activity, "Removed $delKey — Restore to undo", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                                ) {
+                                                    Text("Remove")
+                                                }
                                             }
                                         }
                                     }
@@ -6018,13 +6025,15 @@ internal fun DxvkConfigDialog(
                             },
                             confirmButton = {
                                 DeckDialogBars()
-                                TextButton(
-                                    enabled = addKeyDraft.isNotBlank() && addValueDraft.isNotBlank() && keyValid,
-                                    onClick = {
-                                        applyAddKey(addKeyDraft.trim(), addValueDraft.trim())
-                                        showAddKey = false
-                                    }
-                                ) { Text("Add") }
+                                DeckDialogScaled {
+                                    TextButton(
+                                        enabled = addKeyDraft.isNotBlank() && addValueDraft.isNotBlank() && keyValid,
+                                        onClick = {
+                                            applyAddKey(addKeyDraft.trim(), addValueDraft.trim())
+                                            showAddKey = false
+                                        }
+                                    ) { Text("Add") }
+                                }
                             },
                             dismissButton = { TextButton(onClick = { showAddKey = false }) { Text(stringResource(android.R.string.cancel)) } }
                         )
@@ -6034,21 +6043,23 @@ internal fun DxvkConfigDialog(
         },
         confirmButton = {
             DeckDialogBars()
-            TextButton(onClick = {
-                val cfg = DXVKConfigDialog.parseConfig(initialConfig)
-                cfg.put("version", selectedDxvk)
-                cfg.put("framerate", StringUtils.parseNumber(selectedFramerate))
-                cfg.put("async", if (asyncEnabled && dxvkType != DXVKConfigDialog.DXVK_TYPE_NONE) "1" else "0")
-                cfg.put("asyncCache", if (asyncCacheEnabled && dxvkType == DXVKConfigDialog.DXVK_TYPE_GPLASYNC) "1" else "0")
-                cfg.put("anisotropy", DXVKConfigDialog.ANISOTROPY_VALUES[anisotropyLabels.indexOf(selectedAnisotropy).coerceAtLeast(0)])
-                cfg.put("lodBias", DXVKConfigDialog.LOD_BIAS_VALUES[lodBiasLabels.indexOf(selectedLodBias).coerceAtLeast(0)])
-                cfg.put("vkd3dVersion", selectedVkd3d)
-                cfg.put("vkd3dLevel", selectedFeatureLevel)
-                cfg.put("ddrawrapper", StringUtils.parseIdentifier(selectedDdra))
-                cfg.put("d7vkVersion", selectedD7vk)
-                cfg.put("dxvkConfigFile", livePath)
-                onConfirm(cfg.toString())
-            }) { Text(stringResource(android.R.string.ok)) }
+            DeckDialogScaled {
+                TextButton(onClick = {
+                    val cfg = DXVKConfigDialog.parseConfig(initialConfig)
+                    cfg.put("version", selectedDxvk)
+                    cfg.put("framerate", StringUtils.parseNumber(selectedFramerate))
+                    cfg.put("async", if (asyncEnabled && dxvkType != DXVKConfigDialog.DXVK_TYPE_NONE) "1" else "0")
+                    cfg.put("asyncCache", if (asyncCacheEnabled && dxvkType == DXVKConfigDialog.DXVK_TYPE_GPLASYNC) "1" else "0")
+                    cfg.put("anisotropy", DXVKConfigDialog.ANISOTROPY_VALUES[anisotropyLabels.indexOf(selectedAnisotropy).coerceAtLeast(0)])
+                    cfg.put("lodBias", DXVKConfigDialog.LOD_BIAS_VALUES[lodBiasLabels.indexOf(selectedLodBias).coerceAtLeast(0)])
+                    cfg.put("vkd3dVersion", selectedVkd3d)
+                    cfg.put("vkd3dLevel", selectedFeatureLevel)
+                    cfg.put("ddrawrapper", StringUtils.parseIdentifier(selectedDdra))
+                    cfg.put("d7vkVersion", selectedD7vk)
+                    cfg.put("dxvkConfigFile", livePath)
+                    onConfirm(cfg.toString())
+                }) { Text(stringResource(android.R.string.ok)) }
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) } }
     )
@@ -6666,79 +6677,81 @@ private fun StockConfigDownloadSheet(
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         DeckDialogBars()
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            Text("Stock configs", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Tap a version to fetch its config. Builds without a shipped config show none.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(8.dp))
-        }
-        if (loading) {
-            Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.Center) {
-                CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
-            }
-        } else if (rows.isEmpty()) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        DeckDialogScaled {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Text("Stock configs", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Couldn't reach the releases feed — check connection and retry. (GitHub limit 60/h)",
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
+                    "Tap a version to fetch its config. Builds without a shipped config show none.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(8.dp))
-                TextButton(onClick = { retryKey++ }) { Text("Retry") }
             }
-        } else {
-            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-                items(rows.size) { idx ->
-                    val rel = rows[idx]
-                    val hasConf = rel.confUrl != null
-                    val busy = parkedTag == rel.tag
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = hasConf && !busy) {
-                                parkedTag = rel.tag
-                                scope.launch {
-                                    val res = withContext(Dispatchers.IO) { VegasStockConfigFetcher.park(context, rel) }
-                                    parkedTag = null
-                                    when (res) {
-                                        is VegasStockConfigFetcher.ParkResult.Ok -> {
-                                            activity?.let {
-                                                Toast.makeText(it,
-                                                    "Parked as ${res.parkedAs}.conf — now select \"${res.parkedAs}\" under Stock config",
-                                                    Toast.LENGTH_LONG).show()
+            if (loading) {
+                Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.Center) {
+                    CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+                }
+            } else if (rows.isEmpty()) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(
+                        "Couldn't reach the releases feed — check connection and retry. (GitHub limit 60/h)",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = { retryKey++ }) { Text("Retry") }
+                }
+            } else {
+                androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                    items(rows.size) { idx ->
+                        val rel = rows[idx]
+                        val hasConf = rel.confUrl != null
+                        val busy = parkedTag == rel.tag
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = hasConf && !busy) {
+                                    parkedTag = rel.tag
+                                    scope.launch {
+                                        val res = withContext(Dispatchers.IO) { VegasStockConfigFetcher.park(context, rel) }
+                                        parkedTag = null
+                                        when (res) {
+                                            is VegasStockConfigFetcher.ParkResult.Ok -> {
+                                                activity?.let {
+                                                    Toast.makeText(it,
+                                                        "Parked as ${res.parkedAs}.conf — now select \"${res.parkedAs}\" under Stock config",
+                                                        Toast.LENGTH_LONG).show()
+                                                }
                                             }
+                                            is VegasStockConfigFetcher.ParkResult.Fail ->
+                                                activity?.let { Toast.makeText(it, "Failed: ${res.reason}", Toast.LENGTH_LONG).show() }
                                         }
-                                        is VegasStockConfigFetcher.ParkResult.Fail ->
-                                            activity?.let { Toast.makeText(it, "Failed: ${res.reason}", Toast.LENGTH_LONG).show() }
                                     }
                                 }
-                            }
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                    ) {
-                        Icon(
-                            if (hasConf) Icons.Filled.Download else Icons.Filled.Block,
-                            contentDescription = null,
-                            tint = if (hasConf) MaterialTheme.colorScheme.primary
-                                   else MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(rel.tag.ifEmpty { "(untagged)" }, style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                buildString {
-                                    append(rel.confName ?: "no config asset")
-                                    if (rel.date.isNotEmpty()) append("  ·  ${rel.date}")
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                        ) {
+                            Icon(
+                                if (hasConf) Icons.Filled.Download else Icons.Filled.Block,
+                                contentDescription = null,
+                                tint = if (hasConf) MaterialTheme.colorScheme.primary
+                                       else MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(20.dp)
                             )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(rel.tag.ifEmpty { "(untagged)" }, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    buildString {
+                                        append(rel.confName ?: "no config asset")
+                                        if (rel.date.isNotEmpty()) append("  ·  ${rel.date}")
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         }
-                        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     }
                 }
             }
@@ -6947,91 +6960,93 @@ private fun VGlossarySheet(
     }
     Dialog(onDismissRequest = onDismiss) {
         DeckDialogBars()
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f))
-        ) {
-        Card(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .padding(24.dp)
-                .fillMaxWidth(0.96f)
-                .fillMaxHeight(0.86f),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
-            ),
-            border = androidx.compose.foundation.BorderStroke(
-                1.dp,
-                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text("V-Glossary", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    buildString {
-                        append(if (installedTag != null) "Build: $installedTag" else "No build selected")
-                        append("  ·  catalog ${vegasCatalog?.generatedAt() ?: "n/a"}")
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (vegasCatalog == null) {
-                    Spacer(Modifier.height(6.dp))
+        DeckDialogScaled {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f))
+            ) {
+            Card(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp)
+                    .fillMaxWidth(0.96f)
+                    .fillMaxHeight(0.86f),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text("V-Glossary", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "Catalog offline — provenance hidden, definitions still shown.",
+                        buildString {
+                            append(if (installedTag != null) "Build: $installedTag" else "No build selected")
+                            append("  ·  catalog ${vegasCatalog?.generatedAt() ?: "n/a"}")
+                        },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-                Spacer(Modifier.height(10.dp))
-                val keys = if (vegasCatalog != null) vegasCatalog.allKeys() else KEY_DEFINITIONS.keys.toList()
-                val grouped = keys.groupBy { key ->
-                    if (vegasCatalog != null) vegasCatalog.classify(key, installedTag) else VegasKeyCatalog.Bucket.NOWHERE
-                }
-                LazyColumn(modifier = Modifier.weight(1f)) {
-                    bucketOrder.filter { grouped.containsKey(it) }.forEach { bucket ->
-                        item {
-                            Text(
-                                bucketLabel(bucket),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        items(grouped.getValue(bucket).sorted()) { key ->
-                            Column(modifier = Modifier.padding(vertical = 5.dp)) {
+                    if (vegasCatalog == null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Catalog offline — provenance hidden, definitions still shown.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    val keys = if (vegasCatalog != null) vegasCatalog.allKeys() else KEY_DEFINITIONS.keys.toList()
+                    val grouped = keys.groupBy { key ->
+                        if (vegasCatalog != null) vegasCatalog.classify(key, installedTag) else VegasKeyCatalog.Bucket.NOWHERE
+                    }
+                    LazyColumn(modifier = Modifier.weight(1f)) {
+                        bucketOrder.filter { grouped.containsKey(it) }.forEach { bucket ->
+                            item {
                                 Text(
-                                    key,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    bucketLabel(bucket),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    val fam = vegasCatalog?.familyOf(key)?.name ?: "—"
-                                    Text("[$fam]", style = MaterialTheme.typography.labelSmall)
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        KEY_DEFINITIONS[key] ?: "—",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
                             }
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                            items(grouped.getValue(bucket).sorted()) { key ->
+                                Column(modifier = Modifier.padding(vertical = 5.dp)) {
+                                    Text(
+                                        key,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        val fam = vegasCatalog?.familyOf(key)?.name ?: "—"
+                                        Text("[$fam]", style = MaterialTheme.typography.labelSmall)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            KEY_DEFINITIONS[key] ?: "—",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                            }
                         }
                     }
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("OK")
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = onDismiss) {
+                            Text("OK")
+                        }
                     }
                 }
             }
-        }
+            }
         }
     }
 }

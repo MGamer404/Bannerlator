@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 
 /**
  * Shared audio config used by the editor cog (per-container / per-game) and the in-game side menu.
@@ -334,173 +335,175 @@ fun AudioSettingsDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         DeckDialogBars()
-        Surface(shape = RoundedCornerShape(22.dp), color = cs.surface,
-            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
-            Column(Modifier.fillMaxSize()) {
-                // header
-                Row(Modifier.fillMaxWidth().padding(16.dp, 14.dp, 16.dp, 4.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Text("🎧 Audio settings", fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                        color = cs.onSurface, modifier = Modifier.weight(1f))
-                    // Engine badge — which audio engine these settings actually hit (dropdown value in
-                    // the editors; the driver chosen at launch in-game). Makes "correct settings" explicit.
-                    if (driverLabel.isNotBlank()) {
-                        Surface(shape = RoundedCornerShape(8.dp), color = cs.primary.copy(alpha = 0.16f),
-                            modifier = Modifier.padding(end = 8.dp)) {
-                            Text("🔊 $driverLabel", color = cs.primary, fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp))
-                        }
-                    }
-                    TextButton(onClick = onDismiss) { Text("✕", color = cs.onSurface, fontSize = 16.sp) }
-                }
-                Text("Balance crackle-free vs low delay  ·  $scopeLabel",
-                    color = cs.onSurfaceVariant, fontSize = 12.5.sp,
-                    modifier = Modifier.padding(16.dp, 0.dp, 16.dp, 10.dp))
-
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
-                    // tradeoff meter
-                    Surface(shape = RoundedCornerShape(16.dp), color = cs.surfaceVariant,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Column(Modifier.padding(14.dp)) {
-                            Row(Modifier.fillMaxWidth()) {
-                                Text("◀ Lower delay", color = cs.onSurfaceVariant, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                                Text("Fewer crackles ▶", color = cs.onSurfaceVariant, fontSize = 11.sp)
+        DeckDialogScaled {
+            Surface(shape = RoundedCornerShape(22.dp), color = cs.surface,
+                modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
+                Column(Modifier.fillMaxSize()) {
+                    // header
+                    Row(Modifier.fillMaxWidth().padding(16.dp, 14.dp, 16.dp, 4.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("🎧 Audio settings", fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                            color = cs.onSurface, modifier = Modifier.weight(1f))
+                        // Engine badge — which audio engine these settings actually hit (dropdown value in
+                        // the editors; the driver chosen at launch in-game). Makes "correct settings" explicit.
+                        if (driverLabel.isNotBlank()) {
+                            Surface(shape = RoundedCornerShape(8.dp), color = cs.primary.copy(alpha = 0.16f),
+                                modifier = Modifier.padding(end = 8.dp)) {
+                                Text("🔊 $driverLabel", color = cs.primary, fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp))
                             }
-                            Box(Modifier.fillMaxWidth().padding(top = 8.dp).height(8.dp)
-                                .background(cs.surface, RoundedCornerShape(6.dp))) {
-                                Box(Modifier.fillMaxWidth(curPreset.pos).height(8.dp)
-                                    .background(cs.primary, RoundedCornerShape(6.dp)))
-                            }
-                            Text(curPreset.note, color = cs.onSurfaceVariant, fontSize = 12.sp,
-                                modifier = Modifier.padding(top = 9.dp))
                         }
+                        TextButton(onClick = onDismiss) { Text("✕", color = cs.onSurface, fontSize = 16.sp) }
                     }
+                    Text("Balance crackle-free vs low delay  ·  $scopeLabel",
+                        color = cs.onSurfaceVariant, fontSize = 12.5.sp,
+                        modifier = Modifier.padding(16.dp, 0.dp, 16.dp, 10.dp))
 
-                    Text("PRESET", color = cs.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(4.dp, 14.dp, 0.dp, 8.dp))
-                    AUDIO_PRESETS.forEach { p ->
-                        val sel = p.id == cfg.preset
-                        Surface(shape = RoundedCornerShape(16.dp),
-                            color = if (sel) cs.primary.copy(alpha = 0.14f) else cs.surfaceVariant,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-                                .border(1.5.dp, if (sel) cs.primary else Color.Transparent, RoundedCornerShape(16.dp))
-                                .clickable { applyPreset(p) }) {
-                            Row(Modifier.padding(13.dp), verticalAlignment = Alignment.Top) {
-                                RadioButton(selected = sel, onClick = { applyPreset(p) })
-                                Text(p.emoji, fontSize = 18.sp, modifier = Modifier.padding(top = 12.dp, end = 8.dp))
-                                Column(Modifier.weight(1f).padding(top = 8.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(p.name, color = cs.onSurface, fontWeight = FontWeight.SemiBold)
-                                        p.badge?.let {
-                                            Spacer(Modifier.width(8.dp))
-                                            Text(it.uppercase(), color = cs.primary, fontSize = 10.sp,
-                                                modifier = Modifier.border(1.dp, cs.primary, RoundedCornerShape(10.dp))
-                                                    .padding(horizontal = 7.dp, vertical = 1.dp))
-                                        }
-                                        Spacer(Modifier.weight(1f))
-                                        // Inside the card, but its own click target - tapping "?" explains the
-                                        // preset without selecting it, which matters when you are deciding.
-                                        IconButton(onClick = { helpRes = p.helpRes }, modifier = Modifier.size(30.dp)) {
-                                            Icon(Icons.Default.Help, contentDescription = "What is \"${p.name}\"?",
-                                                 tint = cs.onSurfaceVariant, modifier = Modifier.size(17.dp))
-                                        }
-                                    }
-                                    Text(p.desc, color = cs.onSurfaceVariant, fontSize = 12.sp)
+                    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp)) {
+                        // tradeoff meter
+                        Surface(shape = RoundedCornerShape(16.dp), color = cs.surfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                            Column(Modifier.padding(14.dp)) {
+                                Row(Modifier.fillMaxWidth()) {
+                                    Text("◀ Lower delay", color = cs.onSurfaceVariant, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                    Text("Fewer crackles ▶", color = cs.onSurfaceVariant, fontSize = 11.sp)
                                 }
+                                Box(Modifier.fillMaxWidth().padding(top = 8.dp).height(8.dp)
+                                    .background(cs.surface, RoundedCornerShape(6.dp))) {
+                                    Box(Modifier.fillMaxWidth(curPreset.pos).height(8.dp)
+                                        .background(cs.primary, RoundedCornerShape(6.dp)))
+                                }
+                                Text(curPreset.note, color = cs.onSurfaceVariant, fontSize = 12.sp,
+                                    modifier = Modifier.padding(top = 9.dp))
                             }
                         }
-                    }
 
-                    Text(if (custom) "FINE-TUNE" else "FINE-TUNE — what this preset applies (Custom to edit)",
-                        color = cs.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(4.dp, 16.dp, 0.dp, 8.dp))
-                    val ftAlpha = if (custom) 1f else 0.4f
-                    // Greyed rows must show what the engine will actually use, not the preset object:
-                    // on DirectAudio a named preset means a specific buffer and a forced LOW_LATENCY,
-                    // so showing the generic preset values would state the wrong thing in the one panel
-                    // whose job is telling you what the preset does. Edits still go to `cfg`; this is
-                    // only what is rendered, and it equals `cfg` whenever the rows are editable.
-                    val shown = effectiveConfigFor(cfg, driverId)
-                    Surface(shape = RoundedCornerShape(16.dp), color = cs.surfaceVariant,
-                        modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(horizontal = 14.dp).alpha(ftAlpha)) {
-                            // Output mode
-                            FtRow("Output mode", "AAudio performance mode", cs,
-                                onHelp = { helpRes = R.string.help_audio_perf_mode }) {
-                                Row {
-                                    // DirectAudio must NOT offer POWER_SAVING: on this engine its AAudio
-                                    // power-saving stream errors and reopens ~1/s under box64/FEX (device-
-                                    // proven 2026-08-14), a wasteful churn. Every DirectAudio preset already
-                                    // forces LOW_LATENCY for the same reason, so drop "Power" here too.
-                                    val perfOpts = if (driverId == "directaudio")
-                                        listOf("None" to 0, "Low lat." to 1)
-                                    else listOf("None" to 0, "Low lat." to 1, "Power" to 2)
-                                    perfOpts.forEach { (lbl, v) ->
-                                        val on = shown.perfMode == v
-                                        Text(lbl, color = if (on) cs.onPrimary else cs.onSurfaceVariant, fontSize = 12.sp,
-                                            modifier = Modifier.padding(horizontal = 3.dp)
-                                                .background(if (on) cs.primary else cs.surface, RoundedCornerShape(9.dp))
-                                                .clickable(enabled = custom) { cfg = cfg.copy(perfMode = v) }
-                                                .padding(horizontal = 10.dp, vertical = 7.dp))
+                        Text("PRESET", color = cs.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(4.dp, 14.dp, 0.dp, 8.dp))
+                        AUDIO_PRESETS.forEach { p ->
+                            val sel = p.id == cfg.preset
+                            Surface(shape = RoundedCornerShape(16.dp),
+                                color = if (sel) cs.primary.copy(alpha = 0.14f) else cs.surfaceVariant,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                    .border(1.5.dp, if (sel) cs.primary else Color.Transparent, RoundedCornerShape(16.dp))
+                                    .clickable { applyPreset(p) }) {
+                                Row(Modifier.padding(13.dp), verticalAlignment = Alignment.Top) {
+                                    RadioButton(selected = sel, onClick = { applyPreset(p) })
+                                    Text(p.emoji, fontSize = 18.sp, modifier = Modifier.padding(top = 12.dp, end = 8.dp))
+                                    Column(Modifier.weight(1f).padding(top = 8.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(p.name, color = cs.onSurface, fontWeight = FontWeight.SemiBold)
+                                            p.badge?.let {
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(it.uppercase(), color = cs.primary, fontSize = 10.sp,
+                                                    modifier = Modifier.border(1.dp, cs.primary, RoundedCornerShape(10.dp))
+                                                        .padding(horizontal = 7.dp, vertical = 1.dp))
+                                            }
+                                            Spacer(Modifier.weight(1f))
+                                            // Inside the card, but its own click target - tapping "?" explains the
+                                            // preset without selecting it, which matters when you are deciding.
+                                            IconButton(onClick = { helpRes = p.helpRes }, modifier = Modifier.size(30.dp)) {
+                                                Icon(Icons.Default.Help, contentDescription = "What is \"${p.name}\"?",
+                                                     tint = cs.onSurfaceVariant, modifier = Modifier.size(17.dp))
+                                            }
+                                        }
+                                        Text(p.desc, color = cs.onSurfaceVariant, fontSize = 12.sp)
                                     }
                                 }
                             }
-                            FtRow("Adaptive buffer", "Auto-grow only if it hears crackle", cs,
-                                onHelp = { helpRes = R.string.help_audio_adaptive }) {
-                                Switch(checked = shown.adaptive, enabled = custom,
-                                    onCheckedChange = { cfg = cfg.copy(adaptive = it) })
-                            }
-                            // DirectAudio: this is the driver's own buffer (BANNER_AUDIO_DIRECT_MS), so it
-                            // needs a range that can reach the hardware floor - one 4 ms burst - and a
-                            // label that states the total, since Android adds a fixed ~21 ms nobody can
-                            // go below. PulseAudio keeps the guest winepulse buffer it always had.
-                            val latencyUsed = latencyUsedBy(driverId)
-                            FtRow(
-                                if (directBuffer) "Audio buffer" else "Guest buffer",
-                                // ALSA reaches AAudio through the app's own server, which takes its sizing
-                                // from the buffer rows below - there is no guest-side latency for this row
-                                // to set, so say that rather than leaving a live-looking slider that does
-                                // nothing.
-                                if (!latencyUsed) "not used by ALSA — set the buffer rows below"
-                                else (if (directBuffer) "≈${shown.latencyMsec + ANDROID_OUTPUT_MS} ms total · ${shown.latencyMsec} ms buffer"
-                                      else "winepulse · ${shown.latencyMsec} ms") +
-                                    if (!latencyLive) "  · next launch" else "", cs,
-                                onHelp = { helpRes = when {
-                                    !latencyUsed -> R.string.help_audio_latency_unused
-                                    directBuffer -> R.string.help_audio_direct_buffer
-                                    else -> R.string.help_audio_guest_buffer
-                                } }) {
-                                if (directBuffer)
-                                    Slider(value = shown.latencyMsec.toFloat(), valueRange = 4f..120f, steps = 28,
-                                        enabled = custom && latencyUsed,
-                                        onValueChange = { cfg = cfg.copy(latencyMsec = (it / 4).toInt() * 4) },
-                                        modifier = Modifier.width(140.dp))
-                                else
-                                    Slider(value = shown.latencyMsec.toFloat(), valueRange = 20f..200f, steps = 17,
-                                        enabled = custom && latencyUsed,
-                                        onValueChange = { cfg = cfg.copy(latencyMsec = (it / 10).toInt() * 10) },
-                                        modifier = Modifier.width(140.dp))
-                            }
-                            FtStepper("Initial sink buffer", "frames · 0 = auto",
-                                if (shown.bufferFrames > 0) "${shown.bufferFrames}" else "auto", custom, cs,
-                                onHelp = { helpRes = R.string.help_audio_buffer_frames }) {
-                                cfg = cfg.copy(bufferFrames = (cfg.bufferFrames + it * 256).coerceAtLeast(0))
-                            }
-                            FtStepper("Max sink buffer", "growth cap · 0 = device max",
-                                if (shown.maxBufferFrames > 0) "${shown.maxBufferFrames}" else "device max", custom, cs,
-                                onHelp = { helpRes = R.string.help_audio_max_buffer_frames }) {
-                                cfg = cfg.copy(maxBufferFrames = (cfg.maxBufferFrames + it * 256).coerceAtLeast(0))
+                        }
+
+                        Text(if (custom) "FINE-TUNE" else "FINE-TUNE — what this preset applies (Custom to edit)",
+                            color = cs.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(4.dp, 16.dp, 0.dp, 8.dp))
+                        val ftAlpha = if (custom) 1f else 0.4f
+                        // Greyed rows must show what the engine will actually use, not the preset object:
+                        // on DirectAudio a named preset means a specific buffer and a forced LOW_LATENCY,
+                        // so showing the generic preset values would state the wrong thing in the one panel
+                        // whose job is telling you what the preset does. Edits still go to `cfg`; this is
+                        // only what is rendered, and it equals `cfg` whenever the rows are editable.
+                        val shown = effectiveConfigFor(cfg, driverId)
+                        Surface(shape = RoundedCornerShape(16.dp), color = cs.surfaceVariant,
+                            modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(horizontal = 14.dp).alpha(ftAlpha)) {
+                                // Output mode
+                                FtRow("Output mode", "AAudio performance mode", cs,
+                                    onHelp = { helpRes = R.string.help_audio_perf_mode }) {
+                                    Row {
+                                        // DirectAudio must NOT offer POWER_SAVING: on this engine its AAudio
+                                        // power-saving stream errors and reopens ~1/s under box64/FEX (device-
+                                        // proven 2026-08-14), a wasteful churn. Every DirectAudio preset already
+                                        // forces LOW_LATENCY for the same reason, so drop "Power" here too.
+                                        val perfOpts = if (driverId == "directaudio")
+                                            listOf("None" to 0, "Low lat." to 1)
+                                        else listOf("None" to 0, "Low lat." to 1, "Power" to 2)
+                                        perfOpts.forEach { (lbl, v) ->
+                                            val on = shown.perfMode == v
+                                            Text(lbl, color = if (on) cs.onPrimary else cs.onSurfaceVariant, fontSize = 12.sp,
+                                                modifier = Modifier.padding(horizontal = 3.dp)
+                                                    .background(if (on) cs.primary else cs.surface, RoundedCornerShape(9.dp))
+                                                    .clickable(enabled = custom) { cfg = cfg.copy(perfMode = v) }
+                                                    .padding(horizontal = 10.dp, vertical = 7.dp))
+                                        }
+                                    }
+                                }
+                                FtRow("Adaptive buffer", "Auto-grow only if it hears crackle", cs,
+                                    onHelp = { helpRes = R.string.help_audio_adaptive }) {
+                                    Switch(checked = shown.adaptive, enabled = custom,
+                                        onCheckedChange = { cfg = cfg.copy(adaptive = it) })
+                                }
+                                // DirectAudio: this is the driver's own buffer (BANNER_AUDIO_DIRECT_MS), so it
+                                // needs a range that can reach the hardware floor - one 4 ms burst - and a
+                                // label that states the total, since Android adds a fixed ~21 ms nobody can
+                                // go below. PulseAudio keeps the guest winepulse buffer it always had.
+                                val latencyUsed = latencyUsedBy(driverId)
+                                FtRow(
+                                    if (directBuffer) "Audio buffer" else "Guest buffer",
+                                    // ALSA reaches AAudio through the app's own server, which takes its sizing
+                                    // from the buffer rows below - there is no guest-side latency for this row
+                                    // to set, so say that rather than leaving a live-looking slider that does
+                                    // nothing.
+                                    if (!latencyUsed) "not used by ALSA — set the buffer rows below"
+                                    else (if (directBuffer) "≈${shown.latencyMsec + ANDROID_OUTPUT_MS} ms total · ${shown.latencyMsec} ms buffer"
+                                          else "winepulse · ${shown.latencyMsec} ms") +
+                                        if (!latencyLive) "  · next launch" else "", cs,
+                                    onHelp = { helpRes = when {
+                                        !latencyUsed -> R.string.help_audio_latency_unused
+                                        directBuffer -> R.string.help_audio_direct_buffer
+                                        else -> R.string.help_audio_guest_buffer
+                                    } }) {
+                                    if (directBuffer)
+                                        Slider(value = shown.latencyMsec.toFloat(), valueRange = 4f..120f, steps = 28,
+                                            enabled = custom && latencyUsed,
+                                            onValueChange = { cfg = cfg.copy(latencyMsec = (it / 4).toInt() * 4) },
+                                            modifier = Modifier.width(140.dp))
+                                    else
+                                        Slider(value = shown.latencyMsec.toFloat(), valueRange = 20f..200f, steps = 17,
+                                            enabled = custom && latencyUsed,
+                                            onValueChange = { cfg = cfg.copy(latencyMsec = (it / 10).toInt() * 10) },
+                                            modifier = Modifier.width(140.dp))
+                                }
+                                FtStepper("Initial sink buffer", "frames · 0 = auto",
+                                    if (shown.bufferFrames > 0) "${shown.bufferFrames}" else "auto", custom, cs,
+                                    onHelp = { helpRes = R.string.help_audio_buffer_frames }) {
+                                    cfg = cfg.copy(bufferFrames = (cfg.bufferFrames + it * 256).coerceAtLeast(0))
+                                }
+                                FtStepper("Max sink buffer", "growth cap · 0 = device max",
+                                    if (shown.maxBufferFrames > 0) "${shown.maxBufferFrames}" else "device max", custom, cs,
+                                    onHelp = { helpRes = R.string.help_audio_max_buffer_frames }) {
+                                    cfg = cfg.copy(maxBufferFrames = (cfg.maxBufferFrames + it * 256).coerceAtLeast(0))
+                                }
                             }
                         }
+                        Spacer(Modifier.height(18.dp))
                     }
-                    Spacer(Modifier.height(18.dp))
-                }
 
-                Row(Modifier.fillMaxWidth().padding(14.dp)) {
-                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Cancel") }
-                    Spacer(Modifier.width(10.dp))
-                    Button(onClick = { onSave(cfg) }, modifier = Modifier.weight(1f)) { Text("Save") }
+                    Row(Modifier.fillMaxWidth().padding(14.dp)) {
+                        OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                        Spacer(Modifier.width(10.dp))
+                        Button(onClick = { onSave(cfg) }, modifier = Modifier.weight(1f)) { Text("Save") }
+                    }
                 }
             }
         }

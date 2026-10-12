@@ -5,6 +5,7 @@ import android.os.Build
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.getValue
@@ -12,7 +13,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -97,4 +100,17 @@ fun DeckDialogBars() {
         }
         onDispose {}
     }
+}
+
+/**
+ * The Deck style's density (smaller than the rest of the app), set by DeckTheme. Composition locals reach a
+ * dialog's content but LocalDensity does not: every dialog and sheet window starts again from the raw density.
+ */
+val LocalDeckDensity = staticCompositionLocalOf<Density?> { null }
+
+/** Wraps a dialog's or sheet's content so it is drawn at the Deck style's size; does nothing in Classic. */
+@Composable
+fun DeckDialogScaled(content: @Composable () -> Unit) {
+    val deck = LocalDeckDensity.current
+    if (deck == null) content() else CompositionLocalProvider(LocalDensity provides deck, content = content)
 }

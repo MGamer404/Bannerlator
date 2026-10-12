@@ -95,6 +95,7 @@ import com.winlator.star.store.SteamRegion
 import com.winlator.star.xenvironment.ImageFsInstaller
 import com.winlator.star.MainActivity
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -1423,7 +1424,9 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
             DeckDialogBars()
-            PerformanceSettingsScreen(onClose = { showPerformanceMenu = false })
+            DeckDialogScaled {
+                PerformanceSettingsScreen(onClose = { showPerformanceMenu = false })
+            }
         }
     }
 
@@ -1446,15 +1449,17 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             },
             confirmButton = {
                 DeckDialogBars()
-                TextButton(
-                    enabled = consentChecked, // Enable stays disabled until "I understand" is ticked.
-                    onClick = {
-                        WinFgCapture.recordConsentAndEnable(context)
-                        captureEnabled = true
-                        showCaptureConsent = false
-                        AppUtils.showToast(context, "Frame-gen training capture enabled")
-                    }
-                ) { Text("Enable") }
+                DeckDialogScaled {
+                    TextButton(
+                        enabled = consentChecked, // Enable stays disabled until "I understand" is ticked.
+                        onClick = {
+                            WinFgCapture.recordConsentAndEnable(context)
+                            captureEnabled = true
+                            showCaptureConsent = false
+                            AppUtils.showToast(context, "Frame-gen training capture enabled")
+                        }
+                    ) { Text("Enable") }
+                }
             },
             dismissButton = {
                 TextButton(onClick = { showCaptureConsent = false }) { Text("Cancel") }
@@ -1470,7 +1475,9 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             text = { Text(body, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp) },
             confirmButton = {
                 DeckDialogBars()
-                TextButton(onClick = { steamHelp = null }) { Text("Close") }
+                DeckDialogScaled {
+                    TextButton(onClick = { steamHelp = null }) { Text("Close") }
+                }
             }
         )
     }
@@ -1506,7 +1513,9 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             },
             confirmButton = {
                 DeckDialogBars()
-                TextButton(onClick = { showCaptureHelp = false }) { Text("Close") }
+                DeckDialogScaled {
+                    TextButton(onClick = { showCaptureHelp = false }) { Text("Close") }
+                }
             }
         )
     }
@@ -1517,7 +1526,9 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
             DeckDialogBars()
-            LogManagerScreen(onClose = { showLogManager = false })
+            DeckDialogScaled {
+                LogManagerScreen(onClose = { showLogManager = false })
+            }
         }
     }
 

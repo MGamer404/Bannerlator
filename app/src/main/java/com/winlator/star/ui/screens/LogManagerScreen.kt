@@ -72,6 +72,7 @@ import com.winlator.star.core.LogInventory
 import com.winlator.star.core.LogLocation
 import com.winlator.star.core.LogcatCapture
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.theme.DangerRed
 import kotlinx.coroutines.launch
 import java.io.File
@@ -494,10 +495,12 @@ fun LogManagerScreen(onClose: () -> Unit) {
             properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
         ) {
             DeckDialogBars()
-            // A Dialog window is transparent and the File Manager draws no background of its own —
-            // without this Surface it renders on top of whatever is behind the dialog.
-            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                FileManagerScreen(initialDir = dir)
+            DeckDialogScaled {
+                // A Dialog window is transparent and the File Manager draws no background of its own —
+                // without this Surface it renders on top of whatever is behind the dialog.
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    FileManagerScreen(initialDir = dir)
+                }
             }
         }
     }
@@ -508,8 +511,10 @@ fun LogManagerScreen(onClose: () -> Unit) {
             properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
         ) {
             DeckDialogBars()
-            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                LogViewerScreen(entry = entry, onClose = { viewing = null })
+            DeckDialogScaled {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    LogViewerScreen(entry = entry, onClose = { viewing = null })
+                }
             }
         }
     }
@@ -908,119 +913,121 @@ private fun AllChannelsDialog(
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
     ) {
         DeckDialogBars()
-        Surface(
-            // Nearly full-bleed. This device is a landscape handheld, and at 0.9 height with the
-            // title, search field and chips each on their own row the list got a single visible
-            // row — the one part of the dialog that matters. The header is now one row and the
-            // list takes everything left over.
-            modifier = Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.95f),
-            color = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(16.dp),
-        ) {
-            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("All Wine channels", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "${all.size} available · ${selected.size} on",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        DeckDialogScaled {
+            Surface(
+                // Nearly full-bleed. This device is a landscape handheld, and at 0.9 height with the
+                // title, search field and chips each on their own row the list got a single visible
+                // row — the one part of the dialog that matters. The header is now one row and the
+                // list takes everything left over.
+                modifier = Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.95f),
+                color = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("All Wine channels", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "${all.size} available · ${selected.size} on",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        FilterChip(
+                            selected = showHelp,
+                            onClick = { showHelp = !showHelp },
+                            label = { Text("What's this?", fontSize = 11.sp) },
+                            leadingIcon = {
+                                Icon(Icons.Outlined.HelpOutline, null, modifier = Modifier.size(14.dp))
+                            },
                         )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        FilterChip(
+                            selected = selectedOnly,
+                            onClick = { selectedOnly = !selectedOnly },
+                            label = { Text("On only", fontSize = 11.sp) },
+                        )
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.Close, "Close", tint = MaterialTheme.colorScheme.onSurface)
+                        }
                     }
-                    FilterChip(
-                        selected = showHelp,
-                        onClick = { showHelp = !showHelp },
-                        label = { Text("What's this?", fontSize = 11.sp) },
-                        leadingIcon = {
-                            Icon(Icons.Outlined.HelpOutline, null, modifier = Modifier.size(14.dp))
-                        },
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    FilterChip(
-                        selected = selectedOnly,
-                        onClick = { selectedOnly = !selectedOnly },
-                        label = { Text("On only", fontSize = 11.sp) },
-                    )
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, "Close", tint = MaterialTheme.colorScheme.onSurface)
-                    }
-                }
 
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("Search", fontSize = 12.sp) },
-                    singleLine = true,
-                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                )
-
-                if (visible.isEmpty()) {
-                    Text(
-                        if (selectedOnly && query.isBlank()) "No channels are on."
-                        else "Nothing matches \"$query\".",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp),
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = { Text("Search", fontSize = 12.sp) },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     )
-                } else {
-                    LazyColumn(modifier = Modifier.weight(1f)) {
-                        visible.forEach { (category, names) ->
-                            item(key = "hdr-$category") {
-                                Column(modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)) {
-                                    Text(
-                                        category.uppercase(),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
-                                    if (showHelp) {
+
+                    if (visible.isEmpty()) {
+                        Text(
+                            if (selectedOnly && query.isBlank()) "No channels are on."
+                            else "Nothing matches \"$query\".",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    } else {
+                        LazyColumn(modifier = Modifier.weight(1f)) {
+                            visible.forEach { (category, names) ->
+                                item(key = "hdr-$category") {
+                                    Column(modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)) {
                                         Text(
-                                            WineChannelInfo.categoryBlurb(category),
-                                            fontSize = 10.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
-                            }
-                            items(names, key = { "ch-$it" }) { ch ->
-                                val isOn = ch in selected
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            onChange(if (isOn) selected - ch else selected + ch)
-                                        }
-                                        .padding(vertical = 3.dp),
-                                ) {
-                                    Checkbox(
-                                        checked = isOn,
-                                        onCheckedChange = {
-                                            onChange(if (isOn) selected - ch else selected + ch)
-                                        },
-                                    )
-                                    Column(modifier = Modifier.weight(1f).padding(start = 2.dp)) {
-                                        Text(
-                                            ch,
-                                            fontSize = 13.sp,
-                                            color = if (isOn) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.onSurface,
+                                            category.uppercase(),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
                                         )
                                         if (showHelp) {
                                             Text(
-                                                WineChannelInfo.describe(ch),
+                                                WineChannelInfo.categoryBlurb(category),
                                                 fontSize = 10.sp,
-                                                lineHeight = 13.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
+                                        }
+                                    }
+                                }
+                                items(names, key = { "ch-$it" }) { ch ->
+                                    val isOn = ch in selected
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                onChange(if (isOn) selected - ch else selected + ch)
+                                            }
+                                            .padding(vertical = 3.dp),
+                                    ) {
+                                        Checkbox(
+                                            checked = isOn,
+                                            onCheckedChange = {
+                                                onChange(if (isOn) selected - ch else selected + ch)
+                                            },
+                                        )
+                                        Column(modifier = Modifier.weight(1f).padding(start = 2.dp)) {
+                                            Text(
+                                                ch,
+                                                fontSize = 13.sp,
+                                                color = if (isOn) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.onSurface,
+                                            )
+                                            if (showHelp) {
+                                                Text(
+                                                    WineChannelInfo.describe(ch),
+                                                    fontSize = 10.sp,
+                                                    lineHeight = 13.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
+                }
             }
         }
     }

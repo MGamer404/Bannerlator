@@ -364,12 +364,14 @@ private fun UpdateFailedCard(s: DownloadState.Failed, onRetry: () -> Unit, onRel
 private fun UpdateCardSurface(content: @Composable () -> Unit) {
     // Every card is its own dialog window: keep the landscape Deck's navigation bar hidden behind it.
     DeckDialogBars()
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)),
-    ) {
-        Box(modifier = Modifier.padding(16.dp)) { content() }
+    DeckDialogScaled {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)),
+        ) {
+            Box(modifier = Modifier.padding(16.dp)) { content() }
+        }
     }
 }
 

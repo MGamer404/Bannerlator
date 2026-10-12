@@ -116,6 +116,7 @@ import com.winlator.star.store.DownloadManagerActivity
 import com.winlator.star.ui.AccountAvatar
 import com.winlator.star.ui.AccountUiBus
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.Screen
 import com.winlator.star.ui.findActivity
 import kotlinx.coroutines.Dispatchers
@@ -865,52 +866,54 @@ private fun WallSheetScaffold(title: String, rows: List<WallSheetRow>, onDismiss
         shape = sheetShape,
     ) {
         DeckDialogBars()
-        var focusIndex by remember { mutableStateOf(0) }
-        val fr = remember { FocusRequester() }
-        LaunchedEffect(Unit) { runCatching { fr.requestFocus() } }
-        // The sheet is a plain Column, so on a short landscape screen the lower rows fell below the fold
-        // with no way to reach them (no touch scroll, and D-pad focus walked off-screen). verticalScroll
-        // restores touch scrolling; the BringIntoViewRequester keeps the D-pad-focused row on-screen.
-        val scrollState = rememberScrollState()
-        val bringers = remember(rows.size) { List(rows.size) { BringIntoViewRequester() } }
-        LaunchedEffect(focusIndex) { runCatching { bringers.getOrNull(focusIndex)?.bringIntoView() } }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                // App-menu outline — matches Modifier.outlinedMenuCard() / OutlinedAlertDialog (1dp outline).
-                .border(1.dp, cs.outline, sheetShape)
-                .verticalScroll(scrollState)
-                .padding(bottom = 24.dp)
-                .focusRequester(fr)
-                .focusable()
-                .onPreviewKeyEvent { e ->
-                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    when (e.key) {
-                        Key.DirectionUp -> { if (focusIndex > 0) focusIndex--; true }
-                        Key.DirectionDown -> { if (focusIndex < rows.lastIndex) focusIndex++; true }
-                        Key.ButtonA, Key.Enter, Key.DirectionCenter -> { rows.getOrNull(focusIndex)?.onClick?.invoke(); true }
-                        Key.ButtonB, Key.Back -> { onDismiss(); true }
-                        else -> false
+        DeckDialogScaled {
+            var focusIndex by remember { mutableStateOf(0) }
+            val fr = remember { FocusRequester() }
+            LaunchedEffect(Unit) { runCatching { fr.requestFocus() } }
+            // The sheet is a plain Column, so on a short landscape screen the lower rows fell below the fold
+            // with no way to reach them (no touch scroll, and D-pad focus walked off-screen). verticalScroll
+            // restores touch scrolling; the BringIntoViewRequester keeps the D-pad-focused row on-screen.
+            val scrollState = rememberScrollState()
+            val bringers = remember(rows.size) { List(rows.size) { BringIntoViewRequester() } }
+            LaunchedEffect(focusIndex) { runCatching { bringers.getOrNull(focusIndex)?.bringIntoView() } }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // App-menu outline — matches Modifier.outlinedMenuCard() / OutlinedAlertDialog (1dp outline).
+                    .border(1.dp, cs.outline, sheetShape)
+                    .verticalScroll(scrollState)
+                    .padding(bottom = 24.dp)
+                    .focusRequester(fr)
+                    .focusable()
+                    .onPreviewKeyEvent { e ->
+                        if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        when (e.key) {
+                            Key.DirectionUp -> { if (focusIndex > 0) focusIndex--; true }
+                            Key.DirectionDown -> { if (focusIndex < rows.lastIndex) focusIndex++; true }
+                            Key.ButtonA, Key.Enter, Key.DirectionCenter -> { rows.getOrNull(focusIndex)?.onClick?.invoke(); true }
+                            Key.ButtonB, Key.Back -> { onDismiss(); true }
+                            else -> false
+                        }
+                    },
+            ) {
+                Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = cs.onSurface, modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
+                HorizontalDivider(color = cs.outline, thickness = 1.dp)
+                rows.forEachIndexed { i, r ->
+                    // Thin grey line between options, matching the app's menus.
+                    if (i > 0) HorizontalDivider(color = cs.outline, thickness = 1.dp)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .bringIntoViewRequester(bringers[i])
+                            .then(if (i == focusIndex) Modifier.background(cs.primary.copy(alpha = 0.18f)) else Modifier)
+                            .clickable(onClick = r.onClick)
+                            .padding(horizontal = 24.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(r.icon, contentDescription = null, tint = cs.primary)
+                        Spacer(Modifier.width(16.dp))
+                        Text(r.label, fontSize = 16.sp, color = cs.onSurface)
                     }
-                },
-        ) {
-            Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = cs.onSurface, modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
-            HorizontalDivider(color = cs.outline, thickness = 1.dp)
-            rows.forEachIndexed { i, r ->
-                // Thin grey line between options, matching the app's menus.
-                if (i > 0) HorizontalDivider(color = cs.outline, thickness = 1.dp)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .bringIntoViewRequester(bringers[i])
-                        .then(if (i == focusIndex) Modifier.background(cs.primary.copy(alpha = 0.18f)) else Modifier)
-                        .clickable(onClick = r.onClick)
-                        .padding(horizontal = 24.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(r.icon, contentDescription = null, tint = cs.primary)
-                    Spacer(Modifier.width(16.dp))
-                    Text(r.label, fontSize = 16.sp, color = cs.onSurface)
                 }
             }
         }

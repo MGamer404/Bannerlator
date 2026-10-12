@@ -83,6 +83,7 @@ import com.winlator.star.store.SteamMainActivity
 import com.winlator.star.store.SteamPrefs
 import com.winlator.star.store.SteamTab
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.Screen
 import com.winlator.star.ui.screens.ShortcutsViewModel
 import com.winlator.star.ui.screens.isAmazonShortcut
@@ -467,30 +468,32 @@ private fun StoreOptionsDialog(
     val cs = MaterialTheme.colorScheme
     Dialog(onDismissRequest = onDismiss) {
         DeckDialogBars()
-        Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier
-                .widthIn(max = 480.dp)
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .background(cs.surfaceContainerHigh)
-                .padding(vertical = 14.dp),
-        ) {
-            Text(
-                text = "${store.label} options",
-                color = cs.onSurface,
-                fontFamily = SoraFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
-            )
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                if (!signedIn) DeckRow(title = "Sign in to ${store.label}", icon = Icons.AutoMirrored.Filled.Login, onClick = onSignIn)
-                tabsOf(store).filter { it != StoreTab.LIBRARY }.forEach { t ->
-                    DeckRow(title = "Open ${t.label}", icon = t.icon, onClick = { onOpenTab(t) })
+        DeckDialogScaled {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .widthIn(max = 480.dp)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(cs.surfaceContainerHigh)
+                    .padding(vertical = 14.dp),
+            ) {
+                Text(
+                    text = "${store.label} options",
+                    color = cs.onSurface,
+                    fontFamily = SoraFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                )
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    if (!signedIn) DeckRow(title = "Sign in to ${store.label}", icon = Icons.AutoMirrored.Filled.Login, onClick = onSignIn)
+                    tabsOf(store).filter { it != StoreTab.LIBRARY }.forEach { t ->
+                        DeckRow(title = "Open ${t.label}", icon = t.icon, onClick = { onOpenTab(t) })
+                    }
+                    DeckRow(title = "Open full library", icon = Icons.Filled.VideoLibrary, onClick = { onOpenTab(StoreTab.LIBRARY) })
+                    DeckRow(title = "Hide game stores", subtitle = "Appearance → Show game stores", icon = Icons.Filled.Palette, onClick = onAppearance)
                 }
-                DeckRow(title = "Open full library", icon = Icons.Filled.VideoLibrary, onClick = { onOpenTab(StoreTab.LIBRARY) })
-                DeckRow(title = "Hide game stores", subtitle = "Appearance → Show game stores", icon = Icons.Filled.Palette, onClick = onAppearance)
             }
         }
     }

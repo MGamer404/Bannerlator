@@ -93,6 +93,7 @@ import com.winlator.star.inputcontrols.ExternalController
 import com.winlator.star.inputcontrols.InputControlsManager
 import com.winlator.star.inputcontrols.SteamControllerBackend
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.components.PlayerSlotsEditor
 import com.winlator.star.ui.controllertest.SettingsControllerTestDialog
 import com.winlator.star.util.InAppFilePicker
@@ -1514,24 +1515,26 @@ private fun MenuButtonCaptureDialog(onResult: (Int) -> Unit) {
         properties = androidx.compose.ui.window.DialogProperties(dismissOnClickOutside = true),
     ) {
         DeckDialogBars()
-        val window = (androidx.compose.ui.platform.LocalView.current.parent
-            as? androidx.compose.ui.window.DialogWindowProvider)?.window
-        androidx.compose.runtime.SideEffect {
-            window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
-        }
-        Column(
-            modifier = Modifier
-                .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(12.dp))
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("Press the button you want to open the menu", color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            Text("Use your device's own controls. B and the volume keys can't be used.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-            Spacer(Modifier.height(12.dp))
-            TextButton(onClick = { onResult(-1) }) { Text(stringResource(R.string.cancel)) }
+        DeckDialogScaled {
+            val window = (androidx.compose.ui.platform.LocalView.current.parent
+                as? androidx.compose.ui.window.DialogWindowProvider)?.window
+            androidx.compose.runtime.SideEffect {
+                window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+            }
+            Column(
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(12.dp))
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Press the button you want to open the menu", color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                Text("Use your device's own controls. B and the volume keys can't be used.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick = { onResult(-1) }) { Text(stringResource(R.string.cancel)) }
+            }
         }
     }
 }

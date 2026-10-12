@@ -27,6 +27,7 @@ import com.winlator.star.components.GameRecommendations
 import com.winlator.star.components.PrefixInstalledDetector
 import com.winlator.star.container.Container
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.findActivity
 import com.winlator.star.ui.theme.Divider as DividerColor
 import kotlinx.coroutines.Dispatchers
@@ -144,138 +145,140 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit, exeFile: File? 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState,
         containerColor = cs.surface, contentColor = cs.onSurface) {
         DeckDialogBars()
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(bottom = 12.dp)) {
-            Text("Components", style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp))
-            Text("Install Wine dependencies into this container",
-                style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp))
-            OutlinedTextField(
-                value = query, onValueChange = { query = it },
-                singleLine = true,
-                placeholder = { Text("Search components") },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            )
-            Spacer(Modifier.height(8.dp))
-            Divider(color = DividerColor)
+        DeckDialogScaled {
+            Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(bottom = 12.dp)) {
+                Text("Components", style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp))
+                Text("Install Wine dependencies into this container",
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp))
+                OutlinedTextField(
+                    value = query, onValueChange = { query = it },
+                    singleLine = true,
+                    placeholder = { Text("Search components") },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                Divider(color = DividerColor)
 
-            when {
-                loading -> Box(Modifier.fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = cs.primary)
-                }
-                loadError -> Box(Modifier.fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
-                    Text("Couldn't load the component catalog.", color = cs.onSurfaceVariant)
-                }
-                else -> {
-                    // Name → component, for routing a base install to its file-drop `_dll` variant below.
-                    // Built from the full list (the `_dll` variants are hidden from `shown`, not dropped).
-                    val byName = remember(components) { components.associateBy { it.name } }
-                    // Installed components float to the top (checked), so what the container already
-                    // has is obvious and users don't reinstall. Stable within each group; re-sorts
-                    // live when something finishes installing (installed is a key). The file-drop `_dll`
-                    // variants are install-implementation (reached via routing in onInstall), so they're
-                    // filtered out here — otherwise vcredist2010 AND vcredist2010_dll show as duplicates.
-                    // The file-drop `_dll` variants are install-implementation (reached via routing in
-                    // install()), so they're hidden - otherwise vcredist2010 AND vcredist2010_dll show twice.
-                    val shown = remember(components, query) {
-                        components.filter {
-                            !it.name.endsWith("_dll") &&
-                                (query.isBlank() || it.name.contains(query, true) || it.description.contains(query, true))
-                        }
+                when {
+                    loading -> Box(Modifier.fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = cs.primary)
                     }
-                    // What the game needs, by the name the list shows (a `_dll` pick shows as its base).
-                    val reasons = remember(recs, byName) {
-                        recs.associate { r ->
-                            val base = r.componentName.removeSuffix("_dll").takeIf { byName.containsKey(it) } ?: r.componentName
-                            base to GameRecommendations.reason(r)
-                        }
+                    loadError -> Box(Modifier.fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
+                        Text("Couldn't load the component catalog.", color = cs.onSurfaceVariant)
                     }
-                    val opensContainer: (Component) -> Boolean = { c -> (byName["${c.name}_dll"] ?: c).let { ComponentExecInstaller.isExecComponent(it) } }
-                    val recommended = shown.filter { it.name in reasons }
-                    val have = shown.filter { it.name in installed && it.name !in reasons }
-                    val rest = shown.filter { it.name !in reasons && it.name !in installed }
-                    val others = rest.filterNot(opensContainer)
-                    val session = rest.filter(opensContainer)
+                    else -> {
+                        // Name → component, for routing a base install to its file-drop `_dll` variant below.
+                        // Built from the full list (the `_dll` variants are hidden from `shown`, not dropped).
+                        val byName = remember(components) { components.associateBy { it.name } }
+                        // Installed components float to the top (checked), so what the container already
+                        // has is obvious and users don't reinstall. Stable within each group; re-sorts
+                        // live when something finishes installing (installed is a key). The file-drop `_dll`
+                        // variants are install-implementation (reached via routing in onInstall), so they're
+                        // filtered out here — otherwise vcredist2010 AND vcredist2010_dll show as duplicates.
+                        // The file-drop `_dll` variants are install-implementation (reached via routing in
+                        // install()), so they're hidden - otherwise vcredist2010 AND vcredist2010_dll show twice.
+                        val shown = remember(components, query) {
+                            components.filter {
+                                !it.name.endsWith("_dll") &&
+                                    (query.isBlank() || it.name.contains(query, true) || it.description.contains(query, true))
+                            }
+                        }
+                        // What the game needs, by the name the list shows (a `_dll` pick shows as its base).
+                        val reasons = remember(recs, byName) {
+                            recs.associate { r ->
+                                val base = r.componentName.removeSuffix("_dll").takeIf { byName.containsKey(it) } ?: r.componentName
+                                base to GameRecommendations.reason(r)
+                            }
+                        }
+                        val opensContainer: (Component) -> Boolean = { c -> (byName["${c.name}_dll"] ?: c).let { ComponentExecInstaller.isExecComponent(it) } }
+                        val recommended = shown.filter { it.name in reasons }
+                        val have = shown.filter { it.name in installed && it.name !in reasons }
+                        val rest = shown.filter { it.name !in reasons && it.name !in installed }
+                        val others = rest.filterNot(opensContainer)
+                        val session = rest.filter(opensContainer)
 
-                    fun install(c: Component) {
-                        // Prefer the file-drop `_dll` variant when the catalog carries one: it copies DLLs
-                        // straight into the prefix. Installed-state is recorded under the BASE name.
-                        val target = byName["${c.name}_dll"] ?: c
-                        when {
-                            // An installer that must run → confirm, then a container session.
-                            ComponentExecInstaller.isExecComponent(target) -> confirmExec = target
-                            // Local-only steps the exec driver does inline (set_windows/uninstall).
-                            ComponentExecInstaller.handlesComponent(target) -> runExecInstall(target)
-                            else -> {
-                                installing = c.name; progress = 0f; stage = ""
-                                scope.launch {
-                                    val err = withContext(Dispatchers.IO) {
-                                        ComponentInstaller.install(context, container, target,
-                                            { f -> activity?.runOnUiThread { progress = f } },
-                                            { t -> activity?.runOnUiThread { stage = t } })
+                        fun install(c: Component) {
+                            // Prefer the file-drop `_dll` variant when the catalog carries one: it copies DLLs
+                            // straight into the prefix. Installed-state is recorded under the BASE name.
+                            val target = byName["${c.name}_dll"] ?: c
+                            when {
+                                // An installer that must run → confirm, then a container session.
+                                ComponentExecInstaller.isExecComponent(target) -> confirmExec = target
+                                // Local-only steps the exec driver does inline (set_windows/uninstall).
+                                ComponentExecInstaller.handlesComponent(target) -> runExecInstall(target)
+                                else -> {
+                                    installing = c.name; progress = 0f; stage = ""
+                                    scope.launch {
+                                        val err = withContext(Dispatchers.IO) {
+                                            ComponentInstaller.install(context, container, target,
+                                                { f -> activity?.runOnUiThread { progress = f } },
+                                                { t -> activity?.runOnUiThread { stage = t } })
+                                        }
+                                        installing = null
+                                        if (err == null) {
+                                            // Components it bundled were recorded as they went in.
+                                            installed = installed + (installsPrefs.getStringSet(installKey, emptySet()) ?: emptySet())
+                                            markInstalled(c.name)
+                                        } else message = "Couldn't install ${c.name}: $err"
                                     }
-                                    installing = null
-                                    if (err == null) {
-                                        // Components it bundled were recorded as they went in.
-                                        installed = installed + (installsPrefs.getStringSet(installKey, emptySet()) ?: emptySet())
-                                        markInstalled(c.name)
-                                    } else message = "Couldn't install ${c.name}: $err"
                                 }
                             }
                         }
-                    }
 
-                    Box(Modifier.fillMaxWidth().weight(1f)) {
-                        LazyColumn(Modifier.fillMaxSize()) {
-                            fun section(title: String, list: List<Component>, note: (Component) -> String? = { null }) {
-                                if (list.isEmpty()) return
-                                item(key = "h-$title") { SectionHeader("$title (${list.size})") }
-                                items(list, key = { it.name }) { c ->
-                                    ComponentRow(
-                                        c = c,
-                                        isInstalled = c.name in installed,
-                                        isInstalling = installing == c.name,
-                                        progress = if (installing == c.name) progress else null,
-                                        stage = if (installing == c.name) stage else "",
-                                        note = note(c),
-                                        enabled = installing == null,
-                                        onInstall = { install(c) },
-                                    )
-                                    Divider(color = DividerColor.copy(alpha = 0.5f))
-                                }
-                            }
-                            section("Recommended for this game", recommended) { reasons[it.name] }
-                            section("Installed in this container", have)
-                            section("All components", others)
-                            if (session.isNotEmpty()) {
-                                item(key = "h-session") {
-                                    SectionHeader(
-                                        (if (showSession) "▾ " else "▸ ") + "Open the container to install (${session.size})",
-                                        Modifier.clickable { showSession = !showSession },
-                                    )
-                                }
-                                if (showSession) {
-                                    items(session, key = { it.name }) { c ->
+                        Box(Modifier.fillMaxWidth().weight(1f)) {
+                            LazyColumn(Modifier.fillMaxSize()) {
+                                fun section(title: String, list: List<Component>, note: (Component) -> String? = { null }) {
+                                    if (list.isEmpty()) return
+                                    item(key = "h-$title") { SectionHeader("$title (${list.size})") }
+                                    items(list, key = { it.name }) { c ->
                                         ComponentRow(
                                             c = c,
                                             isInstalled = c.name in installed,
                                             isInstalling = installing == c.name,
                                             progress = if (installing == c.name) progress else null,
                                             stage = if (installing == c.name) stage else "",
-                                            note = null,
+                                            note = note(c),
                                             enabled = installing == null,
                                             onInstall = { install(c) },
                                         )
                                         Divider(color = DividerColor.copy(alpha = 0.5f))
                                     }
                                 }
+                                section("Recommended for this game", recommended) { reasons[it.name] }
+                                section("Installed in this container", have)
+                                section("All components", others)
+                                if (session.isNotEmpty()) {
+                                    item(key = "h-session") {
+                                        SectionHeader(
+                                            (if (showSession) "▾ " else "▸ ") + "Open the container to install (${session.size})",
+                                            Modifier.clickable { showSession = !showSession },
+                                        )
+                                    }
+                                    if (showSession) {
+                                        items(session, key = { it.name }) { c ->
+                                            ComponentRow(
+                                                c = c,
+                                                isInstalled = c.name in installed,
+                                                isInstalling = installing == c.name,
+                                                progress = if (installing == c.name) progress else null,
+                                                stage = if (installing == c.name) stage else "",
+                                                note = null,
+                                                enabled = installing == null,
+                                                onInstall = { install(c) },
+                                            )
+                                            Divider(color = DividerColor.copy(alpha = 0.5f))
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onDismiss) { Text("Close", color = cs.primary) }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Close", color = cs.primary) }
+                }
             }
         }
     }

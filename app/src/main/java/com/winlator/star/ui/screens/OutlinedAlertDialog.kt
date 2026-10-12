@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 
 // Single source of truth for the app's AlertDialogs: a drop-in wrapper around the Material3
 // slot-based AlertDialog that adds a 1dp outline around the whole popup box — matching the
@@ -20,7 +21,8 @@ import com.winlator.star.ui.DeckDialogBars
 // 1.2.0), so every call site can swap AlertDialog( → OutlinedAlertDialog( unchanged. The
 // border shares the dialog's shape so its corner radius follows the rounded dialog.
 // The confirm slot also runs DeckDialogBars (inside the dialog's own window), so landscape Deck
-// keeps Android's navigation bar hidden behind the popup; a no-op in Classic.
+// keeps Android's navigation bar hidden behind the popup, and every slot is drawn at the Deck size;
+// both are no-ops in Classic.
 @Composable
 internal fun OutlinedAlertDialog(
     onDismissRequest: () -> Unit,
@@ -42,13 +44,13 @@ internal fun OutlinedAlertDialog(
         onDismissRequest = onDismissRequest,
         confirmButton = {
             DeckDialogBars()
-            confirmButton()
+            DeckDialogScaled(confirmButton)
         },
         modifier = modifier.border(1.dp, MaterialTheme.colorScheme.outline, shape),
-        dismissButton = dismissButton,
-        icon = icon,
-        title = title,
-        text = text,
+        dismissButton = dismissButton?.let { { DeckDialogScaled(it) } },
+        icon = icon?.let { { DeckDialogScaled(it) } },
+        title = title?.let { { DeckDialogScaled(it) } },
+        text = text?.let { { DeckDialogScaled(it) } },
         shape = shape,
         containerColor = containerColor,
         iconContentColor = iconContentColor,

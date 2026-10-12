@@ -41,6 +41,7 @@ import com.winlator.star.store.SteamPrefs
 import com.winlator.star.store.SteamSessionManager
 import com.winlator.star.store.steamscript.InstallScriptExecutor
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -381,45 +382,47 @@ fun ShortcutLaunchDialogs(launcher: ShortcutLauncher, onRemove: (Shortcut) -> Bo
             },
             confirmButton = {
                 DeckDialogBars()
-                TextButton(enabled = !launcher.eaSetupBusy, onClick = {
-                    launcher.eaSetupBusy = true
-                    launcher.eaScope.launch {
-                        // Resolve with the SAME derivation that decided to show this dialog
-                        // (EaSupport.installDirOf): a legacy shortcut written before steamAppId was stamped
-                        // (pre-2026-08 downloads), or a drive-letter path the strict resolver can't map, used
-                        // to dead-end here with a misleading "install folder" toast (reported on NFS Heat, 3.0.7).
-                        val installDir = withContext(Dispatchers.IO) {
-                            runCatching { EaSupport.installDirOf(s) }.getOrNull()
-                        }
-                        val exe = withContext(Dispatchers.IO) {
-                            val resolved = runCatching { WinePath.resolveAndroidPath(s.container, s.path)?.absolutePath }.getOrNull()
-                            // runForShortcut locates the depot from the exe's steam_games/ segment, so prefer a
-                            // path inside the resolved depot when the direct mapping lacks that segment.
-                            resolved?.takeIf { InstallScriptExecutor.locateInstallDir(File(it)) != null }
-                                ?: installDir?.let { File(it, s.path.replace('\\', '/').substringAfterLast('/')).absolutePath }
-                                ?: resolved
-                        }
-                        val appId = withContext(Dispatchers.IO) {
-                            runCatching { EaSupport.resolveSteamAppId(s, installDir) }.getOrDefault(0)
-                        }
-                        if (exe != null && appId > 0) {
-                            withContext(Dispatchers.IO) {
-                                try { InstallScriptExecutor.runForShortcut(context, s.container, appId, exe, true) }
-                                catch (t: Throwable) { android.util.Log.w("ShortcutsScreen", "EA setup failed", t) }
+                DeckDialogScaled {
+                    TextButton(enabled = !launcher.eaSetupBusy, onClick = {
+                        launcher.eaSetupBusy = true
+                        launcher.eaScope.launch {
+                            // Resolve with the SAME derivation that decided to show this dialog
+                            // (EaSupport.installDirOf): a legacy shortcut written before steamAppId was stamped
+                            // (pre-2026-08 downloads), or a drive-letter path the strict resolver can't map, used
+                            // to dead-end here with a misleading "install folder" toast (reported on NFS Heat, 3.0.7).
+                            val installDir = withContext(Dispatchers.IO) {
+                                runCatching { EaSupport.installDirOf(s) }.getOrNull()
                             }
-                        } else {
-                            android.util.Log.w("ShortcutsScreen", "EA setup: cannot start for '${s.name}' — exe=$exe appId=$appId path='${s.path}' container=${s.container.id}")
-                            Toast.makeText(
-                                context,
-                                if (exe == null) "Couldn't locate the game's install folder (${s.path})"
-                                else "Couldn't work out this game's Steam app id — re-add it from the Steam library",
-                                Toast.LENGTH_LONG,
-                            ).show()
+                            val exe = withContext(Dispatchers.IO) {
+                                val resolved = runCatching { WinePath.resolveAndroidPath(s.container, s.path)?.absolutePath }.getOrNull()
+                                // runForShortcut locates the depot from the exe's steam_games/ segment, so prefer a
+                                // path inside the resolved depot when the direct mapping lacks that segment.
+                                resolved?.takeIf { InstallScriptExecutor.locateInstallDir(File(it)) != null }
+                                    ?: installDir?.let { File(it, s.path.replace('\\', '/').substringAfterLast('/')).absolutePath }
+                                    ?: resolved
+                            }
+                            val appId = withContext(Dispatchers.IO) {
+                                runCatching { EaSupport.resolveSteamAppId(s, installDir) }.getOrDefault(0)
+                            }
+                            if (exe != null && appId > 0) {
+                                withContext(Dispatchers.IO) {
+                                    try { InstallScriptExecutor.runForShortcut(context, s.container, appId, exe, true) }
+                                    catch (t: Throwable) { android.util.Log.w("ShortcutsScreen", "EA setup failed", t) }
+                                }
+                            } else {
+                                android.util.Log.w("ShortcutsScreen", "EA setup: cannot start for '${s.name}' — exe=$exe appId=$appId path='${s.path}' container=${s.container.id}")
+                                Toast.makeText(
+                                    context,
+                                    if (exe == null) "Couldn't locate the game's install folder (${s.path})"
+                                    else "Couldn't work out this game's Steam app id — re-add it from the Steam library",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                            launcher.eaSetupBusy = false
+                            launcher.eaSetupFor = null
                         }
-                        launcher.eaSetupBusy = false
-                        launcher.eaSetupFor = null
-                    }
-                }) { Text(if (launcher.eaSetupBusy) "Starting…" else "Set up") }
+                    }) { Text(if (launcher.eaSetupBusy) "Starting…" else "Set up") }
+                }
             },
             dismissButton = { TextButton(enabled = !launcher.eaSetupBusy, onClick = { launcher.eaSetupFor = null }) { Text("Cancel") } },
         )

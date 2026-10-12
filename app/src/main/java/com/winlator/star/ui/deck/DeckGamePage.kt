@@ -83,6 +83,7 @@ import com.winlator.star.androidgames.AndroidGames
 import com.winlator.star.linux.LinuxShortcuts
 import com.winlator.star.store.SteamAchievementStore
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.screens.GameMenuAction
 import com.winlator.star.ui.screens.ShortcutActionDialogs
 import com.winlator.star.ui.screens.ShortcutLaunchDialogs
@@ -564,56 +565,58 @@ internal fun DeckGameMenuSheet(
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         DeckDialogBars()
-        BackHandler(onBack = onDismiss)
-        Box(
-            contentAlignment = if (compact) Alignment.BottomCenter else Alignment.CenterEnd,
-            modifier = Modifier.fillMaxSize().clickable(onClick = onDismiss, indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }),
-        ) {
-            val shape = if (compact) RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp) else RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp)
-            Column(
-                modifier = Modifier
-                    .then(if (compact) Modifier.fillMaxWidth().fillMaxHeight(0.9f) else Modifier.fillMaxHeight().widthIn(max = 520.dp).fillMaxWidth(0.5f))
-                    .clip(shape)
-                    .background(cs.surfaceContainerHigh)
-                    .border(1.dp, deckLine(), shape)
-                    // Swallow taps so they don't reach the dismiss scrim behind the sheet.
-                    .clickable(onClick = {}, indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() })
-                    .padding(horizontal = 20.dp, vertical = 18.dp),
+        DeckDialogScaled {
+            BackHandler(onBack = onDismiss)
+            Box(
+                contentAlignment = if (compact) Alignment.BottomCenter else Alignment.CenterEnd,
+                modifier = Modifier.fillMaxSize().clickable(onClick = onDismiss, indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Game menu", color = cs.onSurface, fontFamily = SoraFamily, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.weight(1f))
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .deckFocusRing(RoundedCornerShape(14.dp), scaleTo = 1f)
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable(onClick = onDismiss)
-                            .size(44.dp),
-                    ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close", tint = cs.onSurface)
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 14.dp)) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.size(width = 54.dp, height = 76.dp).clip(RoundedCornerShape(10.dp)).background(cs.surfaceVariant),
-                    ) {
-                        val bmp = shortcut.icon
-                        if (bmp != null) {
-                            val img = remember(bmp) { bmp.asImageBitmap() }
-                            Image(img, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                        } else {
-                            Icon(Icons.Filled.SportsEsports, contentDescription = null, tint = cs.primary)
+                val shape = if (compact) RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp) else RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp)
+                Column(
+                    modifier = Modifier
+                        .then(if (compact) Modifier.fillMaxWidth().fillMaxHeight(0.9f) else Modifier.fillMaxHeight().widthIn(max = 520.dp).fillMaxWidth(0.5f))
+                        .clip(shape)
+                        .background(cs.surfaceContainerHigh)
+                        .border(1.dp, deckLine(), shape)
+                        // Swallow taps so they don't reach the dismiss scrim behind the sheet.
+                        .clickable(onClick = {}, indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() })
+                        .padding(horizontal = 20.dp, vertical = 18.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Game menu", color = cs.onSurface, fontFamily = SoraFamily, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.weight(1f))
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .deckFocusRing(RoundedCornerShape(14.dp), scaleTo = 1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable(onClick = onDismiss)
+                                .size(44.dp),
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Close", tint = cs.onSurface)
                         }
                     }
-                    Spacer(Modifier.width(14.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(shortcut.name, color = cs.onSurface, fontWeight = FontWeight.Bold, fontSize = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(subtitle, color = cs.onSurfaceVariant, fontSize = 13.5.sp, maxLines = 1)
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 14.dp)) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.size(width = 54.dp, height = 76.dp).clip(RoundedCornerShape(10.dp)).background(cs.surfaceVariant),
+                        ) {
+                            val bmp = shortcut.icon
+                            if (bmp != null) {
+                                val img = remember(bmp) { bmp.asImageBitmap() }
+                                Image(img, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            } else {
+                                Icon(Icons.Filled.SportsEsports, contentDescription = null, tint = cs.primary)
+                            }
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(shortcut.name, color = cs.onSurface, fontWeight = FontWeight.Bold, fontSize = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(subtitle, color = cs.onSurfaceVariant, fontSize = 13.5.sp, maxLines = 1)
+                        }
                     }
-                }
-                Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(bottom = 8.dp)) {
-                    DeckGameMenuList(shortcut, onPlay, onAction, onContainer, firstRequester)
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(bottom = 8.dp)) {
+                        DeckGameMenuList(shortcut, onPlay, onAction, onContainer, firstRequester)
+                    }
                 }
             }
         }

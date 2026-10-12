@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 
 /** Verbatim risk copy for the hard-gate disclaimers (kept in one place so both surfaces match). */
 object PerfDisclaimerCopy {
@@ -56,21 +57,23 @@ object PerfDisclaimerCopy {
 fun PerfInfoDialog(title: String, body: String, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         DeckDialogBars()
-        Surface(
-            modifier = Modifier.fillMaxWidth(0.92f).padding(8.dp),
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface)
-                // Bounded + scrollable so long explainers (watchdog, the consolidated toggle list) fit.
-                Text(
-                    body, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp,
-                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())
-                )
-                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                    Button(onClick = onDismiss) { Text("Got it") }
+        DeckDialogScaled {
+            Surface(
+                modifier = Modifier.fillMaxWidth(0.92f).padding(8.dp),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surface,
+            ) {
+                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface)
+                    // Bounded + scrollable so long explainers (watchdog, the consolidated toggle list) fit.
+                    Text(
+                        body, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp,
+                        modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())
+                    )
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        Button(onClick = onDismiss) { Text("Got it") }
+                    }
                 }
             }
         }
@@ -101,44 +104,46 @@ fun PerfDisclaimerDialog(
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         DeckDialogBars()
-        Surface(
-            modifier = Modifier.fillMaxWidth(0.92f).padding(8.dp),
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.error)
+        DeckDialogScaled {
+            Surface(
+                modifier = Modifier.fillMaxWidth(0.92f).padding(8.dp),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surface,
+            ) {
+                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error)
 
-                Text(
-                    body,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = 13.sp,
-                    modifier = Modifier
-                        .heightIn(max = 320.dp)
-                        .verticalScroll(scroll)
-                )
+                    Text(
+                        body,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 13.sp,
+                        modifier = Modifier
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(scroll)
+                    )
 
-                if (!reachedBottom) {
-                    Text("Scroll to the end to continue.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-                }
+                    if (!reachedBottom) {
+                        Text("Scroll to the end to continue.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Checkbox(checked = accepted, onCheckedChange = { accepted = it }, enabled = reachedBottom)
-                    Spacer(Modifier.width(6.dp))
-                    Text("I understand and accept all risk",
-                        color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
-                }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Checkbox(checked = accepted, onCheckedChange = { accepted = it }, enabled = reachedBottom)
+                        Spacer(Modifier.width(6.dp))
+                        Text("I understand and accept all risk",
+                            color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+                    }
 
-                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
-                    Spacer(Modifier.width(8.dp))
-                    Button(onClick = { if (canConfirm) { onConfirm(); } }, enabled = canConfirm) {
-                        Text(confirmLabel)
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = onDismiss) { Text("Cancel") }
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = { if (canConfirm) { onConfirm(); } }, enabled = canConfirm) {
+                            Text(confirmLabel)
+                        }
                     }
                 }
             }

@@ -58,6 +58,7 @@ import com.winlator.star.reshade.ReshadeCatalogEntry
 import com.winlator.star.reshade.ReshadeDownloader
 import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.findActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -205,91 +206,93 @@ private fun ReshadeCatalogSheet(
         contentColor = cs.onSurface,
     ) {
         DeckDialogBars()
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(bottom = 12.dp)) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "ReShade Effects",
-                    color = cs.onSurface, style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                if (selectedNames.isNotEmpty()) {
-                    TextButton(onClick = onClear) { Text("Clear all", color = cs.primary) }
-                }
-            }
-            if (offline && !loading) {
-                Text(
-                    if (source == ReshadeCatalog.Source.CACHE)
-                        "Offline — showing a cached list. Connect to download new effects."
-                    else "Offline — showing installed effects only. Connect to browse the catalog.",
-                    color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 2.dp),
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-
-            // Search bar — filters the visible list (both groups) as the user types.
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                singleLine = true,
-                placeholder = { Text("Search effects…") },
-                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        Icon(Icons.Filled.Close, contentDescription = "Clear",
-                            modifier = Modifier.size(20.dp).clickable { query = "" })
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-            )
-            Spacer(Modifier.height(10.dp))
-            Divider(color = cs.outlineVariant)
-
-            errorMsg?.let {
-                Text(it, color = cs.error, style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            }
-
-            if (loading) {
-                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = cs.primary)
-                }
-            } else {
-                Box(Modifier.fillMaxWidth().weight(1f)) {
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        if (installedRows.isNotEmpty()) {
-                            item("__installed_hdr__") { GroupHeader("Installed (${installedRows.size})") }
-                            items(installedRows, key = { "i_${it.id}" }) { entry ->
-                                CatalogRowItem(entry, installed, ::isSelected, downloadingId, phaseLabel, progress, offline, cs,
-                                    onToggle, { startDownload(it) }, { pendingDelete = entry }) { errorMsg = it }
-                                Divider(color = cs.outlineVariant.copy(alpha = 0.5f))
-                            }
-                        }
-
-                        if (availableRows.isNotEmpty()) {
-                            item("__available_hdr__") { GroupHeader("Available (${availableRows.size})") }
-                            items(availableRows, key = { "a_${it.id}" }) { entry ->
-                                CatalogRowItem(entry, installed, ::isSelected, downloadingId, phaseLabel, progress, offline, cs,
-                                    onToggle, { startDownload(it) }, { pendingDelete = entry }) { errorMsg = it }
-                                Divider(color = cs.outlineVariant.copy(alpha = 0.5f))
-                            }
-                        }
-
-                        if (installedRows.isEmpty() && availableRows.isEmpty()) {
-                            item("__empty__") {
-                                Text(
-                                    if (query.isNotBlank()) "No effects match \"$query\"."
-                                    else "No effects available. Connect to the internet to browse the catalog.",
-                                    color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.padding(24.dp),
-                                )
-                            }
-                        }
+        DeckDialogScaled {
+            Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(bottom = 12.dp)) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "ReShade Effects",
+                        color = cs.onSurface, style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (selectedNames.isNotEmpty()) {
+                        TextButton(onClick = onClear) { Text("Clear all", color = cs.primary) }
                     }
                 }
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onDismiss) { Text("Done", color = cs.primary) }
+                if (offline && !loading) {
+                    Text(
+                        if (source == ReshadeCatalog.Source.CACHE)
+                            "Offline — showing a cached list. Connect to download new effects."
+                        else "Offline — showing installed effects only. Connect to browse the catalog.",
+                        color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 2.dp),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+
+                // Search bar — filters the visible list (both groups) as the user types.
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    placeholder = { Text("Search effects…") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            Icon(Icons.Filled.Close, contentDescription = "Clear",
+                                modifier = Modifier.size(20.dp).clickable { query = "" })
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                )
+                Spacer(Modifier.height(10.dp))
+                Divider(color = cs.outlineVariant)
+
+                errorMsg?.let {
+                    Text(it, color = cs.error, style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                }
+
+                if (loading) {
+                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = cs.primary)
+                    }
+                } else {
+                    Box(Modifier.fillMaxWidth().weight(1f)) {
+                        LazyColumn(Modifier.fillMaxSize()) {
+                            if (installedRows.isNotEmpty()) {
+                                item("__installed_hdr__") { GroupHeader("Installed (${installedRows.size})") }
+                                items(installedRows, key = { "i_${it.id}" }) { entry ->
+                                    CatalogRowItem(entry, installed, ::isSelected, downloadingId, phaseLabel, progress, offline, cs,
+                                        onToggle, { startDownload(it) }, { pendingDelete = entry }) { errorMsg = it }
+                                    Divider(color = cs.outlineVariant.copy(alpha = 0.5f))
+                                }
+                            }
+
+                            if (availableRows.isNotEmpty()) {
+                                item("__available_hdr__") { GroupHeader("Available (${availableRows.size})") }
+                                items(availableRows, key = { "a_${it.id}" }) { entry ->
+                                    CatalogRowItem(entry, installed, ::isSelected, downloadingId, phaseLabel, progress, offline, cs,
+                                        onToggle, { startDownload(it) }, { pendingDelete = entry }) { errorMsg = it }
+                                    Divider(color = cs.outlineVariant.copy(alpha = 0.5f))
+                                }
+                            }
+
+                            if (installedRows.isEmpty() && availableRows.isEmpty()) {
+                                item("__empty__") {
+                                    Text(
+                                        if (query.isNotBlank()) "No effects match \"$query\"."
+                                        else "No effects available. Connect to the internet to browse the catalog.",
+                                        color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium,
+                                        modifier = Modifier.padding(24.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Done", color = cs.primary) }
+                }
             }
         }
     }
@@ -303,18 +306,20 @@ private fun ReshadeCatalogSheet(
             text = { Text("This removes the downloaded effect from storage and takes it out of your loadout. You can re-download it any time.") },
             confirmButton = {
                 DeckDialogBars()
-                TextButton(onClick = {
-                    val id = entry.id
-                    pendingDelete = null
-                    scope.launch {
-                        val ok = withContext(Dispatchers.IO) { ReshadeManager.deleteEffect(context, id) }
-                        if (ok) {
-                            installed = installed - id      // row drops back to the "Available" group
-                            onToggle(id, false)             // and out of the current loadout
-                            onCatalogChanged()              // parent rescans the drop-in folder
-                        } else errorMsg = "Couldn't delete ${entry.name}."
-                    }
-                }) { Text("Delete", color = cs.error) }
+                DeckDialogScaled {
+                    TextButton(onClick = {
+                        val id = entry.id
+                        pendingDelete = null
+                        scope.launch {
+                            val ok = withContext(Dispatchers.IO) { ReshadeManager.deleteEffect(context, id) }
+                            if (ok) {
+                                installed = installed - id      // row drops back to the "Available" group
+                                onToggle(id, false)             // and out of the current loadout
+                                onCatalogChanged()              // parent rescans the drop-in folder
+                            } else errorMsg = "Couldn't delete ${entry.name}."
+                        }
+                    }) { Text("Delete", color = cs.error) }
+                }
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text("Cancel", color = cs.primary) }

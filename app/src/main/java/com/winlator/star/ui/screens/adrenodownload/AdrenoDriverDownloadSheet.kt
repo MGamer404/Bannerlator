@@ -69,6 +69,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.winlator.star.contents.AdrenotoolsManager
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,36 +91,38 @@ fun AdrenoDriverDownloadSheet(
         contentColor = cs.onSurface,
     ) {
         DeckDialogBars()
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.92f)
-        ) {
-            Row(
+        DeckDialogScaled {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .fillMaxHeight(0.92f)
             ) {
-                Text(
-                    text = "Download GPU drivers",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = cs.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = { showManage = true }) {
-                    Icon(Icons.Filled.Tune, contentDescription = "Manage sources", tint = cs.onSurfaceVariant)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Download GPU drivers",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = cs.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { showManage = true }) {
+                        Icon(Icons.Filled.Tune, contentDescription = "Manage sources", tint = cs.onSurfaceVariant)
+                    }
                 }
-            }
 
-            // Chip row + driver list + download/install/manage dialogs are shared with the WIN Components
-            // landscape pane (single source of truth). cardStyle = false keeps the flat bottom-sheet rows.
-            AdrenoDriverListPane(
-                showManage = showManage,
-                onManageDismiss = { showManage = false },
-                onDriverInstalled = onDriverInstalled,
-                cardStyle = false,
-            )
+                // Chip row + driver list + download/install/manage dialogs are shared with the WIN Components
+                // landscape pane (single source of truth). cardStyle = false keeps the flat bottom-sheet rows.
+                AdrenoDriverListPane(
+                    showManage = showManage,
+                    onManageDismiss = { showManage = false },
+                    onDriverInstalled = onDriverInstalled,
+                    cardStyle = false,
+                )
+            }
         }
     }
 }

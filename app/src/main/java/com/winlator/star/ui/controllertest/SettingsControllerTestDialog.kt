@@ -44,6 +44,7 @@ import androidx.compose.ui.window.DialogWindowProvider
 import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.ExternalController
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import kotlin.math.min
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -95,79 +96,81 @@ fun SettingsControllerTestDialog(
         )
     ) {
         DeckDialogBars()
-        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
-        SideEffect {
-            // Arm the fork gate SYNCHRONOUSLY (test mode only). MainActivity reads ControllerTestBus.active
-            // directly at its dispatch chokepoints, so this is live before the first input event.
-            ControllerTestBus.active = !bindMode
-            window?.apply {
-                if (bindMode) clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
-                else addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
-                clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-                setDimAmount(0f)
+        DeckDialogScaled {
+            val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+            SideEffect {
+                // Arm the fork gate SYNCHRONOUSLY (test mode only). MainActivity reads ControllerTestBus.active
+                // directly at its dispatch chokepoints, so this is live before the first input event.
+                ControllerTestBus.active = !bindMode
+                window?.apply {
+                    if (bindMode) clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+                    else addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+                    clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                    setDimAmount(0f)
+                }
             }
-        }
 
-        val cs = MaterialTheme.colorScheme
-        val cfg = LocalConfiguration.current
-        val w = min(760, cfg.screenWidthDp - 24).coerceAtLeast(300).dp
-        val maxH = (cfg.screenHeightDp - 24).coerceAtLeast(220).dp
-        // Bound the panel/binder height (card padding + toggle row) so their scroll engages and the
-        // test panel's pinned footer (Identify/Done) stays on-screen in a short landscape screen.
-        val panelMax = (maxH.value - 76f).coerceAtLeast(180f).dp
+            val cs = MaterialTheme.colorScheme
+            val cfg = LocalConfiguration.current
+            val w = min(760, cfg.screenWidthDp - 24).coerceAtLeast(300).dp
+            val maxH = (cfg.screenHeightDp - 24).coerceAtLeast(220).dp
+            // Bound the panel/binder height (card padding + toggle row) so their scroll engages and the
+            // test panel's pinned footer (Identify/Done) stays on-screen in a short landscape screen.
+            val panelMax = (maxH.value - 76f).coerceAtLeast(180f).dp
 
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.5f))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) { },
-            contentAlignment = Alignment.Center
-        ) {
-            Surface(
-                modifier = Modifier.padding(12.dp).width(w).heightIn(max = maxH),
-                shape = RoundedCornerShape(18.dp),
-                color = cs.surface,
-                contentColor = cs.onSurface,
-                border = BorderStroke(1.dp, cs.outline),
-                shadowElevation = 24.dp,
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { },
+                contentAlignment = Alignment.Center
             ) {
-                Column(Modifier.padding(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        TestBindToggle(bindMode) { bindMode = it }
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = onDismiss) { Text("Close") }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    if (bindMode) {
-                        VisualControllerBinder(
-                            profile = profile,
-                            art = padArtOf(snap, padName),
-                            snapshot = snap,
-                            allProfiles = allProfiles,
-                            onSelectProfile = onSelectProfile,
-                            onCreateProfile = onCreateProfile,
-                            onRenameProfile = onRenameProfile,
-                            onSaved = onBindingsChanged,
-                            onOpenAllBindings = onOpenAllBindings,
-                            modifier = Modifier.fillMaxWidth().heightIn(max = panelMax),
-                        )
-                    } else {
-                        ControllerTestPanel(
-                            snapshot = snap,
-                            title = "Test your controller",
-                            subtitle = snap?.deviceName?.takeIf { it.isNotEmpty() } ?: (padName ?: "Press any button on your controller"),
-                            resetKey = Unit,
-                            manualArt = manualArt,
-                            onArtChange = { manualArt = it },
-                            identifyEnabled = snap?.hasVibrator == true,
-                            onIdentify = { ControllerTestBus.onIdentify?.run() },
-                            onDone = null,
-                            modifier = Modifier.fillMaxWidth().heightIn(max = panelMax),
-                            nameHint = padName,
-                        )
+                Surface(
+                    modifier = Modifier.padding(12.dp).width(w).heightIn(max = maxH),
+                    shape = RoundedCornerShape(18.dp),
+                    color = cs.surface,
+                    contentColor = cs.onSurface,
+                    border = BorderStroke(1.dp, cs.outline),
+                    shadowElevation = 24.dp,
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                            TestBindToggle(bindMode) { bindMode = it }
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = onDismiss) { Text("Close") }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        if (bindMode) {
+                            VisualControllerBinder(
+                                profile = profile,
+                                art = padArtOf(snap, padName),
+                                snapshot = snap,
+                                allProfiles = allProfiles,
+                                onSelectProfile = onSelectProfile,
+                                onCreateProfile = onCreateProfile,
+                                onRenameProfile = onRenameProfile,
+                                onSaved = onBindingsChanged,
+                                onOpenAllBindings = onOpenAllBindings,
+                                modifier = Modifier.fillMaxWidth().heightIn(max = panelMax),
+                            )
+                        } else {
+                            ControllerTestPanel(
+                                snapshot = snap,
+                                title = "Test your controller",
+                                subtitle = snap?.deviceName?.takeIf { it.isNotEmpty() } ?: (padName ?: "Press any button on your controller"),
+                                resetKey = Unit,
+                                manualArt = manualArt,
+                                onArtChange = { manualArt = it },
+                                identifyEnabled = snap?.hasVibrator == true,
+                                onIdentify = { ControllerTestBus.onIdentify?.run() },
+                                onDone = null,
+                                modifier = Modifier.fillMaxWidth().heightIn(max = panelMax),
+                                nameHint = padName,
+                            )
+                        }
                     }
                 }
             }

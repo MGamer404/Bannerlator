@@ -88,6 +88,7 @@ import com.winlator.star.ui.AppDrawerContent
 import com.winlator.star.ui.AppNavGraph
 import com.winlator.star.ui.AppTopBar
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.PreloaderOverlay
 import com.winlator.star.ui.Screen
 import com.winlator.star.ui.screens.SplashScreen
@@ -956,84 +957,86 @@ private fun AboutDialog(onDismiss: () -> Unit) {
     }
     Dialog(onDismissRequest = onDismiss) {
         DeckDialogBars()
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = androidx.compose.material3.MaterialTheme.colorScheme.surface,
-            border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.material3.MaterialTheme.colorScheme.outline),
-            modifier = androidx.compose.ui.Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = androidx.compose.ui.Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+        DeckDialogScaled {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = androidx.compose.material3.MaterialTheme.colorScheme.surface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, androidx.compose.material3.MaterialTheme.colorScheme.outline),
+                modifier = androidx.compose.ui.Modifier.fillMaxWidth()
             ) {
-                // Logo + name
-                Image(
-                    painter = painterResource(R.drawable.splash_logo),
-                    contentDescription = null,
+                Column(
                     modifier = androidx.compose.ui.Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp)
-                )
-                Text(
-                    text = "Bannerlator Bionic",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
-                )
-                val newer = update?.takeIf { it.isNewer }
-                Text(
-                    // Read from BuildConfig so it tracks the gradle versionName automatically
-                    // and never drifts from the real app version again.
-                    text = "V ${BuildConfig.VERSION_NAME}" +
-                        (newer?.let { " · latest V ${it.versionName}" } ?: ""),
-                    fontSize = 13.sp,
-                    color = com.winlator.star.ui.theme.OnSurfaceVariant
-                )
-                if (newer != null) {
-                    Button(
-                        onClick = { activity?.let { UpdateManager.downloadAndInstall(it, newer) {} } },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = androidx.compose.ui.graphics.Color(0xFF4CAF50)
-                        ),
+                        .verticalScroll(rememberScrollState())
+                        .padding(24.dp),
+                    horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Logo + name
+                    Image(
+                        painter = painterResource(R.drawable.splash_logo),
+                        contentDescription = null,
+                        modifier = androidx.compose.ui.Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp)
+                    )
+                    Text(
+                        text = "Bannerlator Bionic",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+                    )
+                    val newer = update?.takeIf { it.isNewer }
+                    Text(
+                        // Read from BuildConfig so it tracks the gradle versionName automatically
+                        // and never drifts from the real app version again.
+                        text = "V ${BuildConfig.VERSION_NAME}" +
+                            (newer?.let { " · latest V ${it.versionName}" } ?: ""),
+                        fontSize = 13.sp,
+                        color = com.winlator.star.ui.theme.OnSurfaceVariant
+                    )
+                    if (newer != null) {
+                        Button(
+                            onClick = { activity?.let { UpdateManager.downloadAndInstall(it, newer) {} } },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = androidx.compose.ui.graphics.Color(0xFF4CAF50)
+                            ),
+                            modifier = androidx.compose.ui.Modifier.fillMaxWidth()
+                        ) { Text("Update now", color = androidx.compose.ui.graphics.Color.White) }
+                    }
+
+                    Spacer(androidx.compose.ui.Modifier.height(4.dp))
+                    Divider(color = com.winlator.star.ui.theme.Divider)
+                    Spacer(androidx.compose.ui.Modifier.height(4.dp))
+
+                    // Powered by
+                    AboutSection(title = "Powered By") {
+                        AboutRow("Wine",    "Windows compatibility layer")
+                        AboutRow("Box64",   "x86_64 emulation on ARM")
+                        AboutRow("FEX-Emu", "Fast x86 emulator")
+                        AboutRow("Turnip",  "Open-source Vulkan driver")
+                    }
+
+                    Spacer(androidx.compose.ui.Modifier.height(4.dp))
+                    Divider(color = com.winlator.star.ui.theme.Divider)
+                    Spacer(androidx.compose.ui.Modifier.height(4.dp))
+
+                    // Credits
+                    AboutSection(title = "Credits") {
+                        AboutRow("brunodev85",      "Winlator — original project")
+                        AboutRow("MishaMixXx",      "Winlator Bionic")
+                        AboutRow("The412Banner",    "Bannerlator")
+                        AboutRow("ptitSeb",         "Box64")
+                        AboutRow("WineHQ",          "Wine project")
+                        AboutRow("Mesa / Freedreno","Turnip Vulkan driver")
+                    }
+
+                    Spacer(androidx.compose.ui.Modifier.height(8.dp))
+                    TextButton(
+                        onClick = onDismiss,
                         modifier = androidx.compose.ui.Modifier.fillMaxWidth()
-                    ) { Text("Update now", color = androidx.compose.ui.graphics.Color.White) }
+                    ) { Text("Close") }
                 }
-
-                Spacer(androidx.compose.ui.Modifier.height(4.dp))
-                Divider(color = com.winlator.star.ui.theme.Divider)
-                Spacer(androidx.compose.ui.Modifier.height(4.dp))
-
-                // Powered by
-                AboutSection(title = "Powered By") {
-                    AboutRow("Wine",    "Windows compatibility layer")
-                    AboutRow("Box64",   "x86_64 emulation on ARM")
-                    AboutRow("FEX-Emu", "Fast x86 emulator")
-                    AboutRow("Turnip",  "Open-source Vulkan driver")
-                }
-
-                Spacer(androidx.compose.ui.Modifier.height(4.dp))
-                Divider(color = com.winlator.star.ui.theme.Divider)
-                Spacer(androidx.compose.ui.Modifier.height(4.dp))
-
-                // Credits
-                AboutSection(title = "Credits") {
-                    AboutRow("brunodev85",      "Winlator — original project")
-                    AboutRow("MishaMixXx",      "Winlator Bionic")
-                    AboutRow("The412Banner",    "Bannerlator")
-                    AboutRow("ptitSeb",         "Box64")
-                    AboutRow("WineHQ",          "Wine project")
-                    AboutRow("Mesa / Freedreno","Turnip Vulkan driver")
-                }
-
-                Spacer(androidx.compose.ui.Modifier.height(8.dp))
-                TextButton(
-                    onClick = onDismiss,
-                    modifier = androidx.compose.ui.Modifier.fillMaxWidth()
-                ) { Text("Close") }
             }
         }
     }

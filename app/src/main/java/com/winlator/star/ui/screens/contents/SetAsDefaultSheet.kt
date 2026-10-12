@@ -50,6 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.screens.OutlinedAlertDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -120,52 +121,54 @@ internal fun SetAsDefaultSheet(item: SetAsDefault.Item, onDismiss: () -> Unit, o
     ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, sheetState = sheetState,
         containerColor = cs.surface, contentColor = cs.onSurface) {
         DeckDialogBars()
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Set as default", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Text(buildAnnotatedString {
-                append("${item.title} — sets the ")
-                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = cs.onSurface)) { append(item.kind.setting) }
-            }, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        DeckDialogScaled {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Set as default", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(buildAnnotatedString {
+                    append("${item.title} — sets the ")
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = cs.onSurface)) { append(item.kind.setting) }
+                }, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
 
-            SheetLabel("Architecture")
-            val archs = listOf(SetAsDefault.ARM64EC, SetAsDefault.X86_64)
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                archs.forEachIndexed { index, a ->
-                    SegmentedButton(
-                        selected = arch == a,
-                        enabled = a in item.archs && !busy,
-                        onClick = { arch = a },
-                        shape = SegmentedButtonDefaults.itemShape(index, archs.size),
-                    ) { Text(SetAsDefault.archLabel(a)) }
+                SheetLabel("Architecture")
+                val archs = listOf(SetAsDefault.ARM64EC, SetAsDefault.X86_64)
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    archs.forEachIndexed { index, a ->
+                        SegmentedButton(
+                            selected = arch == a,
+                            enabled = a in item.archs && !busy,
+                            onClick = { arch = a },
+                            shape = SegmentedButtonDefaults.itemShape(index, archs.size),
+                        ) { Text(SetAsDefault.archLabel(a)) }
+                    }
                 }
-            }
-            if (item.archs.size < 2) {
-                Text("${item.title} only works with ${SetAsDefault.archLabel(item.archs.first())} containers.",
-                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-            }
+                if (item.archs.size < 2) {
+                    Text("${item.title} only works with ${SetAsDefault.archLabel(item.archs.first())} containers.",
+                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                }
 
-            SheetLabel("Apply to")
-            ApplyCheck(toDefaults, enabled = !busy, title = "New container defaults",
-                sub = "Every new $archText container starts with it.") { toDefaults = it }
-            ApplyCheck(toContainers, enabled = !busy, title = "All existing containers",
-                sub = "${n(nC)} $archText containers switch to it now." +
-                    if (isLayer) " Uses the in-place layer update with a revert snapshot; saves are kept." else "") { toContainers = it }
-            ApplyCheck(toGames && !isLayer, enabled = !isLayer && !busy, title = "All game shortcuts",
-                sub = if (isLayer) "Games always use their container’s layer, so there is nothing to set per game."
-                      else "${n(nG)} games in those containers get it written into their own settings.") { toGames = it }
+                SheetLabel("Apply to")
+                ApplyCheck(toDefaults, enabled = !busy, title = "New container defaults",
+                    sub = "Every new $archText container starts with it.") { toDefaults = it }
+                ApplyCheck(toContainers, enabled = !busy, title = "All existing containers",
+                    sub = "${n(nC)} $archText containers switch to it now." +
+                        if (isLayer) " Uses the in-place layer update with a revert snapshot; saves are kept." else "") { toContainers = it }
+                ApplyCheck(toGames && !isLayer, enabled = !isLayer && !busy, title = "All game shortcuts",
+                    sub = if (isLayer) "Games always use their container’s layer, so there is nothing to set per game."
+                          else "${n(nG)} games in those containers get it written into their own settings.") { toGames = it }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                if (busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = DefaultGold)
-                Spacer(Modifier.width(8.dp))
-                TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") }
-                Spacer(Modifier.width(8.dp))
-                val any = toDefaults || toContainers || (toGames && !isLayer)
-                Button(
-                    onClick = { if (toContainers || (toGames && !isLayer)) confirm = true else run() },
-                    enabled = any && !busy,
-                    colors = ButtonDefaults.buttonColors(containerColor = DefaultGold, contentColor = Color(0xFF1A1204)),
-                ) { Text("Apply", fontWeight = FontWeight.Bold) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                    if (busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = DefaultGold)
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") }
+                    Spacer(Modifier.width(8.dp))
+                    val any = toDefaults || toContainers || (toGames && !isLayer)
+                    Button(
+                        onClick = { if (toContainers || (toGames && !isLayer)) confirm = true else run() },
+                        enabled = any && !busy,
+                        colors = ButtonDefaults.buttonColors(containerColor = DefaultGold, contentColor = Color(0xFF1A1204)),
+                    ) { Text("Apply", fontWeight = FontWeight.Bold) }
+                }
             }
         }
     }

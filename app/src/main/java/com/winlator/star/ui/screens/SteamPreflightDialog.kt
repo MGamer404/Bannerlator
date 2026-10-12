@@ -80,6 +80,7 @@ import com.winlator.star.store.SteamSessionManager
 import com.winlator.star.store.SteamSessionManager.Step
 import com.winlator.star.store.SteamSessionManager.StepState
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.delay
 
@@ -533,46 +534,48 @@ private fun LandscapePreflight(
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false, usePlatformDefaultWidth = false),
     ) {
         DeckDialogBars()
-        Surface(
-            modifier = Modifier.width(cardW).height(cardH),
-            shape = shape,
-            color = cs.surfaceContainerHigh,
-            contentColor = cs.onSurface,
-            border = BorderStroke(1.dp, cs.outline),
-        ) {
-            if (compact) {
-                Column(Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp)) {
-                    TitleRow(title, highlighted = helpText == titleHelp) { toggleHelp(titleHelp) }
-                    Spacer(Modifier.height(6.dp))
-                    SlideStrip(
-                        show, photoBias = -0.5f,
-                        modifier = Modifier.fillMaxWidth().height((cardH.value * 0.42f).dp),
-                    )
-                    Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                        Spacer(Modifier.height(6.dp))
-                        LandscapeText(gameName, show.caption, fail, helpText, closeHelp, summary = false)
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = onDismiss) { Text("Cancel", color = cs.onSurfaceVariant) }
-                    }
-                }
-            } else {
-                Row(Modifier.fillMaxSize()) {
-                    SlideStrip(
-                        show, photoBias = -0.5f,
-                        modifier = Modifier.fillMaxHeight().width(photoW),
-                        rounded = false,
-                        captionBottom = 22.dp,
-                    )
-                    Column(Modifier.weight(1f).fillMaxHeight().padding(start = 18.dp, end = 16.dp, top = 14.dp, bottom = 8.dp)) {
+        DeckDialogScaled {
+            Surface(
+                modifier = Modifier.width(cardW).height(cardH),
+                shape = shape,
+                color = cs.surfaceContainerHigh,
+                contentColor = cs.onSurface,
+                border = BorderStroke(1.dp, cs.outline),
+            ) {
+                if (compact) {
+                    Column(Modifier.fillMaxSize().padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp)) {
                         TitleRow(title, highlighted = helpText == titleHelp) { toggleHelp(titleHelp) }
-                        // Whatever can't fit the fixed-height card scrolls; Cancel below stays pinned.
+                        Spacer(Modifier.height(6.dp))
+                        SlideStrip(
+                            show, photoBias = -0.5f,
+                            modifier = Modifier.fillMaxWidth().height((cardH.value * 0.42f).dp),
+                        )
                         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-                            Spacer(Modifier.height(4.dp))
-                            LandscapeText(gameName, show.caption, fail, helpText, closeHelp, summary = true)
+                            Spacer(Modifier.height(6.dp))
+                            LandscapeText(gameName, show.caption, fail, helpText, closeHelp, summary = false)
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                             TextButton(onClick = onDismiss) { Text("Cancel", color = cs.onSurfaceVariant) }
+                        }
+                    }
+                } else {
+                    Row(Modifier.fillMaxSize()) {
+                        SlideStrip(
+                            show, photoBias = -0.5f,
+                            modifier = Modifier.fillMaxHeight().width(photoW),
+                            rounded = false,
+                            captionBottom = 22.dp,
+                        )
+                        Column(Modifier.weight(1f).fillMaxHeight().padding(start = 18.dp, end = 16.dp, top = 14.dp, bottom = 8.dp)) {
+                            TitleRow(title, highlighted = helpText == titleHelp) { toggleHelp(titleHelp) }
+                            // Whatever can't fit the fixed-height card scrolls; Cancel below stays pinned.
+                            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                                Spacer(Modifier.height(4.dp))
+                                LandscapeText(gameName, show.caption, fail, helpText, closeHelp, summary = true)
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                TextButton(onClick = onDismiss) { Text("Cancel", color = cs.onSurfaceVariant) }
+                            }
                         }
                     }
                 }

@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.screens.OutlinedAlertDialog
 
 /**
@@ -137,51 +138,53 @@ internal fun MoveProgressDialog(
         properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
     ) {
         DeckDialogBars()
-        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
-            Column(modifier = Modifier.padding(22.dp)) {
-                Text(
-                    text = "Moving $gameName",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.height(14.dp))
-                if (copying) {
-                    LinearProgressIndicator(
-                        progress = { progress.pct / 100f },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = when (progress.phase) {
-                        MoveGameStorage.Phase.COPYING ->
-                            "${progress.pct}%  ·  ${SteamSdInstall.fmtBytes(progress.copiedBytes)} of " +
-                                SteamSdInstall.fmtBytes(progress.totalBytes)
-                        MoveGameStorage.Phase.VERIFYING -> "Checking the copy…"
-                        MoveGameStorage.Phase.REPOINTING -> "Updating shortcuts…"
-                        MoveGameStorage.Phase.CLEANING -> "Freeing the old copy…"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (copying && progress.currentFile.isNotBlank()) {
+        DeckDialogScaled {
+            Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
+                Column(modifier = Modifier.padding(22.dp)) {
                     Text(
-                        text = progress.currentFile,
+                        text = "Moving $gameName",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    if (copying) {
+                        LinearProgressIndicator(
+                            progress = { progress.pct / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = when (progress.phase) {
+                            MoveGameStorage.Phase.COPYING ->
+                                "${progress.pct}%  ·  ${SteamSdInstall.fmtBytes(progress.copiedBytes)} of " +
+                                    SteamSdInstall.fmtBytes(progress.totalBytes)
+                            MoveGameStorage.Phase.VERIFYING -> "Checking the copy…"
+                            MoveGameStorage.Phase.REPOINTING -> "Updating shortcuts…"
+                            MoveGameStorage.Phase.CLEANING -> "Freeing the old copy…"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
-                }
-                Spacer(Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onCancel, enabled = copying) { Text("Cancel") }
+                    if (copying && progress.currentFile.isNotBlank()) {
+                        Text(
+                            text = progress.currentFile,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = onCancel, enabled = copying) { Text("Cancel") }
+                    }
                 }
             }
         }

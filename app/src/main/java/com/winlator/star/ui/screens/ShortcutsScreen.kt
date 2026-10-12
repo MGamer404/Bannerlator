@@ -307,6 +307,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.documentfile.provider.DocumentFile
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -1926,8 +1927,10 @@ internal fun ShortcutActionDialogs(actions: ShortcutActions) {
                 properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
             ) {
                 DeckDialogBars()
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    LogViewerScreen(entry = entry, onClose = { logsShortcut = null })
+                DeckDialogScaled {
+                    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                        LogViewerScreen(entry = entry, onClose = { logsShortcut = null })
+                    }
                 }
             }
         } else {
@@ -3819,305 +3822,307 @@ internal fun CommunityCatalogBrowser(
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         DeckDialogBars()
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.92f)
-                .focusRequester(browserFocus)
-                .focusable()
-                .onPreviewKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    val drilled = selectedGame != null
-                    when (event.key) {
-                        Key.DirectionUp -> {
-                            when {
-                                drilled -> { if (configFocus > 0) configFocus-- }
-                                leftZone -> { if (leftRow > 0) leftRow-- }
-                                else -> { if (gameFocus > 0) gameFocus-- }
-                            }
-                            true
-                        }
-                        Key.DirectionDown -> {
-                            when {
-                                drilled -> { if (configFocus < drilledPicks.lastIndex) configFocus++ }
-                                leftZone -> { if (leftRow < 3) leftRow++ }
-                                else -> { if (gameFocus < visible.lastIndex) gameFocus++ }
-                            }
-                            true
-                        }
-                        Key.DirectionLeft -> {
-                            when {
-                                drilled -> {} // config list is single-column; nothing to the left
-                                !leftZone -> leftZone = true // cross from the game list to the controls
-                                leftRow == 1 -> { if (storeChipFocus > 0) storeChipFocus-- }
-                                leftRow == 3 -> { if (sortChipFocus > 0) sortChipFocus-- }
-                                else -> {} // Search / Matches: already at the left edge
-                            }
-                            true
-                        }
-                        Key.DirectionRight -> {
-                            when {
-                                drilled -> {}
-                                !leftZone -> {} // already on the game list (rightmost)
-                                // Chip groups: step right through the chips, then cross to the list.
-                                leftRow == 1 -> { if (storeChipFocus < 2) storeChipFocus++ else leftZone = false }
-                                leftRow == 3 -> { if (sortChipFocus < 2) sortChipFocus++ else leftZone = false }
-                                else -> leftZone = false // Search / Matches: cross straight to the list
-                            }
-                            true
-                        }
-                        Key.ButtonA, Key.Enter, Key.DirectionCenter -> {
-                            when {
-                                drilled -> drilledPicks.getOrNull(configFocus)?.let(onPick)
-                                leftZone -> when (leftRow) {
-                                    0 -> { searchFocus.requestFocus(); keyboard?.show() } // Search: pop the keyboard
-                                    1 -> storeFilter = when (storeChipFocus) {
-                                        0 -> CatalogStoreFilter.ALL
-                                        1 -> CatalogStoreFilter.STEAM
-                                        else -> CatalogStoreFilter.TITLE
-                                    }
-                                    2 -> matchesMyDevice = !matchesMyDevice
-                                    3 -> sort = when (sortChipFocus) {
-                                        0 -> CatalogSort.CONFIGS
-                                        1 -> CatalogSort.NAME
-                                        else -> CatalogSort.DEVICES
-                                    }
+        DeckDialogScaled {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.95f)
+                    .fillMaxHeight(0.92f)
+                    .focusRequester(browserFocus)
+                    .focusable()
+                    .onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        val drilled = selectedGame != null
+                        when (event.key) {
+                            Key.DirectionUp -> {
+                                when {
+                                    drilled -> { if (configFocus > 0) configFocus-- }
+                                    leftZone -> { if (leftRow > 0) leftRow-- }
+                                    else -> { if (gameFocus > 0) gameFocus-- }
                                 }
-                                else -> visible.getOrNull(gameFocus)?.let { selectedIdentity = it.identity }
+                                true
                             }
-                            true
-                        }
-                        // B / Back: first close the keyboard if it's up; else up a level when drilled,
-                        // otherwise close the browser.
-                        Key.ButtonB, Key.Back -> {
-                            when {
-                                searchFieldFocused -> { keyboard?.hide(); browserFocus.requestFocus() }
-                                drilled -> selectedIdentity = null
-                                else -> onDismiss()
+                            Key.DirectionDown -> {
+                                when {
+                                    drilled -> { if (configFocus < drilledPicks.lastIndex) configFocus++ }
+                                    leftZone -> { if (leftRow < 3) leftRow++ }
+                                    else -> { if (gameFocus < visible.lastIndex) gameFocus++ }
+                                }
+                                true
                             }
-                            true
+                            Key.DirectionLeft -> {
+                                when {
+                                    drilled -> {} // config list is single-column; nothing to the left
+                                    !leftZone -> leftZone = true // cross from the game list to the controls
+                                    leftRow == 1 -> { if (storeChipFocus > 0) storeChipFocus-- }
+                                    leftRow == 3 -> { if (sortChipFocus > 0) sortChipFocus-- }
+                                    else -> {} // Search / Matches: already at the left edge
+                                }
+                                true
+                            }
+                            Key.DirectionRight -> {
+                                when {
+                                    drilled -> {}
+                                    !leftZone -> {} // already on the game list (rightmost)
+                                    // Chip groups: step right through the chips, then cross to the list.
+                                    leftRow == 1 -> { if (storeChipFocus < 2) storeChipFocus++ else leftZone = false }
+                                    leftRow == 3 -> { if (sortChipFocus < 2) sortChipFocus++ else leftZone = false }
+                                    else -> leftZone = false // Search / Matches: cross straight to the list
+                                }
+                                true
+                            }
+                            Key.ButtonA, Key.Enter, Key.DirectionCenter -> {
+                                when {
+                                    drilled -> drilledPicks.getOrNull(configFocus)?.let(onPick)
+                                    leftZone -> when (leftRow) {
+                                        0 -> { searchFocus.requestFocus(); keyboard?.show() } // Search: pop the keyboard
+                                        1 -> storeFilter = when (storeChipFocus) {
+                                            0 -> CatalogStoreFilter.ALL
+                                            1 -> CatalogStoreFilter.STEAM
+                                            else -> CatalogStoreFilter.TITLE
+                                        }
+                                        2 -> matchesMyDevice = !matchesMyDevice
+                                        3 -> sort = when (sortChipFocus) {
+                                            0 -> CatalogSort.CONFIGS
+                                            1 -> CatalogSort.NAME
+                                            else -> CatalogSort.DEVICES
+                                        }
+                                    }
+                                    else -> visible.getOrNull(gameFocus)?.let { selectedIdentity = it.identity }
+                                }
+                                true
+                            }
+                            // B / Back: first close the keyboard if it's up; else up a level when drilled,
+                            // otherwise close the browser.
+                            Key.ButtonB, Key.Back -> {
+                                when {
+                                    searchFieldFocused -> { keyboard?.hide(); browserFocus.requestFocus() }
+                                    drilled -> selectedIdentity = null
+                                    else -> onDismiss()
+                                }
+                                true
+                            }
+                            else -> false
                         }
-                        else -> false
-                    }
-                },
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            // Outline the whole popup so the panel reads as a distinct bordered box (like the cards)
-            // instead of bleeding edge-to-edge into the background behind the dialog.
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-        ) {
-            // Game-list controls (device line + search + filter/sort chips + count). Extracted as a
-            // local composable so portrait (stacked) and landscape (left column) share one definition.
-            @Composable
-            fun ListControls(modifier: Modifier) {
-                Column(
-                    modifier = modifier,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        "Your device: ${deviceHeaderLabel(catalog?.deviceModel, catalog?.hardwareLabel)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = OnSurfaceVariant,
-                    )
-                    // Left-pane control 0 — Search (D-pad highlight-reachable; text entry stays touch/IME).
-                    DpadHighlight(focused = leftZone && leftRow == 0) {
-                        OutlinedTextField(
-                            value = query,
-                            onValueChange = { query = it },
-                            label = { Text("Search all games") },
-                            leadingIcon = { Icon(Icons.Filled.Search, null) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                                .focusRequester(searchFocus)
-                                .onFocusChanged { searchFieldFocused = it.isFocused }
-                                // Guaranteed B handling while the field holds focus: close the keyboard
-                                // and hand focus back to the browser for D-pad nav.
-                                .onPreviewKeyEvent { e ->
-                                    if (e.type == KeyEventType.KeyDown && (e.key == Key.ButtonB || e.key == Key.Back)) {
-                                        keyboard?.hide(); browserFocus.requestFocus(); true
-                                    } else false
-                                },
-                        )
-                    }
-                    // Left-pane control 1 — store filter group (Left/Right cycles the focused chip).
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        DpadHighlight(focused = leftZone && leftRow == 1 && storeChipFocus == 0) {
-                            FilterChip(selected = storeFilter == CatalogStoreFilter.ALL, onClick = { storeFilter = CatalogStoreFilter.ALL; leftZone = true; leftRow = 1; storeChipFocus = 0 }, label = { Text("All") })
-                        }
-                        DpadHighlight(focused = leftZone && leftRow == 1 && storeChipFocus == 1) {
-                            FilterChip(selected = storeFilter == CatalogStoreFilter.STEAM, onClick = { storeFilter = CatalogStoreFilter.STEAM; leftZone = true; leftRow = 1; storeChipFocus = 1 }, label = { Text("Steam") })
-                        }
-                        DpadHighlight(focused = leftZone && leftRow == 1 && storeChipFocus == 2) {
-                            FilterChip(selected = storeFilter == CatalogStoreFilter.TITLE, onClick = { storeFilter = CatalogStoreFilter.TITLE; leftZone = true; leftRow = 1; storeChipFocus = 2 }, label = { Text("Title") })
-                        }
-                    }
-                    // Left-pane control 2 — Matches my device.
-                    DpadHighlight(focused = leftZone && leftRow == 2) {
-                        FilterChip(
-                            selected = matchesMyDevice,
-                            onClick = { matchesMyDevice = !matchesMyDevice; leftZone = true; leftRow = 2 },
-                            label = { Text("Matches my device") },
-                            enabled = userSoc != null || userGpu != null,
-                        )
-                    }
-                    // Left-pane control 3 — sort group (Left/Right cycles the focused chip).
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Sort:", style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
-                        DpadHighlight(focused = leftZone && leftRow == 3 && sortChipFocus == 0) {
-                            FilterChip(selected = sort == CatalogSort.CONFIGS, onClick = { sort = CatalogSort.CONFIGS; leftZone = true; leftRow = 3; sortChipFocus = 0 }, label = { Text("Configs") })
-                        }
-                        DpadHighlight(focused = leftZone && leftRow == 3 && sortChipFocus == 1) {
-                            FilterChip(selected = sort == CatalogSort.NAME, onClick = { sort = CatalogSort.NAME; leftZone = true; leftRow = 3; sortChipFocus = 1 }, label = { Text("Name") })
-                        }
-                        DpadHighlight(focused = leftZone && leftRow == 3 && sortChipFocus == 2) {
-                            FilterChip(selected = sort == CatalogSort.DEVICES, onClick = { sort = CatalogSort.DEVICES; leftZone = true; leftRow = 3; sortChipFocus = 2 }, label = { Text("Devices") })
-                        }
-                    }
-                    Text(
-                        "${visible.size} game${if (visible.size == 1) "" else "s"}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = OnSurfaceVariant,
-                    )
-                }
-            }
-
-            // The scrollable game list (or its empty state). `modifier` sizes the LazyColumn.
-            @Composable
-            fun GameList(modifier: Modifier) {
-                if (visible.isEmpty()) {
-                    Text(
-                        "No games match your filters.",
-                        color = OnSurfaceVariant,
-                        modifier = Modifier.padding(24.dp),
-                    )
-                } else {
-                    LazyColumn(
-                        state = gameListState,
+                    },
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                // Outline the whole popup so the panel reads as a distinct bordered box (like the cards)
+                // instead of bleeding edge-to-edge into the background behind the dialog.
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            ) {
+                // Game-list controls (device line + search + filter/sort chips + count). Extracted as a
+                // local composable so portrait (stacked) and landscape (left column) share one definition.
+                @Composable
+                fun ListControls(modifier: Modifier) {
+                    Column(
                         modifier = modifier,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        itemsIndexed(visible, key = { _, g -> g.identity }) { index, g ->
-                            // The D-pad highlight border wraps the row; touch users see nothing extra. Only
-                            // shown while the RIGHT (list) zone is active, so focus reads as being in one
-                            // place at a time. A tap also snaps the cursor back to the list.
-                            DpadHighlight(focused = !leftZone && index == gameFocus) {
-                                CommunityGameRow(game = g, onClick = { leftZone = false; gameFocus = index; selectedIdentity = g.identity })
-                            }
-                        }
-                    }
-                }
-            }
-
-            Column {
-                // Title bar (with a back affordance when drilled into a game).
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (selectedGame != null) {
-                        IconButton(onClick = { selectedIdentity = null }) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    }
-                    Text(
-                        text = selectedGame?.name ?: "Community configs",
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f).padding(start = if (selectedGame == null) 4.dp else 0.dp),
-                    )
-                    // Force-refresh the community index (bypass the 24h cache) so freshly-folded uploads
-                    // appear now. Only at the top level; spinner + disabled while refreshing.
-                    if (selectedGame == null) {
-                        IconButton(
-                            onClick = {
-                                refreshing = true
-                                vm.refreshCommunityIndex { fresh ->
-                                    refreshing = false
-                                    if (fresh != null) {
-                                        catalog = fresh
-                                        Toast.makeText(
-                                            context,
-                                            "Community index refreshed (${fresh.games.size} games)",
-                                            Toast.LENGTH_SHORT,
-                                        ).show()
-                                    } else {
-                                        Toast.makeText(
-                                            context,
-                                            "Couldn't refresh the community index.",
-                                            Toast.LENGTH_SHORT,
-                                        ).show()
-                                    }
-                                }
-                            },
-                            enabled = !refreshing,
-                        ) {
-                            if (refreshing) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Filled.Refresh, contentDescription = "Refresh community index")
-                            }
-                        }
-                    }
-                    // My account — the global entry point (Phase 2). Opens the SAME My-account sheet as the
-                    // nav-drawer, and reads the SAME AccountUiBus state (Phase 4) so signed-in + a picture →
-                    // this 👤 shows the user's avatar (versioned, in lockstep with the ☰ / drawer). The 🌐
-                    // globe that OPENS this browser stays a globe — only this person icon becomes the avatar.
-                    if (selectedGame == null) {
-                        val myAvatarUrl = AccountUiBus.account?.displayAvatarUrl
-                        IconButton(onClick = onMyAccount) {
-                            if (myAvatarUrl != null) {
-                                AccountAvatar(avatarUrl = myAvatarUrl, size = 28.dp)
-                            } else {
-                                Icon(Icons.Filled.AccountCircle, contentDescription = "My account")
-                            }
-                        }
-                    }
-                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
-                }
-                Divider(color = DividerColor)
-
-                // Landscape (wide): controls/header become a left column so the scrollable list keeps
-                // the full height. Portrait (narrow): the original single-column top-to-bottom stack.
-                BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    val wide = maxWidth >= 600.dp
-                    when {
-                        loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                        selectedGame != null -> CommunityDevicePanel(
-                            vm = vm,
-                            game = selectedGame,
-                            userSoc = userSoc,
-                            userGpu = userGpu,
-                            hardwareLabel = catalog?.hardwareLabel,
-                            deviceModel = catalog?.deviceModel,
-                            onPick = onPick,
-                            wide = wide,
-                            focusedIndex = configFocus,
-                            onPicks = { drilledPicks = it },
-                        )
-                        games.isEmpty() -> Text(
-                            "No community configs available yet (offline, or the index hasn't been fetched).",
+                        Text(
+                            "Your device: ${deviceHeaderLabel(catalog?.deviceModel, catalog?.hardwareLabel)}",
+                            style = MaterialTheme.typography.bodySmall,
                             color = OnSurfaceVariant,
-                            modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                            textAlign = TextAlign.Center,
                         )
-                        wide -> Row(modifier = Modifier.fillMaxSize()) {
-                            ListControls(
-                                modifier = Modifier
-                                    .width(320.dp)
-                                    .fillMaxHeight()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                        // Left-pane control 0 — Search (D-pad highlight-reachable; text entry stays touch/IME).
+                        DpadHighlight(focused = leftZone && leftRow == 0) {
+                            OutlinedTextField(
+                                value = query,
+                                onValueChange = { query = it },
+                                label = { Text("Search all games") },
+                                leadingIcon = { Icon(Icons.Filled.Search, null) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                                    .focusRequester(searchFocus)
+                                    .onFocusChanged { searchFieldFocused = it.isFocused }
+                                    // Guaranteed B handling while the field holds focus: close the keyboard
+                                    // and hand focus back to the browser for D-pad nav.
+                                    .onPreviewKeyEvent { e ->
+                                        if (e.type == KeyEventType.KeyDown && (e.key == Key.ButtonB || e.key == Key.Back)) {
+                                            keyboard?.hide(); browserFocus.requestFocus(); true
+                                        } else false
+                                    },
                             )
-                            Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
-                            GameList(modifier = Modifier.weight(1f).fillMaxHeight())
                         }
-                        else -> Column(modifier = Modifier.fillMaxSize()) {
-                            ListControls(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-                            Divider(color = DividerColor)
-                            GameList(modifier = Modifier.fillMaxSize())
+                        // Left-pane control 1 — store filter group (Left/Right cycles the focused chip).
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            DpadHighlight(focused = leftZone && leftRow == 1 && storeChipFocus == 0) {
+                                FilterChip(selected = storeFilter == CatalogStoreFilter.ALL, onClick = { storeFilter = CatalogStoreFilter.ALL; leftZone = true; leftRow = 1; storeChipFocus = 0 }, label = { Text("All") })
+                            }
+                            DpadHighlight(focused = leftZone && leftRow == 1 && storeChipFocus == 1) {
+                                FilterChip(selected = storeFilter == CatalogStoreFilter.STEAM, onClick = { storeFilter = CatalogStoreFilter.STEAM; leftZone = true; leftRow = 1; storeChipFocus = 1 }, label = { Text("Steam") })
+                            }
+                            DpadHighlight(focused = leftZone && leftRow == 1 && storeChipFocus == 2) {
+                                FilterChip(selected = storeFilter == CatalogStoreFilter.TITLE, onClick = { storeFilter = CatalogStoreFilter.TITLE; leftZone = true; leftRow = 1; storeChipFocus = 2 }, label = { Text("Title") })
+                            }
+                        }
+                        // Left-pane control 2 — Matches my device.
+                        DpadHighlight(focused = leftZone && leftRow == 2) {
+                            FilterChip(
+                                selected = matchesMyDevice,
+                                onClick = { matchesMyDevice = !matchesMyDevice; leftZone = true; leftRow = 2 },
+                                label = { Text("Matches my device") },
+                                enabled = userSoc != null || userGpu != null,
+                            )
+                        }
+                        // Left-pane control 3 — sort group (Left/Right cycles the focused chip).
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Sort:", style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
+                            DpadHighlight(focused = leftZone && leftRow == 3 && sortChipFocus == 0) {
+                                FilterChip(selected = sort == CatalogSort.CONFIGS, onClick = { sort = CatalogSort.CONFIGS; leftZone = true; leftRow = 3; sortChipFocus = 0 }, label = { Text("Configs") })
+                            }
+                            DpadHighlight(focused = leftZone && leftRow == 3 && sortChipFocus == 1) {
+                                FilterChip(selected = sort == CatalogSort.NAME, onClick = { sort = CatalogSort.NAME; leftZone = true; leftRow = 3; sortChipFocus = 1 }, label = { Text("Name") })
+                            }
+                            DpadHighlight(focused = leftZone && leftRow == 3 && sortChipFocus == 2) {
+                                FilterChip(selected = sort == CatalogSort.DEVICES, onClick = { sort = CatalogSort.DEVICES; leftZone = true; leftRow = 3; sortChipFocus = 2 }, label = { Text("Devices") })
+                            }
+                        }
+                        Text(
+                            "${visible.size} game${if (visible.size == 1) "" else "s"}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = OnSurfaceVariant,
+                        )
+                    }
+                }
+
+                // The scrollable game list (or its empty state). `modifier` sizes the LazyColumn.
+                @Composable
+                fun GameList(modifier: Modifier) {
+                    if (visible.isEmpty()) {
+                        Text(
+                            "No games match your filters.",
+                            color = OnSurfaceVariant,
+                            modifier = Modifier.padding(24.dp),
+                        )
+                    } else {
+                        LazyColumn(
+                            state = gameListState,
+                            modifier = modifier,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            itemsIndexed(visible, key = { _, g -> g.identity }) { index, g ->
+                                // The D-pad highlight border wraps the row; touch users see nothing extra. Only
+                                // shown while the RIGHT (list) zone is active, so focus reads as being in one
+                                // place at a time. A tap also snaps the cursor back to the list.
+                                DpadHighlight(focused = !leftZone && index == gameFocus) {
+                                    CommunityGameRow(game = g, onClick = { leftZone = false; gameFocus = index; selectedIdentity = g.identity })
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Column {
+                    // Title bar (with a back affordance when drilled into a game).
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (selectedGame != null) {
+                            IconButton(onClick = { selectedIdentity = null }) {
+                                Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                            }
+                        }
+                        Text(
+                            text = selectedGame?.name ?: "Community configs",
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f).padding(start = if (selectedGame == null) 4.dp else 0.dp),
+                        )
+                        // Force-refresh the community index (bypass the 24h cache) so freshly-folded uploads
+                        // appear now. Only at the top level; spinner + disabled while refreshing.
+                        if (selectedGame == null) {
+                            IconButton(
+                                onClick = {
+                                    refreshing = true
+                                    vm.refreshCommunityIndex { fresh ->
+                                        refreshing = false
+                                        if (fresh != null) {
+                                            catalog = fresh
+                                            Toast.makeText(
+                                                context,
+                                                "Community index refreshed (${fresh.games.size} games)",
+                                                Toast.LENGTH_SHORT,
+                                            ).show()
+                                        } else {
+                                            Toast.makeText(
+                                                context,
+                                                "Couldn't refresh the community index.",
+                                                Toast.LENGTH_SHORT,
+                                            ).show()
+                                        }
+                                    }
+                                },
+                                enabled = !refreshing,
+                            ) {
+                                if (refreshing) {
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh community index")
+                                }
+                            }
+                        }
+                        // My account — the global entry point (Phase 2). Opens the SAME My-account sheet as the
+                        // nav-drawer, and reads the SAME AccountUiBus state (Phase 4) so signed-in + a picture →
+                        // this 👤 shows the user's avatar (versioned, in lockstep with the ☰ / drawer). The 🌐
+                        // globe that OPENS this browser stays a globe — only this person icon becomes the avatar.
+                        if (selectedGame == null) {
+                            val myAvatarUrl = AccountUiBus.account?.displayAvatarUrl
+                            IconButton(onClick = onMyAccount) {
+                                if (myAvatarUrl != null) {
+                                    AccountAvatar(avatarUrl = myAvatarUrl, size = 28.dp)
+                                } else {
+                                    Icon(Icons.Filled.AccountCircle, contentDescription = "My account")
+                                }
+                            }
+                        }
+                        IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
+                    }
+                    Divider(color = DividerColor)
+
+                    // Landscape (wide): controls/header become a left column so the scrollable list keeps
+                    // the full height. Portrait (narrow): the original single-column top-to-bottom stack.
+                    BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        val wide = maxWidth >= 600.dp
+                        when {
+                            loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                            selectedGame != null -> CommunityDevicePanel(
+                                vm = vm,
+                                game = selectedGame,
+                                userSoc = userSoc,
+                                userGpu = userGpu,
+                                hardwareLabel = catalog?.hardwareLabel,
+                                deviceModel = catalog?.deviceModel,
+                                onPick = onPick,
+                                wide = wide,
+                                focusedIndex = configFocus,
+                                onPicks = { drilledPicks = it },
+                            )
+                            games.isEmpty() -> Text(
+                                "No community configs available yet (offline, or the index hasn't been fetched).",
+                                color = OnSurfaceVariant,
+                                modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                                textAlign = TextAlign.Center,
+                            )
+                            wide -> Row(modifier = Modifier.fillMaxSize()) {
+                                ListControls(
+                                    modifier = Modifier
+                                        .width(320.dp)
+                                        .fillMaxHeight()
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                )
+                                Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
+                                GameList(modifier = Modifier.weight(1f).fillMaxHeight())
+                            }
+                            else -> Column(modifier = Modifier.fillMaxSize()) {
+                                ListControls(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                                Divider(color = DividerColor)
+                                GameList(modifier = Modifier.fillMaxSize())
+                            }
                         }
                     }
                 }
@@ -4748,68 +4753,70 @@ private fun CommunityConfigDetailDialog(
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         DeckDialogBars()
-        Surface(
-            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.92f),
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            // Outline the whole popup so the panel reads as a distinct bordered box (like the cards)
-            // instead of bleeding edge-to-edge into the background behind the dialog.
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-        ) {
-            Column {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Config details",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
-                }
-                Divider(color = DividerColor)
+        DeckDialogScaled {
+            Surface(
+                modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.92f),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                // Outline the whole popup so the panel reads as a distinct bordered box (like the cards)
+                // instead of bleeding edge-to-edge into the background behind the dialog.
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "Config details",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
+                    }
+                    Divider(color = DividerColor)
 
-                // Landscape (wide): provenance pinned left, "what it sets" + diff scroll on the right.
-                // Portrait (narrow): a single top-to-bottom scroll of both.
-                BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    if (maxWidth >= 600.dp) {
-                        Row(modifier = Modifier.fillMaxSize()) {
-                            Provenance(
-                                modifier = Modifier
-                                    .width(320.dp)
-                                    .fillMaxHeight()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(12.dp),
-                            )
-                            Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
-                            Body(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(12.dp),
-                            )
-                        }
-                    } else {
-                        Column(
-                            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Provenance(modifier = Modifier.fillMaxWidth())
-                            Divider(color = DividerColor)
-                            Body(modifier = Modifier.fillMaxWidth())
+                    // Landscape (wide): provenance pinned left, "what it sets" + diff scroll on the right.
+                    // Portrait (narrow): a single top-to-bottom scroll of both.
+                    BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        if (maxWidth >= 600.dp) {
+                            Row(modifier = Modifier.fillMaxSize()) {
+                                Provenance(
+                                    modifier = Modifier
+                                        .width(320.dp)
+                                        .fillMaxHeight()
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(12.dp),
+                                )
+                                Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
+                                Body(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(12.dp),
+                                )
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Provenance(modifier = Modifier.fillMaxWidth())
+                                Divider(color = DividerColor)
+                                Body(modifier = Modifier.fillMaxWidth())
+                            }
                         }
                     }
-                }
-                Divider(color = DividerColor)
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onDismiss) { Text("Close") }
-                    TextButton(onClick = onApply, enabled = detail != null) { Text("Apply") }
+                    Divider(color = DividerColor)
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = onDismiss) { Text("Close") }
+                        TextButton(onClick = onApply, enabled = detail != null) { Text("Apply") }
+                    }
                 }
             }
         }
@@ -5578,214 +5585,216 @@ private fun GameDetailsSheet(
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         DeckDialogBars()
-        // The art picker opens from inside this dialog's window: a sheet from outside it would sit
-        // under the full-screen dialog, out of sight.
-        if (showArtPicker) {
-            GameArtPickerSheet(
-                steamAppId = linkedAppId,
-                name = nameField.ifBlank { shortcut.name },
-                onPick = { url -> pickedArt = url; useSteamArt = false; showArtPicker = false },
-                onPickFile = {
-                    showArtPicker = false
-                    artPicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.IMAGES, "Select game art"))
-                },
-                onDismiss = { showArtPicker = false },
-            )
-        }
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Header: Close · title · Save.
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Cancel", tint = OnSurface)
-                    }
-                    Text(
-                        text = "Edit Game",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = OnSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { save() }, enabled = !saving) {
-                        if (saving) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Text("Save", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        DeckDialogScaled {
+            // The art picker opens from inside this dialog's window: a sheet from outside it would sit
+            // under the full-screen dialog, out of sight.
+            if (showArtPicker) {
+                GameArtPickerSheet(
+                    steamAppId = linkedAppId,
+                    name = nameField.ifBlank { shortcut.name },
+                    onPick = { url -> pickedArt = url; useSteamArt = false; showArtPicker = false },
+                    onPickFile = {
+                        showArtPicker = false
+                        artPicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.IMAGES, "Select game art"))
+                    },
+                    onDismiss = { showArtPicker = false },
+                )
+            }
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Header: Close · title · Save.
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.Close, contentDescription = "Cancel", tint = OnSurface)
                         }
-                    }
-                }
-                Divider(color = DividerColor)
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    // Header: the game's art beside its name. Tapping the art picks an image (in-app
-                    // file manager); the name field searches Steam from its trailing icon.
-                    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        val shown = pickedArt ?: currentArt.takeIf { !useSteamArt }
-                        Box(
-                            modifier = Modifier
-                                .size(width = 84.dp, height = 120.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(SurfaceVariant)
-                                .clickable { showArtPicker = true },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            val model: Any? = shown?.let { if (it.startsWith("http")) it else File(it) }
-                                ?: linkedAppId?.let { SteamStoreSearch.coverUrl(it) }
-                            if (model != null) {
-                                SubcomposeAsyncImage(
-                                    model = ImageRequest.Builder(context).data(model).memoryCachePolicy(CachePolicy.DISABLED).build(),
-                                    contentDescription = "Game art",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize(),
-                                )
+                        Text(
+                            text = "Edit Game",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = OnSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { save() }, enabled = !saving) {
+                            if (saving) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                             } else {
-                                Text("Tap to\nadd art", fontSize = 11.sp, color = OnSurfaceVariant, textAlign = TextAlign.Center)
-                            }
-                        }
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            OutlinedTextField(
-                                value = nameField,
-                                onValueChange = { nameField = it; searchResults = emptyList(); searchError = null },
-                                label = { Text("Name") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                trailingIcon = {
-                                    if (searching) {
-                                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                    } else {
-                                        IconButton(onClick = { doSearch() }, enabled = nameField.isNotBlank()) {
-                                            Icon(Icons.Default.Search, contentDescription = "Search Steam")
-                                        }
-                                    }
-                                },
-                            )
-                            // Steam link, in one line.
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                val id = linkedAppId
-                                if (id != null) {
-                                    Text("Steam app $id", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                                    Text("  ·  ", fontSize = 12.sp, color = OnSurfaceVariant)
-                                    Text(
-                                        "Unlink",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.clickable { linkedAppId = null },
-                                    )
-                                } else {
-                                    Text("Not linked to Steam", fontSize = 12.sp, color = OnSurfaceVariant)
-                                }
-                                if (filling) {
-                                    Spacer(Modifier.width(8.dp))
-                                    CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
-                                }
-                            }
-                            // Art actions, in one line.
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "Change art",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.clickable { showArtPicker = true },
-                                )
-                                if (linkedAppId != null && (pickedArt != null || (userArt && !useSteamArt))) {
-                                    Text("  ·  ", fontSize = 12.sp, color = OnSurfaceVariant)
-                                    Text(
-                                        "Use Steam art",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.clickable { pickedArt = null; useSteamArt = true },
-                                    )
-                                }
-                            }
-                            when {
-                                pickedArt != null -> Text(
-                                    if (pickedArt!!.startsWith("http")) "New art is applied on Save" else File(pickedArt!!).name,
-                                    fontSize = 11.sp, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                )
-                                useSteamArt -> Text("Steam's art is applied on Save", fontSize = 11.sp, color = OnSurfaceVariant)
+                                Text("Save", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }
-
-                    searchError?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
-                    if (searchResults.isNotEmpty()) {
-                        Text("Tap a result to auto-fill all fields:", fontSize = 11.sp, color = OnSurfaceVariant)
-                        searchResults.forEach { hit ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { fillFromSteam(hit.appId) }
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                SteamResultThumbnail(hit.appId)
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(hit.name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text("App ID: ${hit.appId}", fontSize = 11.sp, color = OnSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
-
                     Divider(color = DividerColor)
 
-                    Text("DETAILS", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, color = OnSurfaceVariant)
-                    OutlinedTextField(
-                        value = genresField,
-                        onValueChange = { genresField = it },
-                        label = { Text("Genres") },
-                        placeholder = { Text("Action, RPG, Strategy") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        // Header: the game's art beside its name. Tapping the art picks an image (in-app
+                        // file manager); the name field searches Steam from its trailing icon.
+                        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            val shown = pickedArt ?: currentArt.takeIf { !useSteamArt }
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 84.dp, height = 120.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(SurfaceVariant)
+                                    .clickable { showArtPicker = true },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                val model: Any? = shown?.let { if (it.startsWith("http")) it else File(it) }
+                                    ?: linkedAppId?.let { SteamStoreSearch.coverUrl(it) }
+                                if (model != null) {
+                                    SubcomposeAsyncImage(
+                                        model = ImageRequest.Builder(context).data(model).memoryCachePolicy(CachePolicy.DISABLED).build(),
+                                        contentDescription = "Game art",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                } else {
+                                    Text("Tap to\nadd art", fontSize = 11.sp, color = OnSurfaceVariant, textAlign = TextAlign.Center)
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                OutlinedTextField(
+                                    value = nameField,
+                                    onValueChange = { nameField = it; searchResults = emptyList(); searchError = null },
+                                    label = { Text("Name") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    trailingIcon = {
+                                        if (searching) {
+                                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                        } else {
+                                            IconButton(onClick = { doSearch() }, enabled = nameField.isNotBlank()) {
+                                                Icon(Icons.Default.Search, contentDescription = "Search Steam")
+                                            }
+                                        }
+                                    },
+                                )
+                                // Steam link, in one line.
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val id = linkedAppId
+                                    if (id != null) {
+                                        Text("Steam app $id", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                                        Text("  ·  ", fontSize = 12.sp, color = OnSurfaceVariant)
+                                        Text(
+                                            "Unlink",
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.clickable { linkedAppId = null },
+                                        )
+                                    } else {
+                                        Text("Not linked to Steam", fontSize = 12.sp, color = OnSurfaceVariant)
+                                    }
+                                    if (filling) {
+                                        Spacer(Modifier.width(8.dp))
+                                        CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                                    }
+                                }
+                                // Art actions, in one line.
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "Change art",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.clickable { showArtPicker = true },
+                                    )
+                                    if (linkedAppId != null && (pickedArt != null || (userArt && !useSteamArt))) {
+                                        Text("  ·  ", fontSize = 12.sp, color = OnSurfaceVariant)
+                                        Text(
+                                            "Use Steam art",
+                                            fontSize = 12.sp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.clickable { pickedArt = null; useSteamArt = true },
+                                        )
+                                    }
+                                }
+                                when {
+                                    pickedArt != null -> Text(
+                                        if (pickedArt!!.startsWith("http")) "New art is applied on Save" else File(pickedArt!!).name,
+                                        fontSize = 11.sp, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    )
+                                    useSteamArt -> Text("Steam's art is applied on Save", fontSize = 11.sp, color = OnSurfaceVariant)
+                                }
+                            }
+                        }
+
+                        searchError?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
+                        if (searchResults.isNotEmpty()) {
+                            Text("Tap a result to auto-fill all fields:", fontSize = 11.sp, color = OnSurfaceVariant)
+                            searchResults.forEach { hit ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { fillFromSteam(hit.appId) }
+                                        .padding(vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    SteamResultThumbnail(hit.appId)
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(hit.name, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text("App ID: ${hit.appId}", fontSize = 11.sp, color = OnSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+
+                        Divider(color = DividerColor)
+
+                        Text("DETAILS", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp, color = OnSurfaceVariant)
                         OutlinedTextField(
-                            value = yearField,
-                            onValueChange = { if (it.length <= 4) yearField = it.filter { c -> c.isDigit() } },
-                            label = { Text("Release year") },
+                            value = genresField,
+                            onValueChange = { genresField = it },
+                            label = { Text("Genres") },
+                            placeholder = { Text("Action, RPG, Strategy") },
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                         )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedTextField(
+                                value = yearField,
+                                onValueChange = { if (it.length <= 4) yearField = it.filter { c -> c.isDigit() } },
+                                label = { Text("Release year") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f),
+                            )
+                            OutlinedTextField(
+                                value = metaField,
+                                onValueChange = { if (it.length <= 3) metaField = it.filter { c -> c.isDigit() } },
+                                label = { Text("Metacritic") },
+                                placeholder = { Text("1–100") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                         OutlinedTextField(
-                            value = metaField,
-                            onValueChange = { if (it.length <= 3) metaField = it.filter { c -> c.isDigit() } },
-                            label = { Text("Metacritic") },
-                            placeholder = { Text("1–100") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f),
+                            value = descField,
+                            onValueChange = { descField = it },
+                            label = { Text("Description") },
+                            minLines = 3,
+                            maxLines = 6,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            "Shown on the game's launch screen. Genres are comma-separated; leave Metacritic blank to hide it.",
+                            fontSize = 11.sp,
+                            color = OnSurfaceVariant,
                         )
                     }
-                    OutlinedTextField(
-                        value = descField,
-                        onValueChange = { descField = it },
-                        label = { Text("Description") },
-                        minLines = 3,
-                        maxLines = 6,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        "Shown on the game's launch screen. Genres are comma-separated; leave Metacritic blank to hide it.",
-                        fontSize = 11.sp,
-                        color = OnSurfaceVariant,
-                    )
                 }
             }
         }
@@ -7157,2113 +7166,2115 @@ internal fun ShortcutSettingsDialogScreen(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         DeckDialogBars()
-        Surface(
-            // A DEFINITE height (not fillMaxHeight fraction): inside a Dialog the window height is
-            // effectively unbounded, so fillMaxHeight(fraction) silently no-ops and the Surface
-            // wrapped its content — which left a dead band under the footer and kept the weighted
-            // content from expanding. A concrete dp height propagates bounded constraints, so the
-            // inner Column fills it and the footer pins flush to the bottom, mirroring the top bar.
-            modifier = Modifier.fillMaxWidth(0.95f)
-                .height((LocalConfiguration.current.screenHeightDp * 0.92f).dp)
-                .settingsDpad(dp, { dpadIds }, requestClose),
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp
-        ) {
-            // Fill the fixed-height Surface so the weighted content region actually expands and the
-            // footer pins to the real bottom edge. Without this the Column wrapped its content and
-            // floated near the top, leaving a large dead band under the OK/Cancel bar.
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Title bar — compact: minimal vertical padding + a shrunk close button so the
-                // header (and its footer twin below) don't eat vertical space, most noticeable in
-                // landscape where height is scarce.
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(shortcut.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    DpButton(dp, "titleX", onActivate = requestClose) {
-                        IconButton(onClick = requestClose, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Close")
+        DeckDialogScaled {
+            Surface(
+                // A DEFINITE height (not fillMaxHeight fraction): inside a Dialog the window height is
+                // effectively unbounded, so fillMaxHeight(fraction) silently no-ops and the Surface
+                // wrapped its content — which left a dead band under the footer and kept the weighted
+                // content from expanding. A concrete dp height propagates bounded constraints, so the
+                // inner Column fills it and the footer pins flush to the bottom, mirroring the top bar.
+                modifier = Modifier.fillMaxWidth(0.95f)
+                    .height((LocalConfiguration.current.screenHeightDp * 0.92f).dp)
+                    .settingsDpad(dp, { dpadIds }, requestClose),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp
+            ) {
+                // Fill the fixed-height Surface so the weighted content region actually expands and the
+                // footer pins to the real bottom edge. Without this the Column wrapped its content and
+                // floated near the top, leaving a large dead band under the OK/Cancel bar.
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Title bar — compact: minimal vertical padding + a shrunk close button so the
+                    // header (and its footer twin below) don't eat vertical space, most noticeable in
+                    // landscape where height is scarce.
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(shortcut.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        DpButton(dp, "titleX", onActivate = requestClose) {
+                            IconButton(onClick = requestClose, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Close")
+                            }
                         }
                     }
-                }
-                Divider(color = DividerColor)
+                    Divider(color = DividerColor)
 
-                // Scrollable tab content — ONE region shared by both orientations (portrait pins the
-                // tab strip above it; landscape puts the rail beside it). Scrolls internally so the
-                // Cancel/OK footer stays pinned. Branch labels are tab indices: General(0),
-                // Win Components(1), Env Vars(2), Advanced(3), Controller(4). General and Controller are
-                // authored next to each other because both came from the old single top form; the
-                // Controller TAB sits last (index 4).
-                val contentScroll = rememberScrollState()
-                val mainContent: @Composable () -> Unit = {
-                    Column(
-                        modifier = Modifier.fillMaxSize().verticalScroll(contentScroll).padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        when (selectedTab) {
-                            0 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Name
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        DpField(
-                            dp, "name",
-                            value = name,
-                            onValueChange = { name = it },
-                            label = stringResource(R.string.name),
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        LinuxHelp(isLinuxEntry, R.string.help_linux_name) { helpRes = it }
-                    }
+                    // Scrollable tab content — ONE region shared by both orientations (portrait pins the
+                    // tab strip above it; landscape puts the rail beside it). Scrolls internally so the
+                    // Cancel/OK footer stays pinned. Branch labels are tab indices: General(0),
+                    // Win Components(1), Env Vars(2), Advanced(3), Controller(4). General and Controller are
+                    // authored next to each other because both came from the old single top form; the
+                    // Controller TAB sits last (index 4).
+                    val contentScroll = rememberScrollState()
+                    val mainContent: @Composable () -> Unit = {
+                        Column(
+                            modifier = Modifier.fillMaxSize().verticalScroll(contentScroll).padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            when (selectedTab) {
+                                0 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Name
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            DpField(
+                                dp, "name",
+                                value = name,
+                                onValueChange = { name = it },
+                                label = stringResource(R.string.name),
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                            LinuxHelp(isLinuxEntry, R.string.help_linux_name) { helpRes = it }
+                        }
 
-                    // Exec Args — appended to the Wine start command. A Linux entry's Exec line is
-                    // never run as written (linuxSessionArgs decides from the extras), so there is
-                    // nothing for arguments to be appended to.
-                    if (!isLinuxEntry) {
-                        DpField(
-                            dp, "execArgs",
-                            value = execArgs,
-                            onValueChange = { execArgs = it },
-                            label = stringResource(R.string.exec_arguments),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    // Storage — where this game's files currently live, and (unless it's already on
-                    // C:) a one-tap "Move to Drive C" that copies the folder onto native app storage.
-                    // Games that stream assets over FUSE-backed shared storage stall; from C: they run.
-                    // Both this and Executable below describe a Windows install under a drive letter;
-                    // a Linux entry has neither, and the client owns where its games live.
-                    if (!isLinuxEntry) {
-                    val storageLabel = remember(shortcut) { CopyGameToDriveC.storageLabel(shortcut) }
-                    val alreadyOnC = remember(shortcut) { CopyGameToDriveC.parse(shortcut).onDriveC }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Storage", fontSize = 14.sp)
-                            Text(
-                                storageLabel,
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        // Exec Args — appended to the Wine start command. A Linux entry's Exec line is
+                        // never run as written (linuxSessionArgs decides from the extras), so there is
+                        // nothing for arguments to be appended to.
+                        if (!isLinuxEntry) {
+                            DpField(
+                                dp, "execArgs",
+                                value = execArgs,
+                                onValueChange = { execArgs = it },
+                                label = stringResource(R.string.exec_arguments),
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
-                        if (onMoveToDriveC != null && !alreadyOnC) {
-                            Spacer(Modifier.width(8.dp))
-                            OutlinedButton(onClick = onMoveToDriveC) {
-                                Icon(
-                                    Icons.Filled.DriveFileMove,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text("Move to Drive C")
-                            }
-                        }
-                    }
-                    }
 
-                    // Executable — the .exe this shortcut launches, with a one-tap repoint to a
-                    // different exe in the same game (launcher → real exe, dx11 ↔ dx9, a config tool).
-                    if (onChangeExe != null && !isLinuxEntry) {
-                        val currentExeName = remember(shortcut) {
-                            CopyGameToDriveC.parse(shortcut).exeWin.substringAfterLast('\\').substringAfterLast('/')
-                        }
+                        // Storage — where this game's files currently live, and (unless it's already on
+                        // C:) a one-tap "Move to Drive C" that copies the folder onto native app storage.
+                        // Games that stream assets over FUSE-backed shared storage stall; from C: they run.
+                        // Both this and Executable below describe a Windows install under a drive letter;
+                        // a Linux entry has neither, and the client owns where its games live.
+                        if (!isLinuxEntry) {
+                        val storageLabel = remember(shortcut) { CopyGameToDriveC.storageLabel(shortcut) }
+                        val alreadyOnC = remember(shortcut) { CopyGameToDriveC.parse(shortcut).onDriveC }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Executable", fontSize = 14.sp)
+                                Text("Storage", fontSize = 14.sp)
                                 Text(
-                                    currentExeName.ifEmpty { "Unknown" },
+                                    storageLabel,
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                            Spacer(Modifier.width(8.dp))
-                            OutlinedButton(onClick = onChangeExe) {
-                                Icon(
-                                    Icons.Filled.SwapHoriz,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text("Change…")
+                            if (onMoveToDriveC != null && !alreadyOnC) {
+                                Spacer(Modifier.width(8.dp))
+                                OutlinedButton(onClick = onMoveToDriveC) {
+                                    Icon(
+                                        Icons.Filled.DriveFileMove,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Move to Drive C")
+                                }
                             }
                         }
-                    }
+                        }
 
-                    // Epic Online Services (EOS) auth toggle — only for Epic-origin shortcuts.
-                    // When ON, the launcher injects real-Epic auth args (-EpicPortal + a fresh
-                    // exchange code) so EOS-requiring titles authenticate against the user's
-                    // logged-in Epic account. Harmless for non-EOS Epic games.
-                    if (isEpicShortcut) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Epic Online Services (EOS) auth", fontSize = 14.sp)
-                                Text(
-                                    "Sign EOS games in with your Epic account",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                        // Executable — the .exe this shortcut launches, with a one-tap repoint to a
+                        // different exe in the same game (launcher → real exe, dx11 ↔ dx9, a config tool).
+                        if (onChangeExe != null && !isLinuxEntry) {
+                            val currentExeName = remember(shortcut) {
+                                CopyGameToDriveC.parse(shortcut).exeWin.substringAfterLast('\\').substringAfterLast('/')
                             }
-                            Spacer(Modifier.width(8.dp))
-                            Switch(checked = epicEosEnabled, onCheckedChange = { epicEosEnabled = it })
-                        }
-                        // Force the ownership-token (-epicovt) path for Denuvo EOS games
-                        // the auto-detector misses (obfuscated exes). Default OFF.
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Force Denuvo ownership token", fontSize = 14.sp)
-                                Text(
-                                    "Force the ownership token for Denuvo games we don't auto-detect",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            // Sub-option of EOS auth: only meaningful when EOS auth is on.
-                            Switch(checked = epicOvtForce, onCheckedChange = { epicOvtForce = it },
-                                   enabled = epicEosEnabled)
-                        }
-                        // Launch offline: skip the online EOS auth exchange (drops the -AUTH_* args)
-                        // but keep the game's Epic identity/portal args. Default OFF.
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Launch offline", fontSize = 14.sp)
-                                Text(
-                                    "Skip Epic sign-in for this game (no online features)",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            // Sub-option of EOS auth: offline has nothing to skip when EOS auth is off.
-                            Switch(checked = epicOffline, onCheckedChange = { epicOffline = it },
-                                   enabled = epicEosEnabled)
-                        }
-                        // Epic Friends Overlay (Phase 3): provision Epic's real EOS overlay into the
-                        // prefix; the game's own EOS SDK renders it on Shift+F3. Default OFF.
-                        // Dark-launched: hidden behind FeatureFlags.EPIC_OVERLAY_ENABLED so no shortcut
-                        // can be set to epicOverlay=1 through the UI until the DXVK wrapper lands.
-                        if (com.winlator.star.FeatureFlags.EPIC_OVERLAY_ENABLED) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Epic Friends Overlay", fontSize = 14.sp)
+                                    Text("Executable", fontSize = 14.sp)
                                     Text(
-                                        "Experimental — in-game Epic overlay on Shift+F3 (a draggable pill " +
-                                                "can summon it too). Needs the container to allow full services.",
+                                        currentExeName.ifEmpty { "Unknown" },
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                OutlinedButton(onClick = onChangeExe) {
+                                    Icon(
+                                        Icons.Filled.SwapHoriz,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Change…")
+                                }
+                            }
+                        }
+
+                        // Epic Online Services (EOS) auth toggle — only for Epic-origin shortcuts.
+                        // When ON, the launcher injects real-Epic auth args (-EpicPortal + a fresh
+                        // exchange code) so EOS-requiring titles authenticate against the user's
+                        // logged-in Epic account. Harmless for non-EOS Epic games.
+                        if (isEpicShortcut) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Epic Online Services (EOS) auth", fontSize = 14.sp)
+                                    Text(
+                                        "Sign EOS games in with your Epic account",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 Spacer(Modifier.width(8.dp))
-                                Switch(checked = epicOverlayEnabled, onCheckedChange = { epicOverlayEnabled = it })
+                                Switch(checked = epicEosEnabled, onCheckedChange = { epicEosEnabled = it })
                             }
-                        }
-                    }
-
-                    // Screen size
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        DpDrop(
-                            dp, "screenSize",
-                            label = stringResource(R.string.screen_size),
-                            options = screenSizeEntries,
-                            selected = selectedScreenSize,
-                            onSelect = { selectedScreenSize = it },
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = { helpRes = if (isLinuxEntry) R.string.help_linux_screen_size else R.string.help_screen_size }) {
-                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                        }
-                    }
-                    if (selectedScreenSize == "Custom") {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            DpField(
-                                dp, "customW",
-                                value = customWidth,
-                                onValueChange = { customWidth = it },
-                                label = "Width",
-                                modifier = Modifier.weight(1f),
-                                singleLine = true,
-                                onRightId = "customH"
-                            )
-                            DpField(
-                                dp, "customH",
-                                value = customHeight,
-                                onValueChange = { customHeight = it },
-                                label = "Height",
-                                modifier = Modifier.weight(1f),
-                                singleLine = true,
-                                onLeftId = "customW"
-                            )
-                        }
-                    }
-
-                    // Screen alignment (#413) — per-game override. Sentinel value "" = inherit the
-                    // container (Container Default); "0"/"1"/"2" = Center/Top/Bottom. Reuses the same
-                    // strings the container editor + in-game drawer show, plus the shared "Use container
-                    // default" inherit label used by the refresh dropdown above.
-                    run {
-                        val saValues = listOf("", "0", "1", "2")
-                        val saLabels = listOf(
-                            stringResource(R.string.use_container_default),
-                            stringResource(R.string.screen_alignment_center),
-                            stringResource(R.string.screen_alignment_top),
-                            stringResource(R.string.screen_alignment_bottom)
-                        )
-                        val saIdx = saValues.indexOf(screenAlignment).coerceAtLeast(0)
-                        // Applies on X11 and Wayland alike (the compositor fits the desktop the same way).
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            DpDrop(
-                                dp, "screenAlignment",
-                                label = stringResource(R.string.screen_alignment),
-                                options = saLabels,
-                                selected = saLabels[saIdx],
-                                onSelect = { screenAlignment = saValues[saLabels.indexOf(it)] },
-                                modifier = Modifier.weight(1f)
-                            )
-                            LinuxHelp(isLinuxEntry, R.string.help_linux_screen_alignment) { helpRes = it }
-                        }
-                    }
-
-                    // Icon
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        iconBitmap?.let { bmp ->
-                            Image(
-                                bitmap = bmp.asImageBitmap(),
-                                contentDescription = null,
-                                modifier = Modifier.size(48.dp)
-                            )
-                        }
-                        Box(modifier = Modifier.weight(1f)) {
-                            DpButton(dp, "selectIcon", onActivate = { showIconPickMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                                OutlinedButton(onClick = { showIconPickMenu = true }, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Select Icon")
+                            // Force the ownership-token (-epicovt) path for Denuvo EOS games
+                            // the auto-detector misses (obfuscated exes). Default OFF.
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Force Denuvo ownership token", fontSize = 14.sp)
+                                    Text(
+                                        "Force the ownership token for Denuvo games we don't auto-detect",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                // Sub-option of EOS auth: only meaningful when EOS auth is on.
+                                Switch(checked = epicOvtForce, onCheckedChange = { epicOvtForce = it },
+                                       enabled = epicEosEnabled)
+                            }
+                            // Launch offline: skip the online EOS auth exchange (drops the -AUTH_* args)
+                            // but keep the game's Epic identity/portal args. Default OFF.
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Launch offline", fontSize = 14.sp)
+                                    Text(
+                                        "Skip Epic sign-in for this game (no online features)",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                // Sub-option of EOS auth: offline has nothing to skip when EOS auth is off.
+                                Switch(checked = epicOffline, onCheckedChange = { epicOffline = it },
+                                       enabled = epicEosEnabled)
+                            }
+                            // Epic Friends Overlay (Phase 3): provision Epic's real EOS overlay into the
+                            // prefix; the game's own EOS SDK renders it on Shift+F3. Default OFF.
+                            // Dark-launched: hidden behind FeatureFlags.EPIC_OVERLAY_ENABLED so no shortcut
+                            // can be set to epicOverlay=1 through the UI until the DXVK wrapper lands.
+                            if (com.winlator.star.FeatureFlags.EPIC_OVERLAY_ENABLED) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Epic Friends Overlay", fontSize = 14.sp)
+                                        Text(
+                                            "Experimental — in-game Epic overlay on Shift+F3 (a draggable pill " +
+                                                    "can summon it too). Needs the container to allow full services.",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    Switch(checked = epicOverlayEnabled, onCheckedChange = { epicOverlayEnabled = it })
                                 }
                             }
-                            DropdownMenu(expanded = showIconPickMenu, onDismissRequest = { showIconPickMenu = false }) {
-                                DropdownMenuItem(text = { Text("Browse files") }, onClick = {
-                                    showIconPickMenu = false
-                                    iconPickerInAppLauncher.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.IMAGES, "Select icon image"))
-                                })
-                                DropdownMenuItem(text = { Text("Pick via system…") }, onClick = {
-                                    showIconPickMenu = false
-                                    iconPickerLauncher.launch("image/*")
-                                })
+                        }
+
+                        // Screen size
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            DpDrop(
+                                dp, "screenSize",
+                                label = stringResource(R.string.screen_size),
+                                options = screenSizeEntries,
+                                selected = selectedScreenSize,
+                                onSelect = { selectedScreenSize = it },
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(onClick = { helpRes = if (isLinuxEntry) R.string.help_linux_screen_size else R.string.help_screen_size }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                             }
                         }
-                        LinuxHelp(isLinuxEntry, R.string.help_linux_icon) { helpRes = it }
-                    }
-
-                    // "What is all this?" — the same newcomer glossary the container editor shows,
-                    // reused verbatim so the per-game editor's terms match the container's.
-                    TextButton(onClick = { glossaryQuery = "" }) {
-                        Text("❔  What is all this?")
-                    }
-
-                    // Sync (esync / ntsync / fsync / wineserver) — follows the container unless this game
-                    // picks otherwise. D-pad: Left/Right step through the runnable modes, A goes back
-                    // to the container's. Not for a Linux entry: no Wine of ours runs there.
-                    if (!isLinuxEntry) {
-                        val runnable = com.winlator.star.core.SyncMode.ALL.filter { syncCaps?.isAvailable(it) ?: (it != com.winlator.star.core.SyncMode.FSYNC && it != com.winlator.star.core.SyncMode.NTSYNC) }
-                        SideEffect {
-                            dp.actions["syncMode"] = ControlActions(
-                                activate = { syncOverride = null },
-                                onLeft = { runnable.getOrNull(runnable.indexOf(syncEffective) - 1)?.let(pickSync) },
-                                onRight = { runnable.getOrNull(runnable.indexOf(syncEffective) + 1)?.let(pickSync) },
-                            )
-                        }
-                        com.winlator.star.ui.components.SyncModeSelector(
-                            selected = syncEffective,
-                            caps = syncCaps,
-                            helper = when {
-                                syncOverrideUnavailable && syncCaps != null ->
-                                    com.winlator.star.ui.components.syncSwitchedBackNotice(syncOverride!!, syncLayer, syncCaps!!)
-                                syncOverriding -> "$syncEffective for this game only (container: $containerSyncEffective)."
-                                else -> "Following the container: $containerSyncEffective."
-                            },
-                            onPick = pickSync,
-                            focused = dp.isFocused("syncMode"),
-                            onUseContainer = if (syncOverriding) ({ syncOverride = null }) else null,
-                            onHelp = { helpRes = R.string.help_sync_mode },
-                            modifier = Modifier.dpadBringIntoView(dp, "syncMode"),
-                        )
-                    }
-
-                    // Display backend override (per-game): default to the container, or force
-                    // X11 / Wayland. Wayland greys the Renderer group below (compositor replaces it)
-                    // and the driver-config button (the game runs on the Proton's bundled Turnip).
-                    // gamescope is a Wayland client and the launch path pins the backend to Wayland
-                    // for a Linux entry whatever this says, so there is no choice left to offer.
-                    if (!isLinuxEntry) {
-                        val dbLabels = listOf("Use container default", "Force X11", "Force Wayland")
-                        val dbValues = listOf("", Container.DISPLAY_BACKEND_X11, Container.DISPLAY_BACKEND_WAYLAND)
-                        // A stored "Force Wayland" the container's layer can't honour shows as the
-                        // effective backend (Force X11); see containerWaylandCapable above.
-                        val waylandStoredUnusable =
-                            displayBackendOverride == Container.DISPLAY_BACKEND_WAYLAND && !containerWaylandCapable
-                        val dbIdx = if (waylandStoredUnusable) 1
-                                    else dbValues.indexOf(displayBackendOverride).coerceAtLeast(0)
-                        DpDrop(
-                            dp, "displayBackend",
-                            label = "Display backend",
-                            options = dbLabels,
-                            selected = dbLabels[dbIdx],
-                            disabledOptions = if (containerWaylandCapable) emptySet() else setOf(dbLabels[2]),
-                            onSelect = {
-                                val picked = dbValues[dbLabels.indexOf(it)]
-                                displayBackendOverride =
-                                    if (picked == Container.DISPLAY_BACKEND_WAYLAND && !containerWaylandCapable) Container.DISPLAY_BACKEND_X11
-                                    else picked
-                            }
-                        )
-                        if (effectiveWaylandShortcut) {
-                            Text(
-                                "Wayland (experimental): renders through the embedded compositor " +
-                                    "(winewayland). Needs " + com.winlator.star.core.WineWaylandSupport.LAYER_HINT +
-                                    ". The game renders on the Turnip bundled with that " +
-                                    "Proton — the graphics-driver picker only affects the compositor. " +
-                                    "DX wrapper (DXVK/VKD3D) settings apply as on X11. Renderer " +
-                                    "options below don't apply.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else if (!containerWaylandCapable) {
-                            Text(
-                                "Wayland needs " + com.winlator.star.core.WineWaylandSupport.LAYER_HINT +
-                                    ". The selected layer does not include winewayland and its Wayland Turnip.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            if (waylandStoredUnusable || shortcut.container.isWaylandBackend) {
-                                Text(
-                                    if (waylandStoredUnusable)
-                                        "This game was set to Force Wayland, but the container's Proton layer is not Wayland-capable: it runs on X11 and will be saved as Force X11."
-                                    else
-                                        "The container is set to Wayland, but its Proton layer is not Wayland-capable: the game runs on X11.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error
+                        if (selectedScreenSize == "Custom") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                DpField(
+                                    dp, "customW",
+                                    value = customWidth,
+                                    onValueChange = { customWidth = it },
+                                    label = "Width",
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    onRightId = "customH"
+                                )
+                                DpField(
+                                    dp, "customH",
+                                    value = customHeight,
+                                    onValueChange = { customHeight = it },
+                                    label = "Height",
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    onLeftId = "customW"
                                 )
                             }
                         }
-                    }
 
-                    // OpenGL card (per-game): Fast / Show FPS / Vsync off, each `Auto | On | Off` (Auto =
-                    // follow the container), under one "?" and a summary of what the game will get. Fast
-                    // is locked to Auto with Wayland (always on there) or with a short X11 reason.
-                    // D-pad: the "?" and each row are stops; Left/Right step the pills, A goes back to Auto.
-                    // Launch-only (EGL vs GLX is fixed when the game starts), so there is no drawer twin.
-                    if (!isLinuxEntry) {
-                        val glOptions = com.winlator.star.ui.components.OPENGL_OVERRIDES
-                        val fpsSw = com.winlator.star.core.FastOpenGL.FPS_HUD
-                        val vsyncSw = com.winlator.star.core.FastOpenGL.VSYNC_OFF
-                        val pickFastGl: (String) -> Unit = { v -> if (fastGlLocked == null || v.isEmpty()) fastGlOverride = v }
-                        val pickFps: (String) -> Unit = { v -> glFpsHudOverride = v }
-                        val pickVsync: (String) -> Unit = { v -> glVsyncOffOverride = v }
-                        val stepActions = { value: String, pick: (String) -> Unit ->
-                            ControlActions(
-                                activate = { pick("") },
-                                onLeft = { glOptions.getOrNull(glOptions.indexOf(value) - 1)?.let(pick) },
-                                onRight = { glOptions.getOrNull(glOptions.indexOf(value) + 1)?.let(pick) },
+                        // Screen alignment (#413) — per-game override. Sentinel value "" = inherit the
+                        // container (Container Default); "0"/"1"/"2" = Center/Top/Bottom. Reuses the same
+                        // strings the container editor + in-game drawer show, plus the shared "Use container
+                        // default" inherit label used by the refresh dropdown above.
+                        run {
+                            val saValues = listOf("", "0", "1", "2")
+                            val saLabels = listOf(
+                                stringResource(R.string.use_container_default),
+                                stringResource(R.string.screen_alignment_center),
+                                stringResource(R.string.screen_alignment_top),
+                                stringResource(R.string.screen_alignment_bottom)
                             )
-                        }
-                        SideEffect {
-                            dp.actions["openglHelp"] = ControlActions(activate = { helpRes = R.string.help_opengl_settings })
-                            dp.actions["fastOpenGL"] = stepActions(fastGlOverride, pickFastGl)
-                            dp.actions[fpsSw.extra] = stepActions(glFpsHudOverride, pickFps)
-                            dp.actions[vsyncSw.extra] = stepActions(glVsyncOffOverride, pickVsync)
-                        }
-                        val containerFast = shortcut.container.isFastOpenGL()
-                        val containerFps = fpsSw.containerOn(shortcut.container.getExtra(fpsSw.extra))
-                        val containerVsync = vsyncSw.containerOn(shortcut.container.getExtra(vsyncSw.extra))
-                        val fastEffective = effectiveWaylandShortcut || (fastGlLocked == null &&
-                            com.winlator.star.core.FastOpenGL.requested(if (containerFast) "1" else "0", fastGlOverride))
-                        com.winlator.star.ui.components.OpenGLCard(
-                            onHelp = { helpRes = R.string.help_opengl_settings },
-                            summary = com.winlator.star.ui.components.openGLSummary(
-                                fastEffective,
-                                fpsSw.requested(if (containerFps) "1" else "0", glFpsHudOverride),
-                                vsyncSw.requested(if (containerVsync) "1" else "0", glVsyncOffOverride)),
-                            helpFocused = dp.isFocused("openglHelp"),
-                            modifier = Modifier.dpadBringIntoView(dp, "openglHelp"),
-                        ) {
-                            com.winlator.star.ui.components.OpenGLCardRow(
-                                com.winlator.star.ui.components.OPENGL_FAST_ICON, "Fast",
-                                com.winlator.star.ui.components.openGLFastNote(fastGlLocked),
-                                focused = dp.isFocused("fastOpenGL"),
-                                modifier = Modifier.dpadBringIntoView(dp, "fastOpenGL"),
-                            ) {
-                                com.winlator.star.ui.components.OpenGLPills(fastGlOverride,
-                                    autoOn = containerFast || effectiveWaylandShortcut, locked = fastGlLocked != null, onPick = pickFastGl)
-                            }
-                            com.winlator.star.ui.components.OpenGLCardRow(
-                                com.winlator.star.ui.components.OPENGL_FPS_ICON, "Show FPS", null,
-                                focused = dp.isFocused(fpsSw.extra),
-                                modifier = Modifier.dpadBringIntoView(dp, fpsSw.extra),
-                            ) {
-                                com.winlator.star.ui.components.OpenGLPills(glFpsHudOverride,
-                                    autoOn = containerFps, locked = false, onPick = pickFps)
-                            }
-                            com.winlator.star.ui.components.OpenGLCardRow(
-                                com.winlator.star.ui.components.OPENGL_VSYNC_ICON, "Vsync off", null,
-                                focused = dp.isFocused(vsyncSw.extra),
-                                modifier = Modifier.dpadBringIntoView(dp, vsyncSw.extra),
-                            ) {
-                                com.winlator.star.ui.components.OpenGLPills(glVsyncOffOverride,
-                                    autoOn = containerVsync, locked = false, onPick = pickVsync)
+                            val saIdx = saValues.indexOf(screenAlignment).coerceAtLeast(0)
+                            // Applies on X11 and Wayland alike (the compositor fits the desktop the same way).
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                DpDrop(
+                                    dp, "screenAlignment",
+                                    label = stringResource(R.string.screen_alignment),
+                                    options = saLabels,
+                                    selected = saLabels[saIdx],
+                                    onSelect = { screenAlignment = saValues[saLabels.indexOf(it)] },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                LinuxHelp(isLinuxEntry, R.string.help_linux_screen_alignment) { helpRes = it }
                             }
                         }
-                    }
 
-                    // Graphics Driver + wrapper manager (cloud). Under Wayland the wrapper flavour is
-                    // irrelevant: the compositor loads the installed Turnip named by the "version" key of
-                    // graphicsDriverConfig (XServerDisplayActivity's Wayland resolve → adrenotools), and the
-                    // game renders on the Proton's bundled Wayland Turnip. So the flavour dropdown is swapped
-                    // for a "Compositor driver" picker over the installed Turnip ids that writes ONLY the
-                    // version key back (see withGraphicsDriverVersion); the config button stays live.
-                    var showWrapperManager by remember { mutableStateOf(false) }
-                    val gfxContext = LocalContext.current
-                    var compositorChoices by remember { mutableStateOf<List<String>>(emptyList()) }
-                    var compositorChoicesLoaded by remember { mutableStateOf(false) }
-                    // Wayland GAME driver choices + the variant Auto resolves to (native probe, off-main
-                    // under graphicsProbeMutex with the compositor choices; cached after the first run).
-                    var waylandGameDriverValues by remember { mutableStateOf<List<String>>(emptyList()) }
-                    // Imported Linux ICDs, for a Linux entry's draw-driver row (same probe pass).
-                    var linuxVulkanDriverValues by remember { mutableStateOf<List<String>>(emptyList()) }
-                    var waylandAutoPick by remember { mutableStateOf(com.winlator.star.core.WaylandGameDriver.autoVariantIfKnown()) }
-                    LaunchedEffect(effectiveWaylandShortcut, isLinuxEntry) {
-                        if (!effectiveWaylandShortcut && !isLinuxEntry) return@LaunchedEffect
-                        compositorChoices = compositorDriverChoices(gfxContext) // same source as the config dialog
-                        compositorChoicesLoaded = true
-                        waylandGameDriverValues = com.winlator.star.core.WaylandGameDriver.optionValues(gfxContext)
-                        waylandAutoPick = waylandAutoVariant(gfxContext)
-                        linuxVulkanDriverValues = com.winlator.star.core.LinuxVulkanDriver.optionValues(gfxContext)
-                    }
-                    val compositorVersion = GraphicsDriverConfigDialog.getVersion(graphicsDriverConfig) ?: ""
-                    // Two different drivers are involved in a Linux session and only one of them is
-                    // chosen here. This row picks the ANDROID driver the app's own compositor loads to
-                    // import the session's finished frames and put them on screen - it is live on this
-                    // path, and "System" here is a black screen. What the client and its games render
-                    // WITH is the Linux-built driver inside the runtime, which no row here touches.
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (effectiveWaylandShortcut || isLinuxEntry) {
-                            DpDrop(
-                                dp, "gfxDriver",
-                                // Named for what it does on each path. On a Linux entry the distinction
-                                // matters: this is the Android driver that DISPLAYS the session, while a
-                                // separate Linux driver inside the runtime is what draws it.
-                                label = if (isLinuxEntry) "Display driver (Android side)" else stringResource(R.string.graphics_driver),
-                                options = compositorChoices,
-                                selected = compositorDriverLabel(compositorVersion, compositorChoices, compositorChoicesLoaded),
-                                onSelect = { graphicsDriverConfig = withGraphicsDriverVersion(graphicsDriverConfig, it) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        } else {
-                            DpDrop(
-                                dp, "gfxDriver",
-                                label = stringResource(R.string.graphics_driver),
-                                options = graphicsDriverEntries,
-                                selected = selectedGfxDriver,
-                                onSelect = { selectedGfxDriver = it },
-                                modifier = Modifier.weight(1f),
-                                onRightId = "gfxWrapper"
+                        // Icon
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            iconBitmap?.let { bmp ->
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                            }
+                            Box(modifier = Modifier.weight(1f)) {
+                                DpButton(dp, "selectIcon", onActivate = { showIconPickMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(onClick = { showIconPickMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Select Icon")
+                                    }
+                                }
+                                DropdownMenu(expanded = showIconPickMenu, onDismissRequest = { showIconPickMenu = false }) {
+                                    DropdownMenuItem(text = { Text("Browse files") }, onClick = {
+                                        showIconPickMenu = false
+                                        iconPickerInAppLauncher.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.IMAGES, "Select icon image"))
+                                    })
+                                    DropdownMenuItem(text = { Text("Pick via system…") }, onClick = {
+                                        showIconPickMenu = false
+                                        iconPickerLauncher.launch("image/*")
+                                    })
+                                }
+                            }
+                            LinuxHelp(isLinuxEntry, R.string.help_linux_icon) { helpRes = it }
+                        }
+
+                        // "What is all this?" — the same newcomer glossary the container editor shows,
+                        // reused verbatim so the per-game editor's terms match the container's.
+                        TextButton(onClick = { glossaryQuery = "" }) {
+                            Text("❔  What is all this?")
+                        }
+
+                        // Sync (esync / ntsync / fsync / wineserver) — follows the container unless this game
+                        // picks otherwise. D-pad: Left/Right step through the runnable modes, A goes back
+                        // to the container's. Not for a Linux entry: no Wine of ours runs there.
+                        if (!isLinuxEntry) {
+                            val runnable = com.winlator.star.core.SyncMode.ALL.filter { syncCaps?.isAvailable(it) ?: (it != com.winlator.star.core.SyncMode.FSYNC && it != com.winlator.star.core.SyncMode.NTSYNC) }
+                            SideEffect {
+                                dp.actions["syncMode"] = ControlActions(
+                                    activate = { syncOverride = null },
+                                    onLeft = { runnable.getOrNull(runnable.indexOf(syncEffective) - 1)?.let(pickSync) },
+                                    onRight = { runnable.getOrNull(runnable.indexOf(syncEffective) + 1)?.let(pickSync) },
+                                )
+                            }
+                            com.winlator.star.ui.components.SyncModeSelector(
+                                selected = syncEffective,
+                                caps = syncCaps,
+                                helper = when {
+                                    syncOverrideUnavailable && syncCaps != null ->
+                                        com.winlator.star.ui.components.syncSwitchedBackNotice(syncOverride!!, syncLayer, syncCaps!!)
+                                    syncOverriding -> "$syncEffective for this game only (container: $containerSyncEffective)."
+                                    else -> "Following the container: $containerSyncEffective."
+                                },
+                                onPick = pickSync,
+                                focused = dp.isFocused("syncMode"),
+                                onUseContainer = if (syncOverriding) ({ syncOverride = null }) else null,
+                                onHelp = { helpRes = R.string.help_sync_mode },
+                                modifier = Modifier.dpadBringIntoView(dp, "syncMode"),
                             )
                         }
-                        IconButton(onClick = {
-                            helpRes = if (isLinuxEntry) R.string.help_linux_display_driver
-                                      else R.string.help_graphics_driver
-                        }) {
-                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                        }
-                        // Wrappers are X11 game-driver shims: nothing on the Wayland path uses them,
-                        // so the manager button is left out there (the "?" stays).
-                        if (!effectiveWaylandShortcut && !isLinuxEntry) {
-                            DpButton(dp, "gfxWrapper", onActivate = { showWrapperManager = true }, onLeftId = "gfxDriver") {
-                                IconButton(onClick = { showWrapperManager = true }) {
-                                    Icon(Icons.Default.CloudDownload, contentDescription = stringResource(R.string.wrapper_manager_open))
+
+                        // Display backend override (per-game): default to the container, or force
+                        // X11 / Wayland. Wayland greys the Renderer group below (compositor replaces it)
+                        // and the driver-config button (the game runs on the Proton's bundled Turnip).
+                        // gamescope is a Wayland client and the launch path pins the backend to Wayland
+                        // for a Linux entry whatever this says, so there is no choice left to offer.
+                        if (!isLinuxEntry) {
+                            val dbLabels = listOf("Use container default", "Force X11", "Force Wayland")
+                            val dbValues = listOf("", Container.DISPLAY_BACKEND_X11, Container.DISPLAY_BACKEND_WAYLAND)
+                            // A stored "Force Wayland" the container's layer can't honour shows as the
+                            // effective backend (Force X11); see containerWaylandCapable above.
+                            val waylandStoredUnusable =
+                                displayBackendOverride == Container.DISPLAY_BACKEND_WAYLAND && !containerWaylandCapable
+                            val dbIdx = if (waylandStoredUnusable) 1
+                                        else dbValues.indexOf(displayBackendOverride).coerceAtLeast(0)
+                            DpDrop(
+                                dp, "displayBackend",
+                                label = "Display backend",
+                                options = dbLabels,
+                                selected = dbLabels[dbIdx],
+                                disabledOptions = if (containerWaylandCapable) emptySet() else setOf(dbLabels[2]),
+                                onSelect = {
+                                    val picked = dbValues[dbLabels.indexOf(it)]
+                                    displayBackendOverride =
+                                        if (picked == Container.DISPLAY_BACKEND_WAYLAND && !containerWaylandCapable) Container.DISPLAY_BACKEND_X11
+                                        else picked
+                                }
+                            )
+                            if (effectiveWaylandShortcut) {
+                                Text(
+                                    "Wayland (experimental): renders through the embedded compositor " +
+                                        "(winewayland). Needs " + com.winlator.star.core.WineWaylandSupport.LAYER_HINT +
+                                        ". The game renders on the Turnip bundled with that " +
+                                        "Proton — the graphics-driver picker only affects the compositor. " +
+                                        "DX wrapper (DXVK/VKD3D) settings apply as on X11. Renderer " +
+                                        "options below don't apply.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else if (!containerWaylandCapable) {
+                                Text(
+                                    "Wayland needs " + com.winlator.star.core.WineWaylandSupport.LAYER_HINT +
+                                        ". The selected layer does not include winewayland and its Wayland Turnip.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (waylandStoredUnusable || shortcut.container.isWaylandBackend) {
+                                    Text(
+                                        if (waylandStoredUnusable)
+                                            "This game was set to Force Wayland, but the container's Proton layer is not Wayland-capable: it runs on X11 and will be saved as Force X11."
+                                        else
+                                            "The container is set to Wayland, but its Proton layer is not Wayland-capable: the game runs on X11.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
                                 }
                             }
                         }
-                    }
-                    if (showWrapperManager) WrapperManagerDialog(onDismiss = {
-                        showWrapperManager = false
-                        wrapperRefreshKey++ // pick up a just-imported/deleted wrapper
-                    })
-                    // Driver configuration is X11 tuning; on Wayland its only live field (the Turnip
-                    // version) is covered by the Compositor driver dropdown, so the button is hidden.
-                    // The Wayland branch is also where HDR output lives, and that one DOES reach a
-                    // Linux session (the compositor gates HDR for every Wayland session, gamescope
-                    // included), so a Linux entry takes it with the driver rows conditioned off.
-                    if (!effectiveWaylandShortcut && !isLinuxEntry) {
-                        DpButton(dp, "gfxConfig", onActivate = { showGfxConfig = true }, modifier = Modifier.fillMaxWidth()) {
-                            OutlinedButton(onClick = { showGfxConfig = true }, modifier = Modifier.fillMaxWidth()) {
-                                Text("${stringResource(R.string.graphics_driver)}: ${GraphicsDriverConfigDialog.getVersion(graphicsDriverConfig)}")
+
+                        // OpenGL card (per-game): Fast / Show FPS / Vsync off, each `Auto | On | Off` (Auto =
+                        // follow the container), under one "?" and a summary of what the game will get. Fast
+                        // is locked to Auto with Wayland (always on there) or with a short X11 reason.
+                        // D-pad: the "?" and each row are stops; Left/Right step the pills, A goes back to Auto.
+                        // Launch-only (EGL vs GLX is fixed when the game starts), so there is no drawer twin.
+                        if (!isLinuxEntry) {
+                            val glOptions = com.winlator.star.ui.components.OPENGL_OVERRIDES
+                            val fpsSw = com.winlator.star.core.FastOpenGL.FPS_HUD
+                            val vsyncSw = com.winlator.star.core.FastOpenGL.VSYNC_OFF
+                            val pickFastGl: (String) -> Unit = { v -> if (fastGlLocked == null || v.isEmpty()) fastGlOverride = v }
+                            val pickFps: (String) -> Unit = { v -> glFpsHudOverride = v }
+                            val pickVsync: (String) -> Unit = { v -> glVsyncOffOverride = v }
+                            val stepActions = { value: String, pick: (String) -> Unit ->
+                                ControlActions(
+                                    activate = { pick("") },
+                                    onLeft = { glOptions.getOrNull(glOptions.indexOf(value) - 1)?.let(pick) },
+                                    onRight = { glOptions.getOrNull(glOptions.indexOf(value) + 1)?.let(pick) },
+                                )
+                            }
+                            SideEffect {
+                                dp.actions["openglHelp"] = ControlActions(activate = { helpRes = R.string.help_opengl_settings })
+                                dp.actions["fastOpenGL"] = stepActions(fastGlOverride, pickFastGl)
+                                dp.actions[fpsSw.extra] = stepActions(glFpsHudOverride, pickFps)
+                                dp.actions[vsyncSw.extra] = stepActions(glVsyncOffOverride, pickVsync)
+                            }
+                            val containerFast = shortcut.container.isFastOpenGL()
+                            val containerFps = fpsSw.containerOn(shortcut.container.getExtra(fpsSw.extra))
+                            val containerVsync = vsyncSw.containerOn(shortcut.container.getExtra(vsyncSw.extra))
+                            val fastEffective = effectiveWaylandShortcut || (fastGlLocked == null &&
+                                com.winlator.star.core.FastOpenGL.requested(if (containerFast) "1" else "0", fastGlOverride))
+                            com.winlator.star.ui.components.OpenGLCard(
+                                onHelp = { helpRes = R.string.help_opengl_settings },
+                                summary = com.winlator.star.ui.components.openGLSummary(
+                                    fastEffective,
+                                    fpsSw.requested(if (containerFps) "1" else "0", glFpsHudOverride),
+                                    vsyncSw.requested(if (containerVsync) "1" else "0", glVsyncOffOverride)),
+                                helpFocused = dp.isFocused("openglHelp"),
+                                modifier = Modifier.dpadBringIntoView(dp, "openglHelp"),
+                            ) {
+                                com.winlator.star.ui.components.OpenGLCardRow(
+                                    com.winlator.star.ui.components.OPENGL_FAST_ICON, "Fast",
+                                    com.winlator.star.ui.components.openGLFastNote(fastGlLocked),
+                                    focused = dp.isFocused("fastOpenGL"),
+                                    modifier = Modifier.dpadBringIntoView(dp, "fastOpenGL"),
+                                ) {
+                                    com.winlator.star.ui.components.OpenGLPills(fastGlOverride,
+                                        autoOn = containerFast || effectiveWaylandShortcut, locked = fastGlLocked != null, onPick = pickFastGl)
+                                }
+                                com.winlator.star.ui.components.OpenGLCardRow(
+                                    com.winlator.star.ui.components.OPENGL_FPS_ICON, "Show FPS", null,
+                                    focused = dp.isFocused(fpsSw.extra),
+                                    modifier = Modifier.dpadBringIntoView(dp, fpsSw.extra),
+                                ) {
+                                    com.winlator.star.ui.components.OpenGLPills(glFpsHudOverride,
+                                        autoOn = containerFps, locked = false, onPick = pickFps)
+                                }
+                                com.winlator.star.ui.components.OpenGLCardRow(
+                                    com.winlator.star.ui.components.OPENGL_VSYNC_ICON, "Vsync off", null,
+                                    focused = dp.isFocused(vsyncSw.extra),
+                                    modifier = Modifier.dpadBringIntoView(dp, vsyncSw.extra),
+                                ) {
+                                    com.winlator.star.ui.components.OpenGLPills(glVsyncOffOverride,
+                                        autoOn = containerVsync, locked = false, onPick = pickVsync)
+                                }
                             }
                         }
-                    } else {
-                        // A Linux session has two drivers and the row above picked the wrong half of
-                        // the pair on its own: that one DISPLAYS, this one DRAWS - the client's UI
-                        // through the runtime's Zink and every game the client launches through
-                        // Proton. Imported "-Linux" zips only; "" leaves the runtime's own driver in
-                        // place. A stored id whose import is gone stays listed and labelled, and the
-                        // launch path falls back to the runtime's driver for it.
-                        if (isLinuxEntry) {
-                            // The row above is live on this path and "System"/a missing driver is a
-                            // black screen here too, so the same warning applies - it used to be
-                            // inside the Wayland-only branch below.
-                            if (compositorDriverUnusable(compositorVersion, compositorChoices, compositorChoicesLoaded)) {
+
+                        // Graphics Driver + wrapper manager (cloud). Under Wayland the wrapper flavour is
+                        // irrelevant: the compositor loads the installed Turnip named by the "version" key of
+                        // graphicsDriverConfig (XServerDisplayActivity's Wayland resolve → adrenotools), and the
+                        // game renders on the Proton's bundled Wayland Turnip. So the flavour dropdown is swapped
+                        // for a "Compositor driver" picker over the installed Turnip ids that writes ONLY the
+                        // version key back (see withGraphicsDriverVersion); the config button stays live.
+                        var showWrapperManager by remember { mutableStateOf(false) }
+                        val gfxContext = LocalContext.current
+                        var compositorChoices by remember { mutableStateOf<List<String>>(emptyList()) }
+                        var compositorChoicesLoaded by remember { mutableStateOf(false) }
+                        // Wayland GAME driver choices + the variant Auto resolves to (native probe, off-main
+                        // under graphicsProbeMutex with the compositor choices; cached after the first run).
+                        var waylandGameDriverValues by remember { mutableStateOf<List<String>>(emptyList()) }
+                        // Imported Linux ICDs, for a Linux entry's draw-driver row (same probe pass).
+                        var linuxVulkanDriverValues by remember { mutableStateOf<List<String>>(emptyList()) }
+                        var waylandAutoPick by remember { mutableStateOf(com.winlator.star.core.WaylandGameDriver.autoVariantIfKnown()) }
+                        LaunchedEffect(effectiveWaylandShortcut, isLinuxEntry) {
+                            if (!effectiveWaylandShortcut && !isLinuxEntry) return@LaunchedEffect
+                            compositorChoices = compositorDriverChoices(gfxContext) // same source as the config dialog
+                            compositorChoicesLoaded = true
+                            waylandGameDriverValues = com.winlator.star.core.WaylandGameDriver.optionValues(gfxContext)
+                            waylandAutoPick = waylandAutoVariant(gfxContext)
+                            linuxVulkanDriverValues = com.winlator.star.core.LinuxVulkanDriver.optionValues(gfxContext)
+                        }
+                        val compositorVersion = GraphicsDriverConfigDialog.getVersion(graphicsDriverConfig) ?: ""
+                        // Two different drivers are involved in a Linux session and only one of them is
+                        // chosen here. This row picks the ANDROID driver the app's own compositor loads to
+                        // import the session's finished frames and put them on screen - it is live on this
+                        // path, and "System" here is a black screen. What the client and its games render
+                        // WITH is the Linux-built driver inside the runtime, which no row here touches.
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (effectiveWaylandShortcut || isLinuxEntry) {
+                                DpDrop(
+                                    dp, "gfxDriver",
+                                    // Named for what it does on each path. On a Linux entry the distinction
+                                    // matters: this is the Android driver that DISPLAYS the session, while a
+                                    // separate Linux driver inside the runtime is what draws it.
+                                    label = if (isLinuxEntry) "Display driver (Android side)" else stringResource(R.string.graphics_driver),
+                                    options = compositorChoices,
+                                    selected = compositorDriverLabel(compositorVersion, compositorChoices, compositorChoicesLoaded),
+                                    onSelect = { graphicsDriverConfig = withGraphicsDriverVersion(graphicsDriverConfig, it) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            } else {
+                                DpDrop(
+                                    dp, "gfxDriver",
+                                    label = stringResource(R.string.graphics_driver),
+                                    options = graphicsDriverEntries,
+                                    selected = selectedGfxDriver,
+                                    onSelect = { selectedGfxDriver = it },
+                                    modifier = Modifier.weight(1f),
+                                    onRightId = "gfxWrapper"
+                                )
+                            }
+                            IconButton(onClick = {
+                                helpRes = if (isLinuxEntry) R.string.help_linux_display_driver
+                                          else R.string.help_graphics_driver
+                            }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
+                            // Wrappers are X11 game-driver shims: nothing on the Wayland path uses them,
+                            // so the manager button is left out there (the "?" stays).
+                            if (!effectiveWaylandShortcut && !isLinuxEntry) {
+                                DpButton(dp, "gfxWrapper", onActivate = { showWrapperManager = true }, onLeftId = "gfxDriver") {
+                                    IconButton(onClick = { showWrapperManager = true }) {
+                                        Icon(Icons.Default.CloudDownload, contentDescription = stringResource(R.string.wrapper_manager_open))
+                                    }
+                                }
+                            }
+                        }
+                        if (showWrapperManager) WrapperManagerDialog(onDismiss = {
+                            showWrapperManager = false
+                            wrapperRefreshKey++ // pick up a just-imported/deleted wrapper
+                        })
+                        // Driver configuration is X11 tuning; on Wayland its only live field (the Turnip
+                        // version) is covered by the Compositor driver dropdown, so the button is hidden.
+                        // The Wayland branch is also where HDR output lives, and that one DOES reach a
+                        // Linux session (the compositor gates HDR for every Wayland session, gamescope
+                        // included), so a Linux entry takes it with the driver rows conditioned off.
+                        if (!effectiveWaylandShortcut && !isLinuxEntry) {
+                            DpButton(dp, "gfxConfig", onActivate = { showGfxConfig = true }, modifier = Modifier.fillMaxWidth()) {
+                                OutlinedButton(onClick = { showGfxConfig = true }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("${stringResource(R.string.graphics_driver)}: ${GraphicsDriverConfigDialog.getVersion(graphicsDriverConfig)}")
+                                }
+                            }
+                        } else {
+                            // A Linux session has two drivers and the row above picked the wrong half of
+                            // the pair on its own: that one DISPLAYS, this one DRAWS - the client's UI
+                            // through the runtime's Zink and every game the client launches through
+                            // Proton. Imported "-Linux" zips only; "" leaves the runtime's own driver in
+                            // place. A stored id whose import is gone stays listed and labelled, and the
+                            // launch path falls back to the runtime's driver for it.
+                            if (isLinuxEntry) {
+                                // The row above is live on this path and "System"/a missing driver is a
+                                // black screen here too, so the same warning applies - it used to be
+                                // inside the Wayland-only branch below.
+                                if (compositorDriverUnusable(compositorVersion, compositorChoices, compositorChoicesLoaded)) {
+                                    Text(
+                                        "The display driver above cannot show this session. \"System\" or a driver that is no "
+                                            + "longer installed leaves the compositor on the system Vulkan, which shows a black screen.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                }
+                                val linuxValues = if (linuxVulkanDriverOverride.isEmpty() || linuxVulkanDriverOverride in linuxVulkanDriverValues)
+                                    linuxVulkanDriverValues.ifEmpty { listOf("") }
+                                else linuxVulkanDriverValues + linuxVulkanDriverOverride
+                                val linuxLabels = linuxValues.map { com.winlator.star.core.LinuxVulkanDriver.optionLabel(gfxContext, it) }
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    DpDrop(
+                                        dp, "linuxVulkanDriver",
+                                        label = "Draw driver (Linux runtime)",
+                                        options = linuxLabels,
+                                        selected = linuxLabels[linuxValues.indexOf(linuxVulkanDriverOverride).coerceAtLeast(0)],
+                                        onSelect = { linuxVulkanDriverOverride = linuxValues[linuxLabels.indexOf(it)] },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(onClick = { helpRes = R.string.help_linux_draw_driver }) {
+                                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                    }
+                                }
                                 Text(
-                                    "The display driver above cannot show this session. \"System\" or a driver that is no "
-                                        + "longer installed leaves the compositor on the system Vulkan, which shows a black screen.",
+                                    com.winlator.star.core.LinuxVulkanDriver.HELP_TEXT
+                                            + if (linuxVulkanDriverValues.size > 1) ""
+                                              else " Nothing imported yet: Contents \u2192 Installed \u2192 Linux runtime drivers.",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(8.dp))
+
+                                // Performance switches for the chain that draws the client's interface.
+                                // They make that chain cheaper rather than asking for more hardware.
+                                // None of them is device-proven.
+                                // Change ONE, launch, and read the HUD; the session's device.txt says what was set when the number was taken.
+                                Text("Performance (experimental)", style = MaterialTheme.typography.titleSmall)
+                                Spacer(Modifier.height(4.dp))
+                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_GLTHREAD,
+                                    "Threaded GL (mesa_glthread)", linuxGlThread,
+                                    com.winlator.star.linux.LinuxTuning.defaultOn(
+                                        com.winlator.star.linux.LinuxTuning.EXTRA_GLTHREAD)) { linuxGlThread = it }
+                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_LAZY_DESCRIPTORS,
+                                    "Lazy descriptors (ZINK_DESCRIPTORS)", linuxLazyDescriptors,
+                                    com.winlator.star.linux.LinuxTuning.defaultOn(
+                                        com.winlator.star.linux.LinuxTuning.EXTRA_LAZY_DESCRIPTORS)) { linuxLazyDescriptors = it }
+                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_NO_GL_ERROR,
+                                    "Skip GL error checks (MESA_NO_ERROR)", linuxNoGlError,
+                                    com.winlator.star.linux.LinuxTuning.defaultOn(
+                                        com.winlator.star.linux.LinuxTuning.EXTRA_NO_GL_ERROR)) { linuxNoGlError = it }
+                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_STEAMDECK,
+                                    "Steam Deck mode (-steamdeck)", linuxDeckMode,
+                                    com.winlator.star.linux.LinuxTuning.defaultOn(
+                                        com.winlator.star.linux.LinuxTuning.EXTRA_STEAMDECK)) { on ->
+                                    if (on) confirmDeckMode = true else linuxDeckMode = false
+                                }
+                                if (linuxDeckMode) {
+                                    Text(
+                                        "Deck mode is on: games do not receive the controller. If a Steam Client update shows under System that will not install, do not press Apply on it.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                                if (confirmDeckMode) {
+                                    OutlinedAlertDialog(
+                                        onDismissRequest = { confirmDeckMode = false },
+                                        title = { Text("Turn on Steam Deck mode?") },
+                                        text = {
+                                            Text(
+                                                "Deck mode makes the Steam client behave as it does on a Steam Deck and adds the Quick Access Menu.\n\n"
+                                                    + "Known problems, found on device:\n"
+                                                    + "\u2022 Games stop receiving the controller. Steam's own menus still work, but in a game the pad does nothing.\n"
+                                                    + "\u2022 The client may show a Steam Client update under System that will not install. Deck mode now uses the Steam Deck beta channel to avoid it, but if it appears, do not press Apply.\n"
+                                                    + "\u2022 The Quick Access Menu's performance overlay is new and not yet tried on a device.\n\n"
+                                                    + "The scaling controls below do the useful part without it, and the in-game drawer's FPS limit caps the frame rate. Turn Deck mode off again if a game stops responding to the controller."
+                                            )
+                                        },
+                                        confirmButton = {
+                                            TextButton(onClick = { linuxDeckMode = true; confirmDeckMode = false }) { Text("Turn on anyway") }
+                                        },
+                                        dismissButton = {
+                                            TextButton(onClick = { confirmDeckMode = false }) { Text("Keep it off") }
+                                        },
+                                    )
+                                }
+                                val channelLabels = com.winlator.star.linux.LinuxTuning.STEAM_CHANNELS.map {
+                                    when (it) {
+                                        "" -> if (linuxDeckMode) "Automatic (Steam Deck beta, for Deck mode)" else "Automatic (public beta)"
+                                        "publicbeta" -> "Public beta"
+                                        else -> "Steam Deck beta"
+                                    }
+                                }
+                                DpDrop(
+                                    dp, com.winlator.star.linux.LinuxTuning.EXTRA_STEAM_CHANNEL,
+                                    label = "Steam client update channel",
+                                    options = channelLabels,
+                                    selected = channelLabels[com.winlator.star.linux.LinuxTuning.STEAM_CHANNELS.indexOf(linuxSteamChannel).coerceAtLeast(0)],
+                                    onSelect = { linuxSteamChannel = com.winlator.star.linux.LinuxTuning.STEAM_CHANNELS[channelLabels.indexOf(it).coerceAtLeast(0)] }
+                                )
+                                val scalerLabels = com.winlator.star.linux.LinuxTuning.SCALERS.map { if (it.isEmpty()) "Default" else it.replaceFirstChar(Char::uppercase) }
+                                DpDrop(
+                                    dp, com.winlator.star.linux.LinuxTuning.EXTRA_SCALER,
+                                    label = "Scaling mode",
+                                    options = scalerLabels,
+                                    selected = scalerLabels[com.winlator.star.linux.LinuxTuning.SCALERS.indexOf(linuxScaler).coerceAtLeast(0)],
+                                    onSelect = { linuxScaler = com.winlator.star.linux.LinuxTuning.SCALERS[scalerLabels.indexOf(it).coerceAtLeast(0)] }
+                                )
+                                val filterLabels = com.winlator.star.linux.LinuxTuning.FILTERS.map {
+                                    when (it) {
+                                        "" -> "Default"
+                                        "fsr", "nis", "sgsr" -> it.uppercase()
+                                        else -> it.replaceFirstChar(Char::uppercase)
+                                    }
+                                }
+                                DpDrop(
+                                    dp, com.winlator.star.linux.LinuxTuning.EXTRA_FILTER,
+                                    label = "Scaling filter",
+                                    options = filterLabels,
+                                    selected = filterLabels[com.winlator.star.linux.LinuxTuning.FILTERS.indexOf(linuxFilter).coerceAtLeast(0)],
+                                    onSelect = { linuxFilter = com.winlator.star.linux.LinuxTuning.FILTERS[filterLabels.indexOf(it).coerceAtLeast(0)] }
+                                )
+                                Text(
+                                    "Scaling mode and filter only matter when a game renders below the session's resolution. "
+                                        + "FSR, NIS and SGSR upscale and sharpen; SGSR is Qualcomm's, made for Adreno.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(8.dp))
+
+                                // The Steam client switches. The in-game drawer's Steam client section shows the same
+                                // ones and saves to the same extras; there they apply live where they can.
+                                Text("Steam client", style = MaterialTheme.typography.titleSmall)
+                                Spacer(Modifier.height(4.dp))
+                                val touchLabels = listOf("App setting (the Touchscreen switch)", "Touchscreen", "Touchpad")
+                                DpDrop(
+                                    dp, com.winlator.star.linux.LinuxTuning.EXTRA_TOUCH,
+                                    label = "Touch",
+                                    options = touchLabels,
+                                    selected = touchLabels[com.winlator.star.linux.LinuxTuning.TOUCH_CHOICES.indexOf(linuxTouch).coerceAtLeast(0)],
+                                    onSelect = { linuxTouch = com.winlator.star.linux.LinuxTuning.TOUCH_CHOICES[touchLabels.indexOf(it).coerceAtLeast(0)] }
+                                )
+                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_STEAM_BUTTONS,
+                                    "On-screen Steam and Quick Access buttons", linuxSteamButtons,
+                                    com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_STEAM_BUTTONS)) { linuxSteamButtons = it }
+                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_DOUBLE_BACK_QAM,
+                                    "Double Back opens Quick Access", linuxDoubleBackQam,
+                                    com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_DOUBLE_BACK_QAM)) { linuxDoubleBackQam = it }
+                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_FILL_SCREEN,
+                                    "Stretch games to fill the screen", linuxFillScreen,
+                                    com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_FILL_SCREEN)) { linuxFillScreen = it }
+                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_IDTECH3,
+                                    "Quake-engine games windowed", linuxIdTech3,
+                                    com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_IDTECH3)) { linuxIdTech3 = it }
+                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_OFFLINE,
+                                    "Offline mode (no sign-in to Valve)", linuxOffline,
+                                    com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_OFFLINE)) { linuxOffline = it }
+                                Text(
+                                    "Touchscreen sends fingers to Steam as real touches (Big Picture scrolls under one); Touchpad moves the pointer with a drag and clicks with a tap. "
+                                        + "The buttons sit in the top corners: Steam's menu on the left, its Quick Access Menu on the right. "
+                                        + "With double Back, one Back press still opens the in-game drawer. "
+                                        + "Stretch keeps a game that shrinks its window (FlatOut after Resume game) filling the screen. "
+                                        + "Quake III, Team Arena, Return to Castle Wolfenstein and Jedi Academy run windowed at the session's size, the one way they start here. "
+                                        + "Offline mode starts Steam without signing in to Valve, and installed games still launch; it needs one online sign-in on this device first. "
+                                        + "The in-game drawer has all of these too, and changes them without restarting, except offline mode, which applies at the next session.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text("Troubleshooting", style = MaterialTheme.typography.titleSmall)
+                                Spacer(Modifier.height(4.dp))
+                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_NO_XALIA,
+                                    "Xalia off (PROTON_USE_XALIA=0)", linuxNoXalia,
+                                    com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_NO_XALIA)) { linuxNoXalia = it }
+                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_PROOT_NO_SECCOMP,
+                                    "proot without seccomp (PROOT_NO_SECCOMP)", linuxProotNoSeccomp,
+                                    com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_PROOT_NO_SECCOMP)) { linuxProotNoSeccomp = it }
+                                val sysmemLabels = listOf("Automatic (A710/A720/A722 drivers)", "On", "Off")
+                                DpDrop(
+                                    dp, com.winlator.star.linux.LinuxTuning.EXTRA_TU_SYSMEM,
+                                    label = "Turnip sysmem rendering (TU_DEBUG=sysmem)",
+                                    options = sysmemLabels,
+                                    selected = sysmemLabels[com.winlator.star.linux.LinuxTuning.TU_SYSMEM_CHOICES.indexOf(linuxTurnipSysmem).coerceAtLeast(0)],
+                                    onSelect = { linuxTurnipSysmem = com.winlator.star.linux.LinuxTuning.TU_SYSMEM_CHOICES[sysmemLabels.indexOf(it).coerceAtLeast(0)] }
+                                )
+                                Text(
+                                    "Xalia off is on by default: xalia costs every game CPU time under FEX, so turn it off only for a game that needs its gamepad navigation. "
+                                        + "The others are only for a device that misbehaves. "
+                                        + "proot without seccomp is slower, for a device whose seccomp gets in the way. "
+                                        + "Sysmem rendering is what the A710/A720/A722 driver builds need; Automatic turns it on for those imports. "
+                                        + "A TU_DEBUG in the env vars below wins.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(8.dp))
+
+                                // The app's own games in the client's library (LinuxAppGames and the runtime's bannerlator-steam-shortcuts).
+                                Text("Your games in Steam", style = MaterialTheme.typography.titleSmall)
+                                Spacer(Modifier.height(4.dp))
+                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_APP_GAMES,
+                                    "Show my Games-tab games in Steam", linuxAppGames,
+                                    com.winlator.star.linux.LinuxTuning.defaultOn(
+                                        com.winlator.star.linux.LinuxTuning.EXTRA_APP_GAMES)) { linuxAppGames = it }
+                                if (linuxAppGames) {
+                                    PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_SHARE_SAVES,
+                                        "Share saves with the app", linuxShareSaves,
+                                        com.winlator.star.linux.LinuxTuning.defaultOn(
+                                            com.winlator.star.linux.LinuxTuning.EXTRA_SHARE_SAVES)) { linuxShareSaves = it }
+                                }
+                                Text(
+                                    "Games you added in the Games tab show in Steam's library under Non-Steam and run with Steam's Proton. "
+                                        + "Steam's own games are already there, and Epic and Amazon games need the app's own launch, so those are left out. "
+                                        + "Shared saves: the game's Documents, AppData and Saved Games folders are the same ones its container uses, so progress carries over both ways. "
+                                        + "Do not run the same game in the app and in Steam at the same time.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text("Games folders", fontSize = 13.sp)
+                                for (folder in linuxGamesFolders) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                        Text(folder, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                        DpButton(dp, "linuxGamesFolderRemove:$folder",
+                                            onActivate = { linuxGamesFolders = linuxGamesFolders - folder }) {
+                                            TextButton(onClick = { linuxGamesFolders = linuxGamesFolders - folder }) { Text("Remove") }
+                                        }
+                                    }
+                                }
+                                DpButton(dp, "linuxGamesFolderAdd", onActivate = { gamesFolderPicker.launch(null) }) {
+                                    TextButton(onClick = { gamesFolderPicker.launch(null) }) { Text("Add a games folder\u2026") }
+                                }
+                                Text(
+                                    "Each folder inside a games folder is one game; the app picks the program to start in it. They show in Steam the same way.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "Threaded GL, lazy descriptors and skipped GL error checks make the chain that draws the client's interface cheaper. "
+                                        + "None is proven on this device yet, so change one at a time.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(Modifier.height(8.dp))
                             }
-                            val linuxValues = if (linuxVulkanDriverOverride.isEmpty() || linuxVulkanDriverOverride in linuxVulkanDriverValues)
-                                linuxVulkanDriverValues.ifEmpty { listOf("") }
-                            else linuxVulkanDriverValues + linuxVulkanDriverOverride
-                            val linuxLabels = linuxValues.map { com.winlator.star.core.LinuxVulkanDriver.optionLabel(gfxContext, it) }
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                DpDrop(
-                                    dp, "linuxVulkanDriver",
-                                    label = "Draw driver (Linux runtime)",
-                                    options = linuxLabels,
-                                    selected = linuxLabels[linuxValues.indexOf(linuxVulkanDriverOverride).coerceAtLeast(0)],
-                                    onSelect = { linuxVulkanDriverOverride = linuxValues[linuxLabels.indexOf(it)] },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(onClick = { helpRes = R.string.help_linux_draw_driver }) {
-                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                                }
-                            }
-                            Text(
-                                com.winlator.star.core.LinuxVulkanDriver.HELP_TEXT
-                                        + if (linuxVulkanDriverValues.size > 1) ""
-                                          else " Nothing imported yet: Contents \u2192 Installed \u2192 Linux runtime drivers.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(8.dp))
-
-                            // Performance switches for the chain that draws the client's interface.
-                            // They make that chain cheaper rather than asking for more hardware.
-                            // None of them is device-proven.
-                            // Change ONE, launch, and read the HUD; the session's device.txt says what was set when the number was taken.
-                            Text("Performance (experimental)", style = MaterialTheme.typography.titleSmall)
-                            Spacer(Modifier.height(4.dp))
-                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_GLTHREAD,
-                                "Threaded GL (mesa_glthread)", linuxGlThread,
-                                com.winlator.star.linux.LinuxTuning.defaultOn(
-                                    com.winlator.star.linux.LinuxTuning.EXTRA_GLTHREAD)) { linuxGlThread = it }
-                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_LAZY_DESCRIPTORS,
-                                "Lazy descriptors (ZINK_DESCRIPTORS)", linuxLazyDescriptors,
-                                com.winlator.star.linux.LinuxTuning.defaultOn(
-                                    com.winlator.star.linux.LinuxTuning.EXTRA_LAZY_DESCRIPTORS)) { linuxLazyDescriptors = it }
-                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_NO_GL_ERROR,
-                                "Skip GL error checks (MESA_NO_ERROR)", linuxNoGlError,
-                                com.winlator.star.linux.LinuxTuning.defaultOn(
-                                    com.winlator.star.linux.LinuxTuning.EXTRA_NO_GL_ERROR)) { linuxNoGlError = it }
-                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_STEAMDECK,
-                                "Steam Deck mode (-steamdeck)", linuxDeckMode,
-                                com.winlator.star.linux.LinuxTuning.defaultOn(
-                                    com.winlator.star.linux.LinuxTuning.EXTRA_STEAMDECK)) { on ->
-                                if (on) confirmDeckMode = true else linuxDeckMode = false
-                            }
-                            if (linuxDeckMode) {
+                            if (!isLinuxEntry) {
+                            // "System"/empty falls back to the system libvulkan, which can't import the
+                            // game's dmabufs (black screen) — mirrors XServerDisplayActivity's resolve; so
+                            // does an id that is no longer installed. Warn only.
+                            if (compositorDriverUnusable(compositorVersion, compositorChoices, compositorChoicesLoaded)) {
                                 Text(
-                                    "Deck mode is on: games do not receive the controller. If a Steam Client update shows under System that will not install, do not press Apply on it.",
+                                    """Wayland needs a Turnip driver here. "System" or a missing driver cannot import the game's frames and shows a black screen.""",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.error
                                 )
                             }
-                            if (confirmDeckMode) {
-                                OutlinedAlertDialog(
-                                    onDismissRequest = { confirmDeckMode = false },
-                                    title = { Text("Turn on Steam Deck mode?") },
-                                    text = {
-                                        Text(
-                                            "Deck mode makes the Steam client behave as it does on a Steam Deck and adds the Quick Access Menu.\n\n"
-                                                + "Known problems, found on device:\n"
-                                                + "\u2022 Games stop receiving the controller. Steam's own menus still work, but in a game the pad does nothing.\n"
-                                                + "\u2022 The client may show a Steam Client update under System that will not install. Deck mode now uses the Steam Deck beta channel to avoid it, but if it appears, do not press Apply.\n"
-                                                + "\u2022 The Quick Access Menu's performance overlay is new and not yet tried on a device.\n\n"
-                                                + "The scaling controls below do the useful part without it, and the in-game drawer's FPS limit caps the frame rate. Turn Deck mode off again if a game stops responding to the controller."
-                                        )
-                                    },
-                                    confirmButton = {
-                                        TextButton(onClick = { linuxDeckMode = true; confirmDeckMode = false }) { Text("Turn on anyway") }
-                                    },
-                                    dismissButton = {
-                                        TextButton(onClick = { confirmDeckMode = false }) { Text("Keep it off") }
-                                    },
-                                )
+                            // What the one pick drives (same rules as the container editor).
+                            val blobPicked = remember(compositorVersion) {
+                                com.winlator.star.core.WaylandAdapter.isProprietaryBlob(gfxContext, compositorVersion)
                             }
-                            val channelLabels = com.winlator.star.linux.LinuxTuning.STEAM_CHANNELS.map {
-                                when (it) {
-                                    "" -> if (linuxDeckMode) "Automatic (Steam Deck beta, for Deck mode)" else "Automatic (public beta)"
-                                    "publicbeta" -> "Public beta"
-                                    else -> "Steam Deck beta"
-                                }
-                            }
-                            DpDrop(
-                                dp, com.winlator.star.linux.LinuxTuning.EXTRA_STEAM_CHANNEL,
-                                label = "Steam client update channel",
-                                options = channelLabels,
-                                selected = channelLabels[com.winlator.star.linux.LinuxTuning.STEAM_CHANNELS.indexOf(linuxSteamChannel).coerceAtLeast(0)],
-                                onSelect = { linuxSteamChannel = com.winlator.star.linux.LinuxTuning.STEAM_CHANNELS[channelLabels.indexOf(it).coerceAtLeast(0)] }
-                            )
-                            val scalerLabels = com.winlator.star.linux.LinuxTuning.SCALERS.map { if (it.isEmpty()) "Default" else it.replaceFirstChar(Char::uppercase) }
-                            DpDrop(
-                                dp, com.winlator.star.linux.LinuxTuning.EXTRA_SCALER,
-                                label = "Scaling mode",
-                                options = scalerLabels,
-                                selected = scalerLabels[com.winlator.star.linux.LinuxTuning.SCALERS.indexOf(linuxScaler).coerceAtLeast(0)],
-                                onSelect = { linuxScaler = com.winlator.star.linux.LinuxTuning.SCALERS[scalerLabels.indexOf(it).coerceAtLeast(0)] }
-                            )
-                            val filterLabels = com.winlator.star.linux.LinuxTuning.FILTERS.map {
-                                when (it) {
-                                    "" -> "Default"
-                                    "fsr", "nis", "sgsr" -> it.uppercase()
-                                    else -> it.replaceFirstChar(Char::uppercase)
-                                }
-                            }
-                            DpDrop(
-                                dp, com.winlator.star.linux.LinuxTuning.EXTRA_FILTER,
-                                label = "Scaling filter",
-                                options = filterLabels,
-                                selected = filterLabels[com.winlator.star.linux.LinuxTuning.FILTERS.indexOf(linuxFilter).coerceAtLeast(0)],
-                                onSelect = { linuxFilter = com.winlator.star.linux.LinuxTuning.FILTERS[filterLabels.indexOf(it).coerceAtLeast(0)] }
-                            )
-                            Text(
-                                "Scaling mode and filter only matter when a game renders below the session's resolution. "
-                                    + "FSR, NIS and SGSR upscale and sharpen; SGSR is Qualcomm's, made for Adreno.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(8.dp))
-
-                            // The Steam client switches. The in-game drawer's Steam client section shows the same
-                            // ones and saves to the same extras; there they apply live where they can.
-                            Text("Steam client", style = MaterialTheme.typography.titleSmall)
-                            Spacer(Modifier.height(4.dp))
-                            val touchLabels = listOf("App setting (the Touchscreen switch)", "Touchscreen", "Touchpad")
-                            DpDrop(
-                                dp, com.winlator.star.linux.LinuxTuning.EXTRA_TOUCH,
-                                label = "Touch",
-                                options = touchLabels,
-                                selected = touchLabels[com.winlator.star.linux.LinuxTuning.TOUCH_CHOICES.indexOf(linuxTouch).coerceAtLeast(0)],
-                                onSelect = { linuxTouch = com.winlator.star.linux.LinuxTuning.TOUCH_CHOICES[touchLabels.indexOf(it).coerceAtLeast(0)] }
-                            )
-                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_STEAM_BUTTONS,
-                                "On-screen Steam and Quick Access buttons", linuxSteamButtons,
-                                com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_STEAM_BUTTONS)) { linuxSteamButtons = it }
-                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_DOUBLE_BACK_QAM,
-                                "Double Back opens Quick Access", linuxDoubleBackQam,
-                                com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_DOUBLE_BACK_QAM)) { linuxDoubleBackQam = it }
-                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_FILL_SCREEN,
-                                "Stretch games to fill the screen", linuxFillScreen,
-                                com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_FILL_SCREEN)) { linuxFillScreen = it }
-                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_IDTECH3,
-                                "Quake-engine games windowed", linuxIdTech3,
-                                com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_IDTECH3)) { linuxIdTech3 = it }
-                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_OFFLINE,
-                                "Offline mode (no sign-in to Valve)", linuxOffline,
-                                com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_OFFLINE)) { linuxOffline = it }
-                            Text(
-                                "Touchscreen sends fingers to Steam as real touches (Big Picture scrolls under one); Touchpad moves the pointer with a drag and clicks with a tap. "
-                                    + "The buttons sit in the top corners: Steam's menu on the left, its Quick Access Menu on the right. "
-                                    + "With double Back, one Back press still opens the in-game drawer. "
-                                    + "Stretch keeps a game that shrinks its window (FlatOut after Resume game) filling the screen. "
-                                    + "Quake III, Team Arena, Return to Castle Wolfenstein and Jedi Academy run windowed at the session's size, the one way they start here. "
-                                    + "Offline mode starts Steam without signing in to Valve, and installed games still launch; it needs one online sign-in on this device first. "
-                                    + "The in-game drawer has all of these too, and changes them without restarting, except offline mode, which applies at the next session.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text("Troubleshooting", style = MaterialTheme.typography.titleSmall)
-                            Spacer(Modifier.height(4.dp))
-                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_NO_XALIA,
-                                "Xalia off (PROTON_USE_XALIA=0)", linuxNoXalia,
-                                com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_NO_XALIA)) { linuxNoXalia = it }
-                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_PROOT_NO_SECCOMP,
-                                "proot without seccomp (PROOT_NO_SECCOMP)", linuxProotNoSeccomp,
-                                com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_PROOT_NO_SECCOMP)) { linuxProotNoSeccomp = it }
-                            val sysmemLabels = listOf("Automatic (A710/A720/A722 drivers)", "On", "Off")
-                            DpDrop(
-                                dp, com.winlator.star.linux.LinuxTuning.EXTRA_TU_SYSMEM,
-                                label = "Turnip sysmem rendering (TU_DEBUG=sysmem)",
-                                options = sysmemLabels,
-                                selected = sysmemLabels[com.winlator.star.linux.LinuxTuning.TU_SYSMEM_CHOICES.indexOf(linuxTurnipSysmem).coerceAtLeast(0)],
-                                onSelect = { linuxTurnipSysmem = com.winlator.star.linux.LinuxTuning.TU_SYSMEM_CHOICES[sysmemLabels.indexOf(it).coerceAtLeast(0)] }
-                            )
-                            Text(
-                                "Xalia off is on by default: xalia costs every game CPU time under FEX, so turn it off only for a game that needs its gamepad navigation. "
-                                    + "The others are only for a device that misbehaves. "
-                                    + "proot without seccomp is slower, for a device whose seccomp gets in the way. "
-                                    + "Sysmem rendering is what the A710/A720/A722 driver builds need; Automatic turns it on for those imports. "
-                                    + "A TU_DEBUG in the env vars below wins.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(8.dp))
-
-                            // The app's own games in the client's library (LinuxAppGames and the runtime's bannerlator-steam-shortcuts).
-                            Text("Your games in Steam", style = MaterialTheme.typography.titleSmall)
-                            Spacer(Modifier.height(4.dp))
-                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_APP_GAMES,
-                                "Show my Games-tab games in Steam", linuxAppGames,
-                                com.winlator.star.linux.LinuxTuning.defaultOn(
-                                    com.winlator.star.linux.LinuxTuning.EXTRA_APP_GAMES)) { linuxAppGames = it }
-                            if (linuxAppGames) {
-                                PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_SHARE_SAVES,
-                                    "Share saves with the app", linuxShareSaves,
-                                    com.winlator.star.linux.LinuxTuning.defaultOn(
-                                        com.winlator.star.linux.LinuxTuning.EXTRA_SHARE_SAVES)) { linuxShareSaves = it }
+                            val effectiveGameChoice = waylandGameDriverOverride.ifEmpty { shortcut.container.waylandGameDriver }
+                            val adapterActive = remember(effectiveGameChoice, compositorVersion) {
+                                com.winlator.star.core.WaylandGameDriver.adapterActive(gfxContext, effectiveGameChoice, compositorVersion)
                             }
                             Text(
-                                "Games you added in the Games tab show in Steam's library under Non-Steam and run with Steam's Proton. "
-                                    + "Steam's own games are already there, and Epic and Amazon games need the app's own launch, so those are left out. "
-                                    + "Shared saves: the game's Documents, AppData and Saved Games folders are the same ones its container uses, so progress carries over both ways. "
-                                    + "Do not run the same game in the app and in Steam at the same time.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text("Games folders", fontSize = 13.sp)
-                            for (folder in linuxGamesFolders) {
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                    Text(folder, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                                    DpButton(dp, "linuxGamesFolderRemove:$folder",
-                                        onActivate = { linuxGamesFolders = linuxGamesFolders - folder }) {
-                                        TextButton(onClick = { linuxGamesFolders = linuxGamesFolders - folder }) { Text("Remove") }
-                                    }
-                                }
-                            }
-                            DpButton(dp, "linuxGamesFolderAdd", onActivate = { gamesFolderPicker.launch(null) }) {
-                                TextButton(onClick = { gamesFolderPicker.launch(null) }) { Text("Add a games folder\u2026") }
-                            }
-                            Text(
-                                "Each folder inside a games folder is one game; the app picks the program to start in it. They show in Steam the same way.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                "Threaded GL, lazy descriptors and skipped GL error checks make the chain that draws the client's interface cheaper. "
-                                    + "None is proven on this device yet, so change one at a time.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(8.dp))
-                        }
-                        if (!isLinuxEntry) {
-                        // "System"/empty falls back to the system libvulkan, which can't import the
-                        // game's dmabufs (black screen) — mirrors XServerDisplayActivity's resolve; so
-                        // does an id that is no longer installed. Warn only.
-                        if (compositorDriverUnusable(compositorVersion, compositorChoices, compositorChoicesLoaded)) {
-                            Text(
-                                """Wayland needs a Turnip driver here. "System" or a missing driver cannot import the game's frames and shows a black screen.""",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                        // What the one pick drives (same rules as the container editor).
-                        val blobPicked = remember(compositorVersion) {
-                            com.winlator.star.core.WaylandAdapter.isProprietaryBlob(gfxContext, compositorVersion)
-                        }
-                        val effectiveGameChoice = waylandGameDriverOverride.ifEmpty { shortcut.container.waylandGameDriver }
-                        val adapterActive = remember(effectiveGameChoice, compositorVersion) {
-                            com.winlator.star.core.WaylandGameDriver.adapterActive(gfxContext, effectiveGameChoice, compositorVersion)
-                        }
-                        Text(
-                            when {
-                                blobPicked -> "Qualcomm's own driver cannot put Wayland frames on screen, so the screen uses a " +
-                                    "bundled Turnip automatically" + (if (waylandAdapterChoice) " and the game renders on the bundled " +
-                                    "Wayland Turnip (the adapter needs a Turnip driver here)." else ".")
-                                adapterActive -> "Used for the game (through the Wayland adapter) and for putting its frames on screen."
-                                else -> "Used by the Wayland compositor to put frames on screen; the game renders on the " +
-                                    "Wayland game driver under Advanced."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        // Advanced: the Wayland game driver (per-game): "Use container default (<its
-                        // label>)" first, then Adapter / Auto / bundled variants / imported Linux ICDs.
-                        // A stored imported:<id> whose import is gone stays listed (labelled missing);
-                        // launch uses Auto for it. Folded while the effective choice is the adapter.
-                        run {
-                            val containerChoice = shortcut.container.waylandGameDriver
-                            val values = listOf("") + (
-                                if (waylandGameDriverOverride.isEmpty() || waylandGameDriverOverride in waylandGameDriverValues) waylandGameDriverValues
-                                else waylandGameDriverValues + waylandGameDriverOverride)
-                            val labels = values.map {
-                                if (it.isEmpty()) "Use container default (" + com.winlator.star.core.WaylandGameDriver.optionLabel(gfxContext, containerChoice, waylandAutoPick) + ")"
-                                else com.winlator.star.core.WaylandGameDriver.optionLabel(gfxContext, it, waylandAutoPick)
-                            }
-                            // The gear: this game's Wayland driver settings (GPU name spoof, memory cap,
-                            // present mode, UBWC hint) in its graphicsDriverConfig, like X11's per-game
-                            // driver configuration.
-                            val selectedLabel = labels[values.indexOf(waylandGameDriverOverride).coerceAtLeast(0)]
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                DpButton(
-                                    dp, "waylandAdvanced",
-                                    onActivate = { waylandAdvancedToggled = !waylandAdvancedOpen },
-                                    modifier = Modifier.weight(1f),
-                                    onRightId = "waylandDriverCfg"
-                                ) {
-                                    TextButton(onClick = { waylandAdvancedToggled = !waylandAdvancedOpen }, modifier = Modifier.fillMaxWidth()) {
-                                        Icon(if (waylandAdvancedOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                            contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("Advanced: Wayland game driver ($selectedLabel)", modifier = Modifier.weight(1f))
-                                    }
-                                }
-                                DpButton(dp, "waylandDriverCfg", onActivate = { showWaylandDriverCfg = true }, onLeftId = "waylandAdvanced") {
-                                    IconButton(onClick = { showWaylandDriverCfg = true }) {
-                                        Icon(Icons.Default.Settings, contentDescription = "Wayland driver settings")
-                                    }
-                                }
-                            }
-                            if (waylandAdvancedOpen) {
-                                DpDrop(
-                                    dp, "waylandGameDriver",
-                                    label = "Wayland game driver",
-                                    options = labels,
-                                    selected = selectedLabel,
-                                    onSelect = { waylandGameDriverOverride = values[labels.indexOf(it)] },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Text(
-                                    com.winlator.star.core.WaylandGameDriver.HELP_TEXT,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            val spoof = com.winlator.star.core.GpuSpoof.gpuNameOf(graphicsDriverConfig)
-                            if (com.winlator.star.core.GpuSpoof.isSpoofing(spoof)) Text(
-                                "GPU name spoof: $spoof (the gear)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        }
-                        // HDR output (per-game): "Use container default (<On/Off>)" / On / Off, see
-                        // display.WaylandHdr. On a screen that doesn't report HDR10 the dropdown is greyed
-                        // with the reason but still shows what is stored.
-                        run {
-                            val hdrUnavailable = remember { com.winlator.star.display.WaylandHdr.unavailableReason(gfxContext) }
-                            val containerHdr = shortcut.container.isWaylandHdr()
-                            val values = listOf("", "1", "0")
-                            val labels = listOf("Use container default (" + (if (containerHdr) "On" else "Off") + ")", "On", "Off")
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                DpDrop(
-                                    dp, com.winlator.star.display.WaylandHdr.EXTRA,
-                                    label = com.winlator.star.display.WaylandHdr.TITLE,
-                                    options = labels,
-                                    selected = labels[values.indexOf(waylandHdrOverride).coerceAtLeast(0)],
-                                    onSelect = { waylandHdrOverride = values[labels.indexOf(it)] },
-                                    enabled = hdrUnavailable == null,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                LinuxHelp(isLinuxEntry, R.string.help_linux_hdr_output) { helpRes = it }
-                            }
-                            if (hdrUnavailable != null) {
-                                Text(
-                                    hdrUnavailable,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Text(
-                                com.winlator.star.display.WaylandHdr.HELP_TEXT,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    // Everything from here to the Frame Generation row is Wine-side rendering: the
-                    // Unreal HDR fix swaps DLLs in the prefix, the DX wrapper and its config are the
-                    // prefix's D3D translation, and Renderer / render scale / in-game refresh belong to
-                    // the X server and its Wine registry keys. A gamescope session has no prefix and no
-                    // X server, and the Linux runtime brings its own D3D stack.
-                    if (!isLinuxEntry) {
-
-                    // Unreal Engine HDR (per-game, both backends; under HDR output on Wayland):
-                    // "Use container default (<its mode>)" / Off / DirectX 12 fix / DirectX 11. See
-                    // core.UnrealHdr; the DirectX 11 notes follow this game's GPU name spoof.
-                    run {
-                        val containerMode = com.winlator.star.core.UnrealHdr.containerMode(shortcut.container)
-                        val values = listOf("") + com.winlator.star.core.UnrealHdr.MODES
-                        val labels = values.map {
-                            if (it.isEmpty()) "Use container default (" + com.winlator.star.core.UnrealHdr.label(containerMode) + ")"
-                            else com.winlator.star.core.UnrealHdr.label(it)
-                        }
-                        DpDrop(
-                            dp, com.winlator.star.core.UnrealHdr.EXTRA,
-                            label = com.winlator.star.core.UnrealHdr.TITLE,
-                            options = labels,
-                            selected = labels[values.indexOf(unrealHdrOverride).coerceAtLeast(0)],
-                            onSelect = { unrealHdrOverride = values[labels.indexOf(it)] },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        val effectiveMode = unrealHdrOverride.ifEmpty { containerMode }
-                        if (effectiveMode == com.winlator.star.core.UnrealHdr.DX11) UnrealHdrDx11Notes(
-                            gpuName = com.winlator.star.core.GpuSpoof.gpuNameOf(graphicsDriverConfig),
-                            wayland = effectiveWaylandShortcut
-                        )
-                        Text(
-                            com.winlator.star.core.UnrealHdr.help(effectiveWaylandShortcut),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    // DX Wrapper
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        DpDrop(
-                            dp, "dxWrapper",
-                            label = stringResource(R.string.dxwrapper),
-                            options = dxWrapperEntries,
-                            selected = selectedDxWrapper,
-                            onSelect = { newWrapper ->
-                                val wasVegas = StringUtils.parseIdentifier(selectedDxWrapper).contains("vegas")
-                                val isVegas = StringUtils.parseIdentifier(newWrapper).contains("vegas")
-                                selectedDxWrapper = newWrapper
-                                // Strip dxvkConfigFile when leaving VEGAS — prevents stale
-                                // VEGAS config path from leaking into plain DXVK+VKD3D.
-                                if (wasVegas && !isVegas) {
-                                    val cfg = DXVKConfigDialog.parseConfig(dxWrapperConfig)
-                                    val path = cfg.get("dxvkConfigFile")
-                                    if (path.isNotEmpty()) {
-                                        val stripped = dxWrapperConfig.split(",").filter { !it.startsWith("dxvkConfigFile=") }.joinToString(",")
-                                        dxWrapperConfig = stripped
-                                    }
-                                }
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = { helpRes = R.string.dxwrapper_help_content }) {
-                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                        }
-                    }
-                    DpButton(dp, "dxConfig", onActivate = {
-                        val w = StringUtils.parseIdentifier(selectedDxWrapper)
-                        if (w.contains("dxvk") || w.contains("vegas")) showDxvkConfig = true
-                        else showWineD3DConfig = true
-                    }, modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(
-                            onClick = {
-                                val w = StringUtils.parseIdentifier(selectedDxWrapper)
-                                if (w.contains("dxvk") || w.contains("vegas")) showDxvkConfig = true
-                                else showWineD3DConfig = true
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text("DX Wrapper Config") }
-                    }
-
-                    // Renderer (host) — per-game override of the container's OpenGL/Vulkan choice.
-                    var showSfWarning by remember { mutableStateOf(false) }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        // Display only while greyed on Wayland: the compositor is always Vulkan; the
-                        // stored X11 choice is kept and returns with the X11 backend.
-                        val rendererShown = if (effectiveWaylandShortcut) "Vulkan (Wayland compositor)" else selectedRenderer
-                        DpDrop(
-                            dp, "renderer",
-                            label = stringResource(R.string.renderer),
-                            options = if (effectiveWaylandShortcut) listOf(rendererShown) else listOf("OpenGL", "Vulkan", "SurfaceFlinger"),
-                            selected = rendererShown,
-                            onSelect = {
-                                // SurfaceFlinger is experimental and can reboot some devices — require opt-in.
-                                if (it == "SurfaceFlinger" && selectedRenderer != "SurfaceFlinger") showSfWarning = true
-                                else selectedRenderer = it
-                            },
-                            enabled = !effectiveWaylandShortcut,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = { helpRes = R.string.help_renderer }) {
-                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                        }
-                    }
-                    if (showSfWarning) {
-                        SurfaceFlingerWarningDialog(
-                            onConfirm = { selectedRenderer = "SurfaceFlinger"; showSfWarning = false },
-                            onDismiss = { showSfWarning = false }
-                        )
-                    }
-
-                    // SurfaceFlinger colour correction (ASR-only, GN #1620) — only relevant when this
-                    // game runs on the SurfaceFlinger renderer, so surface it under that choice.
-                    if (!effectiveWaylandShortcut && selectedRenderer == "SurfaceFlinger") {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(stringResource(R.string.renderer_sf_compat))
-                                Text(
-                                    stringResource(R.string.renderer_sf_compat_hint),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            IconButton(onClick = { helpRes = R.string.help_renderer_sf_compat }) {
-                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                            }
-                            DpSwitch(dp, "sfCompat", checked = sfCompatMode, onCheckedChange = { sfCompatMode = it })
-                        }
-                    }
-
-                    // Vulkan renderer per-game overrides — only relevant when this game runs on Vulkan.
-                    if (!effectiveWaylandShortcut && selectedRenderer == "Vulkan") {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(stringResource(R.string.renderer_native), Modifier.weight(1f))
-                            IconButton(onClick = { helpRes = R.string.help_renderer_native }) {
-                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                            }
-                            DpSwitch(dp, "vkNative", checked = vkNative, onCheckedChange = { vkNative = it })
-                        }
-                        // Colors = the game buffer's channel order. BGRA (default) presents as-is; RGBA
-                        // swaps R/B (routes through the compositor — native can't swap). Per-game so one
-                        // game can differ from the container / its siblings.
-                        val vkColorOrders = listOf("BGRA", "RGBA")
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DpDrop(
-                                dp, "vkColors",
-                                label = stringResource(R.string.renderer_colors),
-                                options = vkColorOrders,
-                                selected = if (vkSwapRB) "RGBA" else "BGRA",
-                                onSelect = { vkSwapRB = (it == "RGBA") },
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(onClick = { helpRes = R.string.help_renderer_colors }) {
-                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        // Present mode is ignored under Native Rendering (direct scanout), so grey it out.
-                        val vkPmValues = listOf("fifo", "mailbox", "immediate")
-                        val vkPmLabels = listOf(
-                            stringResource(R.string.renderer_present_mode_fifo),
-                            stringResource(R.string.renderer_present_mode_mailbox),
-                            stringResource(R.string.renderer_present_mode_immediate)
-                        )
-                        val vkPmIdx = vkPmValues.indexOf(vkPresentMode).coerceAtLeast(0)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DpDrop(
-                                dp, "vkPresent",
-                                label = stringResource(R.string.renderer_present_mode),
-                                options = vkPmLabels,
-                                selected = vkPmLabels[vkPmIdx],
-                                onSelect = { vkPresentMode = vkPmValues[vkPmLabels.indexOf(it)] },
-                                enabled = !vkNative,
-                                modifier = (if (vkNative) Modifier.alpha(0.5f) else Modifier).weight(1f)
-                            )
-                            IconButton(onClick = { helpRes = R.string.renderer_present_mode_help_content }) {
-                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        // Native backend — which native path Native Rendering uses. Only meaningful when
-                        // Native Rendering is on (matches the container Vulkan cog), so gate on vkNative.
-                        if (vkNative) {
-                            val vkBackendValues = listOf("auto", "asr", "flip")
-                            val vkBackendLabels = listOf(
-                                stringResource(R.string.renderer_native_backend_auto),
-                                stringResource(R.string.renderer_native_backend_asr),
-                                stringResource(R.string.renderer_native_backend_flip)
-                            )
-                            val vkBackendIdx = vkBackendValues.indexOf(vkNativeBackend).coerceAtLeast(0)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                DpDrop(
-                                    dp, "vkBackend",
-                                    label = stringResource(R.string.renderer_native_backend),
-                                    options = vkBackendLabels,
-                                    selected = vkBackendLabels[vkBackendIdx],
-                                    onSelect = { vkNativeBackend = vkBackendValues[vkBackendLabels.indexOf(it)] },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(onClick = { helpRes = R.string.help_renderer_native_backend }) {
-                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                                }
-                            }
-                        }
-                        // Compositor (present-layer) Vulkan driver: System or an installed Turnip. Applies
-                        // regardless of native mode, so not gated on vkNative. Matches the container cog.
-                        val vkDriverOptions = remember {
-                            val installed = try {
-                                com.winlator.star.contents.AdrenotoolsManager(context).enumarateInstalledDrivers()
-                            } catch (e: Exception) { arrayListOf<String>() }
-                            (listOf("system") + installed).distinct()
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DpDrop(
-                                dp, "vkDriver",
-                                label = stringResource(R.string.renderer_driver_id),
-                                options = vkDriverOptions,
-                                selected = if (vkDriverOptions.contains(vkRendererDriverId)) vkRendererDriverId else "system",
-                                onSelect = { vkRendererDriverId = it },
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(onClick = { helpRes = R.string.help_renderer_driver }) {
-                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        // FG temporarily forces Mailbox; caption the field so FIFO-while-FG-selected isn't confusing.
-                        if (frameGenEngine != "off") {
-                            Text(
-                                stringResource(R.string.renderer_present_mode_fg_note),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    // Render scale (supersampling) — per-game override of the container default.
-                    // Greyed on Wayland (downscale lives in the X11 Vulkan renderer only); displays
-                    // "Not used on Wayland" while the stored value is left untouched.
-                    run {
-                        val renderScaleValues = listOf("1.0", "1.25", "1.5", "2.0")
-                        val renderScaleLabels = listOf("Off", "1.25x", "1.5x", "2x")
-                        val rsIdx = renderScaleValues.indexOf(renderScale).coerceAtLeast(0)
-                        val rsShown = if (effectiveWaylandShortcut) "Not used on Wayland" else renderScaleLabels[rsIdx]
-                        DpDrop(
-                            dp, "renderScale",
-                            label = "Render scale (supersampling)",
-                            options = if (effectiveWaylandShortcut) listOf(rsShown) else renderScaleLabels,
-                            selected = rsShown,
-                            onSelect = { renderScale = renderScaleValues[renderScaleLabels.indexOf(it)] },
-                            enabled = !effectiveWaylandShortcut
-                        )
-                        if (effectiveWaylandShortcut) {
-                            Text(
-                                "Not used on Wayland: the compositor has no supersampling downscale. The stored value returns on X11.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    // In-game refresh rate — single per-game override of the container default. Options:
-                    // Use container default (inherit) / Locked (60) / <rate> Hz / Unlimited. Drives the
-                    // two underlying extras (unlock + cap) together; empty = inherit.
-                    run {
-                        // panelRates is hoisted to the dialog body (so the D-pad order can see this row).
-                        if (panelRates.isNotEmpty()) {
-                            // Only rates ABOVE 60 are cap options — "Locked (60)" already covers 60.
-                            val ratesAbove60 = panelRates.filter { it > 60 }
-                            // Sentinel value model: "" = inherit, "locked" = Locked(60), "0" = Unlimited,
-                            // "N" = cap N. Maps to the (unlock, cap) extra pair on select.
-                            val rrValues = listOf("", "locked", "0") + ratesAbove60.map { it.toString() }
-                            val rrLabels = listOf(
-                                stringResource(R.string.use_container_default),
-                                stringResource(R.string.in_game_refresh_locked),
-                                stringResource(R.string.max_game_refresh_rate_unlimited)) +
-                                ratesAbove60.map { "$it Hz" }
-                            val currentValue = when {
-                                unlockGameRefreshRate.isEmpty() && maxGameRefreshRate.isEmpty() -> ""
-                                unlockGameRefreshRate == "0" -> "locked"
-                                else -> maxGameRefreshRate.ifEmpty { "0" }
-                            }
-                            val rrIdx = rrValues.indexOf(currentValue).coerceAtLeast(0)
-                            DpDrop(
-                                dp, "refresh",
-                                label = stringResource(R.string.in_game_refresh_rate),
-                                options = rrLabels,
-                                selected = rrLabels[rrIdx],
-                                onSelect = {
-                                    when (val v = rrValues[rrLabels.indexOf(it)]) {
-                                        ""       -> { unlockGameRefreshRate = "";  maxGameRefreshRate = "" }
-                                        "locked" -> { unlockGameRefreshRate = "0"; maxGameRefreshRate = "0" }
-                                        else     -> { unlockGameRefreshRate = "1"; maxGameRefreshRate = v }
-                                    }
-                                }
-                            )
-                        }
-                    }
-
-                    } // end of the Wine-side rendering rows (see isLinuxEntry above)
-
-                    // Frame Generation engine — per-game override (lsfg grayed without Lossless.dll).
-                    run {
-                        val fgLabels = listOf(
-                            stringResource(R.string.frame_generation_off),
-                            stringResource(R.string.frame_generation_bionic),
-                            stringResource(R.string.frame_generation_lsfg_native)
-                        )
-                        val fgIdx = fgEngines.indexOf(frameGenEngine).coerceAtLeast(0)
-                        // FG's mailbox/present-mode delivery only exists on the Vulkan host renderer, so
-                        // gate the whole dropdown on Vulkan (grey it out otherwise) — combined with the
-                        // existing lsfg-DLL option gate. See ContainerDetailScreen for the rationale.
-                        // On Wayland the renderer gate does not apply: FG runs inside the compositor
-                        // (always Vulkan) and the drawer arms the engine picked here. See ContainerDetailScreen.
-                        // A Linux session always presents through the Vulkan compositor, whatever
-                        // its entry's renderer field says (gamescope is a Wayland client of it).
-                        val fgVulkan = effectiveWaylandShortcut || isLinuxEntry || selectedRenderer == "Vulkan"
-                        val fgShown = fgLabels[fgIdx]
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DpDrop(
-                                dp, "frameGen",
-                                label = stringResource(R.string.frame_generation),
-                                options = fgLabels,
-                                selected = fgShown,
-                                onSelect = { frameGenEngine = fgEngines[fgLabels.indexOf(it)] },
-                                enabled = fgVulkan,
-                                disabledOptions = buildSet {
-                                    // bionic-fg re-enabled (2.9.4+) — see ContainerDetailScreen note.
-                                    if (!lsfgDllAvailable) add(fgLabels[2])   // LSFG Native — needs an imported Lossless.dll
+                                when {
+                                    blobPicked -> "Qualcomm's own driver cannot put Wayland frames on screen, so the screen uses a " +
+                                        "bundled Turnip automatically" + (if (waylandAdapterChoice) " and the game renders on the bundled " +
+                                        "Wayland Turnip (the adapter needs a Turnip driver here)." else ".")
+                                    adapterActive -> "Used for the game (through the Wayland adapter) and for putting its frames on screen."
+                                    else -> "Used by the Wayland compositor to put frames on screen; the game renders on the " +
+                                        "Wayland game driver under Advanced."
                                 },
-                                modifier = (if (!fgVulkan) Modifier.alpha(0.5f) else Modifier).weight(1f)
-                            )
-                            IconButton(onClick = { helpRes = R.string.help_frame_generation }) {
-                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        if (!fgVulkan) {
-                            Text(
-                                text = stringResource(R.string.frame_generation_requires_vulkan),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        }
-                        if (!lsfgDllAvailable) {
-                            Text(
-                                text = stringResource(R.string.frame_generation_lsfg_needs_dll),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    // FPS limiter — per-game override.
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        DpSwitch(dp, "fpsLimiter", checked = fpsLimiterEnabled, onCheckedChange = { fpsLimiterEnabled = it })
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.fps_limiter), modifier = Modifier.weight(1f))
-                        IconButton(onClick = { helpRes = if (isLinuxEntry) R.string.help_linux_fps_limiter else R.string.help_fps_limiter }) {
-                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                        }
-                    }
-
-                    // Power-user performance toggles — collapsed into an expandable "Performance" section
-                    // (closed by default) so the shortcut dialog stays short. Each toggle is a compact row;
-                    // a per-game toggle is only saved when it differs from the App Settings global default.
-                    val anyPerfOverride = sustainedPerfMode != com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value ||
-                        perfPriorityBoost != com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value ||
-                        preferBigCores != com.winlator.star.perf.PerformanceSettings.preferBigCores.value ||
-                        com.winlator.star.perf.PerfRootApplier.ROOT_KEYS.any { (rootOverrides[it] ?: false) != com.winlator.star.perf.PerformanceSettings.rootDefaultValue(it) }
-                    val perfOverrideCount = (if (sustainedPerfMode != com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value) 1 else 0) +
-                        (if (perfPriorityBoost != com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value) 1 else 0) +
-                        (if (preferBigCores != com.winlator.star.perf.PerformanceSettings.preferBigCores.value) 1 else 0) +
-                        com.winlator.star.perf.PerfRootApplier.ROOT_KEYS.count { (rootOverrides[it] ?: false) != com.winlator.star.perf.PerformanceSettings.rootDefaultValue(it) }
-
-                    // Performance — one row opens the full dashboard menu (same as in-game), bound to
-                    // this shortcut's saved-per-game toggles. Replaces the old inline toggle list; the
-                    // save block below still persists whatever the dialog set (override-when-different).
-                    var showPerfDialog by remember { mutableStateOf(false) }
-                    // Styled to match the other outlined menu fields (notched "Performance" label +
-                    // border + trailing chevron). The read-only field shows the override status; a
-                    // transparent overlay Box catches taps so the whole field opens the dashboard
-                    // dialog instead of focusing the text field.
-                    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        OutlinedTextField(
-                            value = if (perfOverrideCount > 0) "$perfOverrideCount overridden" else "Global defaults",
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Performance") },
-                            trailingIcon = { Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Open") },
-                            // Accent-colored outline so this opener stands out from the grey menu fields.
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.primary,
-                                focusedLabelColor = MaterialTheme.colorScheme.primary,
-                                unfocusedLabelColor = MaterialTheme.colorScheme.primary,
-                                focusedTrailingIconColor = MaterialTheme.colorScheme.primary,
-                                unfocusedTrailingIconColor = MaterialTheme.colorScheme.primary,
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Box(Modifier.matchParentSize().clickable { showPerfDialog = true })
-                    }
-
-                    if (showPerfDialog) {
-                        com.winlator.star.ui.PerformanceDashboardDialogPerGame(
-                            sustained = sustainedPerfMode, onSustained = { sustainedPerfMode = it },
-                            priority = perfPriorityBoost, onPriority = { perfPriorityBoost = it },
-                            bigCores = preferBigCores, onBigCores = { preferBigCores = it },
-                            rootValue = { rootOverrides[it] ?: false },
-                            onRoot = { k, v -> rootOverrides[k] = v },
-                            onResetAll = {
-                                sustainedPerfMode = com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value
-                                perfPriorityBoost = com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value
-                                preferBigCores = com.winlator.star.perf.PerformanceSettings.preferBigCores.value
-                                for (rk in com.winlator.star.perf.PerfRootApplier.ROOT_KEYS)
-                                    rootOverrides[rk] = com.winlator.star.perf.PerformanceSettings.rootDefaultValue(rk)
-                            },
-                            onDismiss = { showPerfDialog = false },
-                        )
-                    }
-
-                    // Audio driver
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        DpDrop(
-                            dp, "audio",
-                            label = stringResource(R.string.audio_driver),
-                            options = audioDriverEntries,
-                            selected = selectedAudioDriver,
-                            disabledOptions = if (!directAudioSupported && directAudioEntry != null) setOf(directAudioEntry) else emptySet(),
-                            onSelect = {
-                                selectedAudioDriver = it
-                                // DirectAudio is experimental — warn on select (reuses the HelpDialog surface).
-                                if (StringUtils.parseIdentifier(it) == "directaudio") helpRes = R.string.directaudio_experimental_warning
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        val scAudioId = StringUtils.parseIdentifier(selectedAudioDriver)
-                        if (scAudioId == "pulseaudio" || scAudioId == "alsa" || scAudioId == "directaudio") {
-                            IconButton(onClick = { showScAudioSettings = true }) {
-                                Icon(Icons.Default.Settings, contentDescription = "Audio settings", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        IconButton(onClick = { helpRes = if (isLinuxEntry) R.string.help_linux_audio_driver else R.string.help_audio_driver }) {
-                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                        }
-                    }
-                    if (!directAudioSupported && directAudioEntry != null) {
-                        Text(
-                            "DirectAudio requires Proton ${com.winlator.star.core.DirectAudioSupport.SUPPORTED_LABEL}",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.5.sp,
-                            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
-                        )
-                    }
-                    if (showScAudioSettings) {
-                        AudioSettingsDialog(
-                            initial = audioConfigFromEnv(envVarsStr, StringUtils.parseIdentifier(selectedAudioDriver)),
-                            scopeLabel = "this game",
-                            latencyLive = true,
-                            driverLabel = when (StringUtils.parseIdentifier(selectedAudioDriver)) {
-                                "alsa" -> "ALSA"; "pulseaudio" -> "PulseAudio"; "directaudio" -> "DirectAudio"
-                                else -> StringUtils.parseIdentifier(selectedAudioDriver)
-                            },
-                            driverId = StringUtils.parseIdentifier(selectedAudioDriver),
-                            onDismiss = { showScAudioSettings = false },
-                            onSave = { cfg ->
-                                envVarsStr = audioConfigToEnv(envVarsStr, cfg, StringUtils.parseIdentifier(selectedAudioDriver))
-                                showScAudioSettings = false
-                            }
-                        )
-                    }
-
-                    // Microphone (DirectAudio only). Opt-in per game, default OFF — a knowingly-granted
-                    // permission. ON seeds BANNER_AUDIO_DIRECT_MIC=1 into this shortcut's env; the
-                    // DirectAudio driver opens the AAudio INPUT stream itself when the flag is present
-                    // (the app never records). Greyed off DirectAudio, since only that driver consumes the
-                    // flag today. Keyed on the live envVarsStr so it can't capture a stale value and drift.
-                    run {
-                        val micCtx = LocalContext.current
-                        val micDriverActive = StringUtils.parseIdentifier(selectedAudioDriver) == "directaudio" && directAudioSupported
-                        val micOn = com.winlator.star.core.DirectAudioSupport.isMicEnabledInEnv(envVarsStr)
-                        val micPermLauncher = rememberLauncherForActivityResult(
-                            ActivityResultContracts.RequestPermission()
-                        ) { granted ->
-                            if (granted) {
-                                envVarsStr = com.winlator.star.core.DirectAudioSupport.withMicEnabled(envVarsStr, true)
-                            } else {
-                                envVarsStr = com.winlator.star.core.DirectAudioSupport.withMicEnabled(envVarsStr, false)
-                                Toast.makeText(micCtx, "Microphone permission denied — mic stays off.", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Switch(
-                                enabled = micDriverActive,
-                                checked = micOn && micDriverActive,
-                                onCheckedChange = { want ->
-                                    if (want) {
-                                        if (androidx.core.content.ContextCompat.checkSelfPermission(micCtx, android.Manifest.permission.RECORD_AUDIO)
-                                                == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                                            envVarsStr = com.winlator.star.core.DirectAudioSupport.withMicEnabled(envVarsStr, true)
-                                        } else {
-                                            micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                            Spacer(Modifier.height(8.dp))
+                            // Advanced: the Wayland game driver (per-game): "Use container default (<its
+                            // label>)" first, then Adapter / Auto / bundled variants / imported Linux ICDs.
+                            // A stored imported:<id> whose import is gone stays listed (labelled missing);
+                            // launch uses Auto for it. Folded while the effective choice is the adapter.
+                            run {
+                                val containerChoice = shortcut.container.waylandGameDriver
+                                val values = listOf("") + (
+                                    if (waylandGameDriverOverride.isEmpty() || waylandGameDriverOverride in waylandGameDriverValues) waylandGameDriverValues
+                                    else waylandGameDriverValues + waylandGameDriverOverride)
+                                val labels = values.map {
+                                    if (it.isEmpty()) "Use container default (" + com.winlator.star.core.WaylandGameDriver.optionLabel(gfxContext, containerChoice, waylandAutoPick) + ")"
+                                    else com.winlator.star.core.WaylandGameDriver.optionLabel(gfxContext, it, waylandAutoPick)
+                                }
+                                // The gear: this game's Wayland driver settings (GPU name spoof, memory cap,
+                                // present mode, UBWC hint) in its graphicsDriverConfig, like X11's per-game
+                                // driver configuration.
+                                val selectedLabel = labels[values.indexOf(waylandGameDriverOverride).coerceAtLeast(0)]
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    DpButton(
+                                        dp, "waylandAdvanced",
+                                        onActivate = { waylandAdvancedToggled = !waylandAdvancedOpen },
+                                        modifier = Modifier.weight(1f),
+                                        onRightId = "waylandDriverCfg"
+                                    ) {
+                                        TextButton(onClick = { waylandAdvancedToggled = !waylandAdvancedOpen }, modifier = Modifier.fillMaxWidth()) {
+                                            Icon(if (waylandAdvancedOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                                contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Advanced: Wayland game driver ($selectedLabel)", modifier = Modifier.weight(1f))
                                         }
-                                    } else {
-                                        envVarsStr = com.winlator.star.core.DirectAudioSupport.withMicEnabled(envVarsStr, false)
+                                    }
+                                    DpButton(dp, "waylandDriverCfg", onActivate = { showWaylandDriverCfg = true }, onLeftId = "waylandAdvanced") {
+                                        IconButton(onClick = { showWaylandDriverCfg = true }) {
+                                            Icon(Icons.Default.Settings, contentDescription = "Wayland driver settings")
+                                        }
                                     }
                                 }
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    "Microphone",
-                                    color = if (micDriverActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    if (micDriverActive) "Let games use the mic (DirectAudio captures input)"
-                                    else "Available on the DirectAudio driver",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 11.5.sp
-                                )
-                            }
-                            LinuxHelp(isLinuxEntry, R.string.help_linux_microphone) { helpRes = it }
-                        }
-                    }
-
-                    // Emulator — display-only relabel (see EmulatorLabels). On arm64ec the non-FEX
-                    // backend is wowbox64, and on an x86_64 container this picker is inert (the
-                    // launcher always runs bin/box64) so the disabled field must read Box64 instead
-                    // of the stored "FEXCore" default. What save() persists is unchanged.
-                    // It names which x86 backend the Wine launcher runs under, and the Linux runtime
-                    // brings its own FEX; the preset it honours is on the Advanced tab.
-                    if (!isLinuxEntry) {
-                    val emulatorShown =
-                        if (archLoaded && !isArm64EC) EmulatorLabels.box64EntryOf(emulatorEntries)
-                        else EmulatorLabels.display(selectedEmulator, isArm64EC)
-                    DpDrop(
-                        dp, "emulator",
-                        label = "Emulator (32-bit)",
-                        options = EmulatorLabels.options(emulatorEntries, isArm64EC),
-                        selected = emulatorShown,
-                        onSelect = {
-                            selectedEmulator = EmulatorLabels.fromDisplay(it, emulatorEntries, isArm64EC)
-                        },
-                        enabled = isArm64EC
-                    )
-
-                    // x86-64 translator override (arm64ec only, once a Box64EC component exists).
-                    // "Container default" stores no extra: the game follows the container's
-                    // Emulator (64-bit) choice, which is what every existing shortcut does.
-                    if (isArm64EC && box64ECInstalled) {
-                        DpDrop(
-                            dp, "emulator64",
-                            label = "Emulator (64-bit)",
-                            options = emulator64Entries,
-                            selected = selectedEmulator64,
-                            onSelect = { selectedEmulator64 = it }
-                        )
-                    }
-
-                    // MIDI
-                    if (midiList.isNotEmpty()) {
-                        val midiDisplay = midiList.firstOrNull { it == selectedMidi } ?: midiList.first()
-                        DpDrop(
-                            dp, "midi",
-                            label = "MIDI Sound Font",
-                            options = midiList,
-                            selected = midiDisplay,
-                            onSelect = { selectedMidi = it }
-                        )
-                    }
-
-                    // LC_ALL — goes into the Wine environment (setupXEnvironment), which the gamescope
-                    // path returns before ever building; the session's locale comes from the runtime.
-                    DpField(
-                        dp, "lcAll",
-                        value = lcAll,
-                        onValueChange = { lcAll = it },
-                        label = "LC_ALL",
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    } // end of the Wine launcher rows (Emulator / MIDI / LC_ALL)
-
-                    // Fullscreen aspect-ratio mode (#71) — per-game override. Index 0 = use the
-                    // container default; indices 1..5 map to Container.FULLSCREEN_OFF/FIT/STRETCH/FILL/INTEGER.
-                    val fsOverrideLabels = listOf(
-                        stringResource(R.string.fullscreen_mode_default),
-                        stringResource(R.string.fullscreen_mode_off),
-                        stringResource(R.string.fullscreen_mode_fit),
-                        stringResource(R.string.fullscreen_mode_stretch),
-                        stringResource(R.string.fullscreen_mode_fill),
-                        stringResource(R.string.fullscreen_mode_integer)
-                    )
-                    val fsOverrideIdx = if (fullscreenModeOverride < 0) 0 else (fullscreenModeOverride + 1)
-                        .coerceIn(1, fsOverrideLabels.size - 1)
-                    // Applies on X11 and Wayland alike (the compositor fits the desktop the same way).
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        DpDrop(
-                            dp, "fullscreen",
-                            label = stringResource(R.string.fullscreen_mode),
-                            options = fsOverrideLabels,
-                            selected = fsOverrideLabels[fsOverrideIdx],
-                            onSelect = { sel ->
-                                val idx = fsOverrideLabels.indexOf(sel)
-                                fullscreenModeOverride = if (idx <= 0) -1 else idx - 1
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                        LinuxHelp(isLinuxEntry, R.string.help_linux_fullscreen_mode) { helpRes = it }
-                    }
-
-                    // Close the session when this game exits (per-game override; container default is ON).
-                    // The watcher that arms it lives past the gamescope early return and watches for a
-                    // Windows exe leaving the prefix, so it never fires for a Linux entry.
-                    if (!isLinuxEntry) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DpCheck(dp, "autoClose", checked = autoCloseOnExit, onCheckedChange = { autoCloseOnExit = it })
-                            Text("Close when game exits")
-                        }
-                    }
-                            }
-                            4 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Input section
-                    SectionBox(title = "Input") {
-                        // XInput/DInput, exclusive input and the controller count are how WinHandler
-                        // presents pads to a Wine game and what it writes into the prefix's joystick
-                        // registry keys. A Linux session's pads arrive as fake-evdev devices instead,
-                        // so those rows are conditioned off and the ones that still act on the host
-                        // side (touchscreen mode, on-screen-control auto-hide, player slots, gyro) stay.
-                        if (!isLinuxEntry) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DpSwitch(
-                                dp, "enableXInput",
-                                checked = enableXInput,
-                                onCheckedChange = { enableXInput = it },
-                                enabled = exclusiveXInput
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.enable_xinput_for_wine_game), modifier = Modifier.weight(1f))
-                            IconButton(onClick = { helpRes = R.string.help_xinput }) {
-                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DpSwitch(
-                                dp, "enableDInput",
-                                checked = enableDInput,
-                                onCheckedChange = { enableDInput = it },
-                                enabled = exclusiveXInput
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.enable_dinput_for_wine_game), modifier = Modifier.weight(1f))
-                            IconButton(onClick = { helpRes = R.string.help_dinput }) {
-                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DpSwitch(
-                                dp, "exclusiveXInput",
-                                checked = exclusiveXInput,
-                                onCheckedChange = { checked ->
-                                    exclusiveXInput = checked
-                                    if (!checked) { enableXInput = true; enableDInput = true }
-                                    else if (enableXInput && enableDInput) enableDInput = false
+                                if (waylandAdvancedOpen) {
+                                    DpDrop(
+                                        dp, "waylandGameDriver",
+                                        label = "Wayland game driver",
+                                        options = labels,
+                                        selected = selectedLabel,
+                                        onSelect = { waylandGameDriverOverride = values[labels.indexOf(it)] },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Text(
+                                        com.winlator.star.core.WaylandGameDriver.HELP_TEXT,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text("Exclusive Input", modifier = Modifier.weight(1f))
-                            IconButton(onClick = { helpRes = R.string.help_exclusive_xinput }) {
-                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DpCheck(dp, "disableXInput", checked = disabledXInput, onCheckedChange = { disabledXInput = it })
-                            Text("Disable XInput")
-                        }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DpCheck(dp, "simTouch", checked = simTouchScreen, onCheckedChange = { simTouchScreen = it })
-                            Text("Touchscreen Mode")
-                            LinuxHelp(isLinuxEntry, R.string.help_linux_touchscreen_mode) { helpRes = it }
-                        }
-                        if (!isLinuxEntry) {
-                            DpDrop(
-                                dp, "numControllers",
-                                label = "Num Controllers",
-                                options = numControllersEntries,
-                                selected = selectedNumControllers,
-                                onSelect = { selectedNumControllers = it }
-                            )
-                        }
-
-                        // #333 per-game auto-hide override (tri-state): inherit container / On / Off.
-                        Spacer(Modifier.height(12.dp))
-                        run {
-                            val autoHideLabels = listOf("Use container default", "On", "Off")
-                            val autoHideIdx = when (autoHideControlsOnPad) { "1" -> 1; "0" -> 2; else -> 0 }
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                LabeledDropdown(
-                                    label = "Hide on-screen controls when a controller connects",
-                                    options = autoHideLabels,
-                                    selectedOption = autoHideLabels[autoHideIdx],
-                                    onSelect = {
-                                        autoHideControlsOnPad = when (autoHideLabels.indexOf(it)) { 1 -> "1"; 2 -> "0"; else -> "" }
-                                    },
-                                    modifier = Modifier.weight(1f)
+                                val spoof = com.winlator.star.core.GpuSpoof.gpuNameOf(graphicsDriverConfig)
+                                if (com.winlator.star.core.GpuSpoof.isSpoofing(spoof)) Text(
+                                    "GPU name spoof: $spoof (the gear)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                LinuxHelp(isLinuxEntry, R.string.help_linux_autohide_controls) { helpRes = it }
-                            }
-                        }
-
-                        // Player Slots (per-game override). Empty override = inherit the container's
-                        // Player Slots; touching any slot makes this shortcut own the pins. The "Use
-                        // container default" button clears the override so it re-inherits. Editing an
-                        // empty override starts from an all-auto ("{}") view.
-                        Spacer(Modifier.height(12.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Player Slots", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
-                            IconButton(onClick = { helpRes = if (isLinuxEntry) R.string.help_linux_player_slots else R.string.help_player_slots }) {
-                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                            }
-                            if (controllerSlotOverridesJson.isNotEmpty()) {
-                                TextButton(onClick = { controllerSlotOverridesJson = "" }) {
-                                    Text("Use container default")
-                                }
-                            }
-                        }
-                        if (controllerSlotOverridesJson.isEmpty()) {
-                            Text(
-                                "Inheriting the container's Player Slots. Pin a controller below to set a per-game override.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        PlayerSlotsEditor(
-                            savedOverridesJson = controllerSlotOverridesJson.ifEmpty { "{}" },
-                            onOverridesChange = { controllerSlotOverridesJson = it },
-                        )
-
-                        // Gyro (motion aim) per-game override. Deadzone/smoothing are deliberately
-                        // absent — those stay on the container (Container Settings -> Gyro).
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            DpSwitch(dp, "gyroEnabled", checked = gyroEnabled, onCheckedChange = { gyroEnabled = it })
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.gyro_enabled), modifier = Modifier.weight(1f))
-                            LinuxHelp(isLinuxEntry, R.string.help_linux_gyro_enabled) { helpRes = it }
-                        }
-                        if (gyroEnabled) {
-                            // Same pairing rule as the container editor: Tilt to Aim and the Mouse
-                            // target can't coexist (a held tilt is a constant pointer delta), so each
-                            // selection knocks the other back to a working value.
-                            val gyroModeLabels = listOf(
-                                stringResource(R.string.gyro_mode_rate),
-                                stringResource(R.string.gyro_mode_orientation),
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                DpDrop(
-                                    dp, "gyroMode",
-                                    label = stringResource(R.string.gyro_mode_label),
-                                    options = gyroModeLabels,
-                                    selected = gyroModeLabels.getOrElse(gyroMode) {
-                                        gyroModeLabels[Container.GYRO_MODE_DEFAULT]
-                                    },
-                                    onSelect = { opt ->
-                                        gyroMode = gyroModeLabels.indexOf(opt).coerceAtLeast(0)
-                                        if (gyroMode == Container.GYRO_MODE_ORIENTATION && gyroTarget == Container.GYRO_TARGET_MOUSE)
-                                            gyroTarget = Container.GYRO_TARGET_DEFAULT
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(onClick = { helpRes = R.string.help_gyro_mode }) {
-                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                                }
                             }
                             Spacer(Modifier.height(8.dp))
-                            val gyroTargetLabels = listOf(
-                                stringResource(R.string.gyro_target_right_stick),
-                                stringResource(R.string.gyro_target_left_stick),
-                                stringResource(R.string.gyro_target_mouse),
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                DpDrop(
-                                    dp, "gyroTarget",
-                                    label = stringResource(R.string.gyro_target_label),
-                                    options = gyroTargetLabels,
-                                    selected = gyroTargetLabels.getOrElse(gyroTarget) {
-                                        gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
-                                    },
-                                    onSelect = { opt ->
-                                        gyroTarget = gyroTargetLabels.indexOf(opt).coerceAtLeast(0)
-                                        if (gyroTarget == Container.GYRO_TARGET_MOUSE)
-                                            gyroMode = Container.GYRO_MODE_RATE
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(onClick = { helpRes = R.string.help_gyro_target }) {
-                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                                }
                             }
-                            val gyroActivatorLabels = listOf(
-                                stringResource(R.string.gyro_activator_l1),
-                                stringResource(R.string.gyro_activator_l2),
-                                stringResource(R.string.gyro_activator_r1),
-                                stringResource(R.string.gyro_activator_r3),
-                                stringResource(R.string.gyro_activator_always),
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                DpDrop(
-                                    dp, "gyroActivator",
-                                    label = stringResource(R.string.gyro_activator_label),
-                                    options = gyroActivatorLabels,
-                                    selected = gyroActivatorLabels.getOrElse(gyroActivator) {
-                                        gyroActivatorLabels[Container.GYRO_ACTIVATOR_DEFAULT]
-                                    },
-                                    onSelect = { opt -> gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(onClick = { helpRes = R.string.help_gyro_activator }) {
-                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                                }
-                            }
-                            // Hold vs Toggle for that button — hidden under "Always On", which has no
-                            // button to latch (same call the container editor makes).
-                            if (gyroActivator != Container.GYRO_ACTIVATOR_ALWAYS) {
-                                val gyroActivationModeLabels = listOf(
-                                    stringResource(R.string.gyro_activation_hold),
-                                    stringResource(R.string.gyro_activation_toggle),
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                            // HDR output (per-game): "Use container default (<On/Off>)" / On / Off, see
+                            // display.WaylandHdr. On a screen that doesn't report HDR10 the dropdown is greyed
+                            // with the reason but still shows what is stored.
+                            run {
+                                val hdrUnavailable = remember { com.winlator.star.display.WaylandHdr.unavailableReason(gfxContext) }
+                                val containerHdr = shortcut.container.isWaylandHdr()
+                                val values = listOf("", "1", "0")
+                                val labels = listOf("Use container default (" + (if (containerHdr) "On" else "Off") + ")", "On", "Off")
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     DpDrop(
-                                        dp, "gyroActivationMode",
-                                        label = stringResource(R.string.gyro_activation_mode_label),
-                                        options = gyroActivationModeLabels,
-                                        selected = gyroActivationModeLabels.getOrElse(gyroActivationMode) {
-                                            gyroActivationModeLabels[Container.GYRO_ACTIVATION_MODE_DEFAULT]
-                                        },
-                                        onSelect = { opt -> gyroActivationMode = gyroActivationModeLabels.indexOf(opt).coerceAtLeast(0) },
+                                        dp, com.winlator.star.display.WaylandHdr.EXTRA,
+                                        label = com.winlator.star.display.WaylandHdr.TITLE,
+                                        options = labels,
+                                        selected = labels[values.indexOf(waylandHdrOverride).coerceAtLeast(0)],
+                                        onSelect = { waylandHdrOverride = values[labels.indexOf(it)] },
+                                        enabled = hdrUnavailable == null,
                                         modifier = Modifier.weight(1f)
                                     )
-                                    IconButton(onClick = { helpRes = R.string.help_gyro_activation_mode }) {
+                                    LinuxHelp(isLinuxEntry, R.string.help_linux_hdr_output) { helpRes = it }
+                                }
+                                if (hdrUnavailable != null) {
+                                    Text(
+                                        hdrUnavailable,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Text(
+                                    com.winlator.star.display.WaylandHdr.HELP_TEXT,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        // Everything from here to the Frame Generation row is Wine-side rendering: the
+                        // Unreal HDR fix swaps DLLs in the prefix, the DX wrapper and its config are the
+                        // prefix's D3D translation, and Renderer / render scale / in-game refresh belong to
+                        // the X server and its Wine registry keys. A gamescope session has no prefix and no
+                        // X server, and the Linux runtime brings its own D3D stack.
+                        if (!isLinuxEntry) {
+
+                        // Unreal Engine HDR (per-game, both backends; under HDR output on Wayland):
+                        // "Use container default (<its mode>)" / Off / DirectX 12 fix / DirectX 11. See
+                        // core.UnrealHdr; the DirectX 11 notes follow this game's GPU name spoof.
+                        run {
+                            val containerMode = com.winlator.star.core.UnrealHdr.containerMode(shortcut.container)
+                            val values = listOf("") + com.winlator.star.core.UnrealHdr.MODES
+                            val labels = values.map {
+                                if (it.isEmpty()) "Use container default (" + com.winlator.star.core.UnrealHdr.label(containerMode) + ")"
+                                else com.winlator.star.core.UnrealHdr.label(it)
+                            }
+                            DpDrop(
+                                dp, com.winlator.star.core.UnrealHdr.EXTRA,
+                                label = com.winlator.star.core.UnrealHdr.TITLE,
+                                options = labels,
+                                selected = labels[values.indexOf(unrealHdrOverride).coerceAtLeast(0)],
+                                onSelect = { unrealHdrOverride = values[labels.indexOf(it)] },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            val effectiveMode = unrealHdrOverride.ifEmpty { containerMode }
+                            if (effectiveMode == com.winlator.star.core.UnrealHdr.DX11) UnrealHdrDx11Notes(
+                                gpuName = com.winlator.star.core.GpuSpoof.gpuNameOf(graphicsDriverConfig),
+                                wayland = effectiveWaylandShortcut
+                            )
+                            Text(
+                                com.winlator.star.core.UnrealHdr.help(effectiveWaylandShortcut),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        // DX Wrapper
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            DpDrop(
+                                dp, "dxWrapper",
+                                label = stringResource(R.string.dxwrapper),
+                                options = dxWrapperEntries,
+                                selected = selectedDxWrapper,
+                                onSelect = { newWrapper ->
+                                    val wasVegas = StringUtils.parseIdentifier(selectedDxWrapper).contains("vegas")
+                                    val isVegas = StringUtils.parseIdentifier(newWrapper).contains("vegas")
+                                    selectedDxWrapper = newWrapper
+                                    // Strip dxvkConfigFile when leaving VEGAS — prevents stale
+                                    // VEGAS config path from leaking into plain DXVK+VKD3D.
+                                    if (wasVegas && !isVegas) {
+                                        val cfg = DXVKConfigDialog.parseConfig(dxWrapperConfig)
+                                        val path = cfg.get("dxvkConfigFile")
+                                        if (path.isNotEmpty()) {
+                                            val stripped = dxWrapperConfig.split(",").filter { !it.startsWith("dxvkConfigFile=") }.joinToString(",")
+                                            dxWrapperConfig = stripped
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(onClick = { helpRes = R.string.dxwrapper_help_content }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        DpButton(dp, "dxConfig", onActivate = {
+                            val w = StringUtils.parseIdentifier(selectedDxWrapper)
+                            if (w.contains("dxvk") || w.contains("vegas")) showDxvkConfig = true
+                            else showWineD3DConfig = true
+                        }, modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(
+                                onClick = {
+                                    val w = StringUtils.parseIdentifier(selectedDxWrapper)
+                                    if (w.contains("dxvk") || w.contains("vegas")) showDxvkConfig = true
+                                    else showWineD3DConfig = true
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("DX Wrapper Config") }
+                        }
+
+                        // Renderer (host) — per-game override of the container's OpenGL/Vulkan choice.
+                        var showSfWarning by remember { mutableStateOf(false) }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // Display only while greyed on Wayland: the compositor is always Vulkan; the
+                            // stored X11 choice is kept and returns with the X11 backend.
+                            val rendererShown = if (effectiveWaylandShortcut) "Vulkan (Wayland compositor)" else selectedRenderer
+                            DpDrop(
+                                dp, "renderer",
+                                label = stringResource(R.string.renderer),
+                                options = if (effectiveWaylandShortcut) listOf(rendererShown) else listOf("OpenGL", "Vulkan", "SurfaceFlinger"),
+                                selected = rendererShown,
+                                onSelect = {
+                                    // SurfaceFlinger is experimental and can reboot some devices — require opt-in.
+                                    if (it == "SurfaceFlinger" && selectedRenderer != "SurfaceFlinger") showSfWarning = true
+                                    else selectedRenderer = it
+                                },
+                                enabled = !effectiveWaylandShortcut,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(onClick = { helpRes = R.string.help_renderer }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        if (showSfWarning) {
+                            SurfaceFlingerWarningDialog(
+                                onConfirm = { selectedRenderer = "SurfaceFlinger"; showSfWarning = false },
+                                onDismiss = { showSfWarning = false }
+                            )
+                        }
+
+                        // SurfaceFlinger colour correction (ASR-only, GN #1620) — only relevant when this
+                        // game runs on the SurfaceFlinger renderer, so surface it under that choice.
+                        if (!effectiveWaylandShortcut && selectedRenderer == "SurfaceFlinger") {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(stringResource(R.string.renderer_sf_compat))
+                                    Text(
+                                        stringResource(R.string.renderer_sf_compat_hint),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(onClick = { helpRes = R.string.help_renderer_sf_compat }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
+                                DpSwitch(dp, "sfCompat", checked = sfCompatMode, onCheckedChange = { sfCompatMode = it })
+                            }
+                        }
+
+                        // Vulkan renderer per-game overrides — only relevant when this game runs on Vulkan.
+                        if (!effectiveWaylandShortcut && selectedRenderer == "Vulkan") {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(stringResource(R.string.renderer_native), Modifier.weight(1f))
+                                IconButton(onClick = { helpRes = R.string.help_renderer_native }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
+                                DpSwitch(dp, "vkNative", checked = vkNative, onCheckedChange = { vkNative = it })
+                            }
+                            // Colors = the game buffer's channel order. BGRA (default) presents as-is; RGBA
+                            // swaps R/B (routes through the compositor — native can't swap). Per-game so one
+                            // game can differ from the container / its siblings.
+                            val vkColorOrders = listOf("BGRA", "RGBA")
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpDrop(
+                                    dp, "vkColors",
+                                    label = stringResource(R.string.renderer_colors),
+                                    options = vkColorOrders,
+                                    selected = if (vkSwapRB) "RGBA" else "BGRA",
+                                    onSelect = { vkSwapRB = (it == "RGBA") },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = { helpRes = R.string.help_renderer_colors }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            // Present mode is ignored under Native Rendering (direct scanout), so grey it out.
+                            val vkPmValues = listOf("fifo", "mailbox", "immediate")
+                            val vkPmLabels = listOf(
+                                stringResource(R.string.renderer_present_mode_fifo),
+                                stringResource(R.string.renderer_present_mode_mailbox),
+                                stringResource(R.string.renderer_present_mode_immediate)
+                            )
+                            val vkPmIdx = vkPmValues.indexOf(vkPresentMode).coerceAtLeast(0)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpDrop(
+                                    dp, "vkPresent",
+                                    label = stringResource(R.string.renderer_present_mode),
+                                    options = vkPmLabels,
+                                    selected = vkPmLabels[vkPmIdx],
+                                    onSelect = { vkPresentMode = vkPmValues[vkPmLabels.indexOf(it)] },
+                                    enabled = !vkNative,
+                                    modifier = (if (vkNative) Modifier.alpha(0.5f) else Modifier).weight(1f)
+                                )
+                                IconButton(onClick = { helpRes = R.string.renderer_present_mode_help_content }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            // Native backend — which native path Native Rendering uses. Only meaningful when
+                            // Native Rendering is on (matches the container Vulkan cog), so gate on vkNative.
+                            if (vkNative) {
+                                val vkBackendValues = listOf("auto", "asr", "flip")
+                                val vkBackendLabels = listOf(
+                                    stringResource(R.string.renderer_native_backend_auto),
+                                    stringResource(R.string.renderer_native_backend_asr),
+                                    stringResource(R.string.renderer_native_backend_flip)
+                                )
+                                val vkBackendIdx = vkBackendValues.indexOf(vkNativeBackend).coerceAtLeast(0)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    DpDrop(
+                                        dp, "vkBackend",
+                                        label = stringResource(R.string.renderer_native_backend),
+                                        options = vkBackendLabels,
+                                        selected = vkBackendLabels[vkBackendIdx],
+                                        onSelect = { vkNativeBackend = vkBackendValues[vkBackendLabels.indexOf(it)] },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(onClick = { helpRes = R.string.help_renderer_native_backend }) {
                                         Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                                     }
                                 }
                             }
+                            // Compositor (present-layer) Vulkan driver: System or an installed Turnip. Applies
+                            // regardless of native mode, so not gated on vkNative. Matches the container cog.
+                            val vkDriverOptions = remember {
+                                val installed = try {
+                                    com.winlator.star.contents.AdrenotoolsManager(context).enumarateInstalledDrivers()
+                                } catch (e: Exception) { arrayListOf<String>() }
+                                (listOf("system") + installed).distinct()
+                            }
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(gyroSensitivity)}",
-                                    style = MaterialTheme.typography.bodySmall,
+                                DpDrop(
+                                    dp, "vkDriver",
+                                    label = stringResource(R.string.renderer_driver_id),
+                                    options = vkDriverOptions,
+                                    selected = if (vkDriverOptions.contains(vkRendererDriverId)) vkRendererDriverId else "system",
+                                    onSelect = { vkRendererDriverId = it },
                                     modifier = Modifier.weight(1f)
                                 )
-                                IconButton(onClick = { helpRes = R.string.help_gyro_sensitivity }) {
+                                IconButton(onClick = { helpRes = R.string.help_renderer_driver }) {
                                     Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                                 }
                             }
-                            DpSlider(
-                                dp, "gyroSensitivity",
-                                value = gyroSensitivity,
-                                onValueChange = { gyroSensitivity = it },
-                                valueRange = 0.1f..10f,
-                                step = 0.5f,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                DpSwitch(dp, "gyroInvertX", checked = gyroInvertX, onCheckedChange = { gyroInvertX = it })
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.gyro_invert_x), modifier = Modifier.weight(1f))
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                DpSwitch(dp, "gyroInvertY", checked = gyroInvertY, onCheckedChange = { gyroInvertY = it })
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.gyro_invert_y), modifier = Modifier.weight(1f))
-                            }
-                        }
-                    }
-
-                            }
-                            1 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            RecommendedComponentsSection(
-                                container = shortcut.container,
-                                exeFile = gameExe,
-                                gameDir = gameDir,
-                                shortcutBaseName = shortcut.name,
-                            )
-                            // Every component, with what this game needs at the top, installed into
-                            // the game's container (the same list as the container's Win Components tab).
-                            var showAllComponents by remember { mutableStateOf(false) }
-                            OutlinedButton(onClick = { showAllComponents = true }, modifier = Modifier.fillMaxWidth()) {
-                                Text("All components")
-                            }
-                            if (showAllComponents) {
-                                ComponentsSheet(
-                                    container = shortcut.container,
-                                    onDismiss = { showAllComponents = false },
-                                    exeFile = gameExe,
-                                    gameDir = gameDir,
+                            // FG temporarily forces Mailbox; caption the field so FIFO-while-FG-selected isn't confusing.
+                            if (frameGenEngine != "off") {
+                                Text(
+                                    stringResource(R.string.renderer_present_mode_fg_note),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            ScWinComponentsTab(winComponents)
                         }
-                            2 -> ScEnvVarsTab(envVarsStr, { envVarsStr = it }, gameDir, isLinuxEntry)
-                            3 -> ScAdvancedTab(
-            shortcut = shortcut,
-            onPresetListChanged = {
-                box64Presets = Box64PresetManager.getPresets("box64", context)
-                fexCorePresets = FEXCorePresetManager.getPresets(context)
-            },
-            isArm64EC = isArm64EC,
-            isLinuxEntry = isLinuxEntry,
-            box64Versions = box64Versions,
-            selectedBox64Version = selectedBox64Version,
-            onBox64VersionChange = { selectedBox64Version = it },
-            box64Presets = box64Presets,
-            selectedBox64PresetIndex = selectedBox64PresetIndex,
-            onBox64PresetIndexChange = { selectedBox64PresetIndex = it },
-            fexCoreVersions = fexCoreVersions,
-            selectedFexCoreVersion = selectedFexCoreVersion,
-            onFexVersionChange = { selectedFexCoreVersion = it },
-            fexCorePresets = fexCorePresets,
-            selectedFexPresetIndex = selectedFexCorePresetIndex,
-            onFexPresetIndexChange = { selectedFexCorePresetIndex = it },
-            controlsProfiles = controlsProfiles,
-            selectedControlsProfileIndex = selectedControlsProfileIndex,
-            onControlsProfileChange = { selectedControlsProfileIndex = it },
-            startupSelectionEntries = startupSelectionEntries,
-            selectedStartupSelection = selectedStartupSelection,
-            onStartupChange = { selectedStartupSelection = it },
-            startupServicesEnabled = startupServicesEnabled,
-            onStartupServiceToggle = { raw, on ->
-                startupServicesEnabled =
-                    if (on) startupServicesEnabled + raw else startupServicesEnabled - raw
-            },
-            cpuListViewRef = cpuListViewRef,
-            initialCpuList = shortcut.getExtra("cpuList", shortcut.container.getCPUList(true)),
-            onCpuListSnapshot = { shortcut.putExtra("cpuList", it) },
-            linuxClientCpuListViewRef = linuxClientCpuListViewRef,
-            initialLinuxClientCpuList = shortcut.getExtra("linuxClientCpuList", shortcut.container.getCPUList(true)),
-            onLinuxClientCpuListSnapshot = { shortcut.putExtra("linuxClientCpuList", it) },
-            linuxGameCpuListViewRef = linuxGameCpuListViewRef,
-            initialLinuxGameCpuList = shortcut.getExtra("linuxGameCpuList", shortcut.container.getCPUList(true)),
-            onLinuxGameCpuListSnapshot = { shortcut.putExtra("linuxGameCpuList", it) },
-            sharpnessEffectEntries = sharpnessEffectEntries,
-            selectedSharpnessEffect = selectedSharpnessEffect,
-            onSharpnessEffectChange = { selectedSharpnessEffect = it },
-            sharpnessLevel = sharpnessLevel,
-            onSharpnessLevelChange = { sharpnessLevel = it },
-            sharpnessDenoise = sharpnessDenoise,
-            onSharpnessDenoiseChange = { sharpnessDenoise = it },
-            reshadeLoadout = reshadeLoadout,
-            reshadeEffects = reshadeEffects,
-            onReshadeCatalogChanged = {
-                reshadeEffects = ReshadeManager.scanEffects(context)
-                reshadeLoadout.reconcile(reshadeEffects)
-            },
-            reshadeSupported = StringUtils.parseIdentifier(selectedDxWrapper).let { it.contains("dxvk") || it.contains("vegas") },
-            onShowBox64DownloadSheet = { showBox64DownloadSheet = true },
-            onShowFexCoreDownloadSheet = { showFexCoreDownloadSheet = true },
-            box64ECVersions = box64ECVersions,
-            selectedBox64ECVersion = selectedBox64ECVersion,
-            onBox64ECVersionChange = { selectedBox64ECVersion = it },
-            onShowBox64ECDownloadSheet = { showBox64ECDownloadSheet = true },
-            forceSsbs = forceSsbs,
-            onForceSsbsChange = { forceSsbs = it },
-        )
-                            5 -> ScTvTab(
-                                dp = dp,
-                                display = tvDisplay,
-                                // This game's own render resolution, for the "instead of…" subtitle —
-                                // taken from the LIVE General-tab state, not the saved extra, so the
-                                // two tabs can't disagree while the dialog is open.
-                                gameScreenSize = if (selectedScreenSize == "Custom") "${customWidth}x${customHeight}"
-                                                 else StringUtils.parseIdentifier(selectedScreenSize),
-                                tvLaunch = tvLaunch,
-                                onTvLaunchChange = { tvLaunch = it },
-                                tvModeId = tvModeId,
-                                onTvModeIdChange = { tvModeId = it },
-                                tvMatchRes = tvMatchRes,
-                                onTvMatchResChange = { tvMatchRes = it },
-                            )
-                            6 -> ScLinuxComponentsTab(dp) { linuxComponentIds = it }
-                        }
-                    }
-                }
 
-                // ── Responsive tab layout ────────────────────────────────────────────────────────
-                // Portrait: the tab strip is pinned across the TOP (mirrors the container editor's
-                // top tab bar via the shared RailTopTabs). Landscape: the shared collapsible left rail
-                // beside the content. Left/Right on the focused "tabs" node still switches tabs for
-                // D-pad/controller users in both orientations, and L1/R1 switch from anywhere.
-                val railState = rememberRailState("shortcut")
-                val railItems = tabTitles.mapIndexed { position, tab ->
-                    val contentIndex = tabIndices[position]
-                    RailItem(tab, shortcutTabIcon(tab), contentIndex == selectedTab) { selectedTab = contentIndex }
-                }
-                // Same "What is all this?" glossary link the container editor surfaces on its rail.
-                val railLinks = listOf(RailLink("What is all this?", Icons.Filled.Help) { glossaryQuery = "" })
-                if (isPortrait) {
-                    Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                        // Left/Right and L1/R1 step through the strip, so DpTabs works in POSITIONS.
-                        DpTabs(dp, "tabs", selected = tabIndices.indexOf(selectedTab).coerceAtLeast(0),
-                               count = tabTitles.size, onSelect = { selectedTab = tabIndices[it] }) {
-                            RailTopTabs(items = railItems, links = railLinks)
+                        // Render scale (supersampling) — per-game override of the container default.
+                        // Greyed on Wayland (downscale lives in the X11 Vulkan renderer only); displays
+                        // "Not used on Wayland" while the stored value is left untouched.
+                        run {
+                            val renderScaleValues = listOf("1.0", "1.25", "1.5", "2.0")
+                            val renderScaleLabels = listOf("Off", "1.25x", "1.5x", "2x")
+                            val rsIdx = renderScaleValues.indexOf(renderScale).coerceAtLeast(0)
+                            val rsShown = if (effectiveWaylandShortcut) "Not used on Wayland" else renderScaleLabels[rsIdx]
+                            DpDrop(
+                                dp, "renderScale",
+                                label = "Render scale (supersampling)",
+                                options = if (effectiveWaylandShortcut) listOf(rsShown) else renderScaleLabels,
+                                selected = rsShown,
+                                onSelect = { renderScale = renderScaleValues[renderScaleLabels.indexOf(it)] },
+                                enabled = !effectiveWaylandShortcut
+                            )
+                            if (effectiveWaylandShortcut) {
+                                Text(
+                                    "Not used on Wayland: the compositor has no supersampling downscale. The stored value returns on X11.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
-                        // Weighted so the internally-scrolling content takes exactly the space left
-                        // between the pinned tab strip and the pinned footer (never overflows it).
-                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) { mainContent() }
-                    }
-                } else {
-                    Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                        DpTabs(dp, "tabs", selected = tabIndices.indexOf(selectedTab).coerceAtLeast(0),
-                               count = tabTitles.size, onSelect = { selectedTab = tabIndices[it] }) {
-                            CollapsibleRail(
-                                state = railState,
-                                title = shortcut.name,
-                                links = railLinks,
-                                sections = listOf(RailSection(header = null, items = railItems)),
+
+                        // In-game refresh rate — single per-game override of the container default. Options:
+                        // Use container default (inherit) / Locked (60) / <rate> Hz / Unlimited. Drives the
+                        // two underlying extras (unlock + cap) together; empty = inherit.
+                        run {
+                            // panelRates is hoisted to the dialog body (so the D-pad order can see this row).
+                            if (panelRates.isNotEmpty()) {
+                                // Only rates ABOVE 60 are cap options — "Locked (60)" already covers 60.
+                                val ratesAbove60 = panelRates.filter { it > 60 }
+                                // Sentinel value model: "" = inherit, "locked" = Locked(60), "0" = Unlimited,
+                                // "N" = cap N. Maps to the (unlock, cap) extra pair on select.
+                                val rrValues = listOf("", "locked", "0") + ratesAbove60.map { it.toString() }
+                                val rrLabels = listOf(
+                                    stringResource(R.string.use_container_default),
+                                    stringResource(R.string.in_game_refresh_locked),
+                                    stringResource(R.string.max_game_refresh_rate_unlimited)) +
+                                    ratesAbove60.map { "$it Hz" }
+                                val currentValue = when {
+                                    unlockGameRefreshRate.isEmpty() && maxGameRefreshRate.isEmpty() -> ""
+                                    unlockGameRefreshRate == "0" -> "locked"
+                                    else -> maxGameRefreshRate.ifEmpty { "0" }
+                                }
+                                val rrIdx = rrValues.indexOf(currentValue).coerceAtLeast(0)
+                                DpDrop(
+                                    dp, "refresh",
+                                    label = stringResource(R.string.in_game_refresh_rate),
+                                    options = rrLabels,
+                                    selected = rrLabels[rrIdx],
+                                    onSelect = {
+                                        when (val v = rrValues[rrLabels.indexOf(it)]) {
+                                            ""       -> { unlockGameRefreshRate = "";  maxGameRefreshRate = "" }
+                                            "locked" -> { unlockGameRefreshRate = "0"; maxGameRefreshRate = "0" }
+                                            else     -> { unlockGameRefreshRate = "1"; maxGameRefreshRate = v }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        } // end of the Wine-side rendering rows (see isLinuxEntry above)
+
+                        // Frame Generation engine — per-game override (lsfg grayed without Lossless.dll).
+                        run {
+                            val fgLabels = listOf(
+                                stringResource(R.string.frame_generation_off),
+                                stringResource(R.string.frame_generation_bionic),
+                                stringResource(R.string.frame_generation_lsfg_native)
+                            )
+                            val fgIdx = fgEngines.indexOf(frameGenEngine).coerceAtLeast(0)
+                            // FG's mailbox/present-mode delivery only exists on the Vulkan host renderer, so
+                            // gate the whole dropdown on Vulkan (grey it out otherwise) — combined with the
+                            // existing lsfg-DLL option gate. See ContainerDetailScreen for the rationale.
+                            // On Wayland the renderer gate does not apply: FG runs inside the compositor
+                            // (always Vulkan) and the drawer arms the engine picked here. See ContainerDetailScreen.
+                            // A Linux session always presents through the Vulkan compositor, whatever
+                            // its entry's renderer field says (gamescope is a Wayland client of it).
+                            val fgVulkan = effectiveWaylandShortcut || isLinuxEntry || selectedRenderer == "Vulkan"
+                            val fgShown = fgLabels[fgIdx]
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpDrop(
+                                    dp, "frameGen",
+                                    label = stringResource(R.string.frame_generation),
+                                    options = fgLabels,
+                                    selected = fgShown,
+                                    onSelect = { frameGenEngine = fgEngines[fgLabels.indexOf(it)] },
+                                    enabled = fgVulkan,
+                                    disabledOptions = buildSet {
+                                        // bionic-fg re-enabled (2.9.4+) — see ContainerDetailScreen note.
+                                        if (!lsfgDllAvailable) add(fgLabels[2])   // LSFG Native — needs an imported Lossless.dll
+                                    },
+                                    modifier = (if (!fgVulkan) Modifier.alpha(0.5f) else Modifier).weight(1f)
+                                )
+                                IconButton(onClick = { helpRes = R.string.help_frame_generation }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            if (!fgVulkan) {
+                                Text(
+                                    text = stringResource(R.string.frame_generation_requires_vulkan),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (!lsfgDllAvailable) {
+                                Text(
+                                    text = stringResource(R.string.frame_generation_lsfg_needs_dll),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        // FPS limiter — per-game override.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            DpSwitch(dp, "fpsLimiter", checked = fpsLimiterEnabled, onCheckedChange = { fpsLimiterEnabled = it })
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.fps_limiter), modifier = Modifier.weight(1f))
+                            IconButton(onClick = { helpRes = if (isLinuxEntry) R.string.help_linux_fps_limiter else R.string.help_fps_limiter }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
+                        }
+
+                        // Power-user performance toggles — collapsed into an expandable "Performance" section
+                        // (closed by default) so the shortcut dialog stays short. Each toggle is a compact row;
+                        // a per-game toggle is only saved when it differs from the App Settings global default.
+                        val anyPerfOverride = sustainedPerfMode != com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value ||
+                            perfPriorityBoost != com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value ||
+                            preferBigCores != com.winlator.star.perf.PerformanceSettings.preferBigCores.value ||
+                            com.winlator.star.perf.PerfRootApplier.ROOT_KEYS.any { (rootOverrides[it] ?: false) != com.winlator.star.perf.PerformanceSettings.rootDefaultValue(it) }
+                        val perfOverrideCount = (if (sustainedPerfMode != com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value) 1 else 0) +
+                            (if (perfPriorityBoost != com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value) 1 else 0) +
+                            (if (preferBigCores != com.winlator.star.perf.PerformanceSettings.preferBigCores.value) 1 else 0) +
+                            com.winlator.star.perf.PerfRootApplier.ROOT_KEYS.count { (rootOverrides[it] ?: false) != com.winlator.star.perf.PerformanceSettings.rootDefaultValue(it) }
+
+                        // Performance — one row opens the full dashboard menu (same as in-game), bound to
+                        // this shortcut's saved-per-game toggles. Replaces the old inline toggle list; the
+                        // save block below still persists whatever the dialog set (override-when-different).
+                        var showPerfDialog by remember { mutableStateOf(false) }
+                        // Styled to match the other outlined menu fields (notched "Performance" label +
+                        // border + trailing chevron). The read-only field shows the override status; a
+                        // transparent overlay Box catches taps so the whole field opens the dashboard
+                        // dialog instead of focusing the text field.
+                        Box(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                            OutlinedTextField(
+                                value = if (perfOverrideCount > 0) "$perfOverrideCount overridden" else "Global defaults",
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Performance") },
+                                trailingIcon = { Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Open") },
+                                // Accent-colored outline so this opener stands out from the grey menu fields.
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    focusedLabelColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedLabelColor = MaterialTheme.colorScheme.primary,
+                                    focusedTrailingIconColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedTrailingIconColor = MaterialTheme.colorScheme.primary,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Box(Modifier.matchParentSize().clickable { showPerfDialog = true })
+                        }
+
+                        if (showPerfDialog) {
+                            com.winlator.star.ui.PerformanceDashboardDialogPerGame(
+                                sustained = sustainedPerfMode, onSustained = { sustainedPerfMode = it },
+                                priority = perfPriorityBoost, onPriority = { perfPriorityBoost = it },
+                                bigCores = preferBigCores, onBigCores = { preferBigCores = it },
+                                rootValue = { rootOverrides[it] ?: false },
+                                onRoot = { k, v -> rootOverrides[k] = v },
+                                onResetAll = {
+                                    sustainedPerfMode = com.winlator.star.perf.PerformanceSettings.sustainedPerfMode.value
+                                    perfPriorityBoost = com.winlator.star.perf.PerformanceSettings.perfPriorityBoost.value
+                                    preferBigCores = com.winlator.star.perf.PerformanceSettings.preferBigCores.value
+                                    for (rk in com.winlator.star.perf.PerfRootApplier.ROOT_KEYS)
+                                        rootOverrides[rk] = com.winlator.star.perf.PerformanceSettings.rootDefaultValue(rk)
+                                },
+                                onDismiss = { showPerfDialog = false },
                             )
                         }
-                        Column(modifier = Modifier.weight(1f).fillMaxHeight()) { mainContent() }
-                    }
-                }
 
-                Divider(color = DividerColor)
-                // Compact footer — reduced padding + shrunk button height so the OK/Cancel bar
-                // matches the slimmed title bar above and frees vertical room for content.
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    DpButton(dp, "cancel", onActivate = requestClose, onRightId = "ok") {
-                        TextButton(
-                            onClick = requestClose,
-                            // Definite height overrides TextButton's internal 40dp defaultMinSize
-                            // floor (which heightIn(min=…) can't lower), so the footer bar is genuinely
-                            // short — roughly matching the slim title bar at the top.
-                            modifier = Modifier.height(30.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
-                        ) { Text(stringResource(android.R.string.cancel)) }
+                        // Audio driver
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            DpDrop(
+                                dp, "audio",
+                                label = stringResource(R.string.audio_driver),
+                                options = audioDriverEntries,
+                                selected = selectedAudioDriver,
+                                disabledOptions = if (!directAudioSupported && directAudioEntry != null) setOf(directAudioEntry) else emptySet(),
+                                onSelect = {
+                                    selectedAudioDriver = it
+                                    // DirectAudio is experimental — warn on select (reuses the HelpDialog surface).
+                                    if (StringUtils.parseIdentifier(it) == "directaudio") helpRes = R.string.directaudio_experimental_warning
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            val scAudioId = StringUtils.parseIdentifier(selectedAudioDriver)
+                            if (scAudioId == "pulseaudio" || scAudioId == "alsa" || scAudioId == "directaudio") {
+                                IconButton(onClick = { showScAudioSettings = true }) {
+                                    Icon(Icons.Default.Settings, contentDescription = "Audio settings", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            IconButton(onClick = { helpRes = if (isLinuxEntry) R.string.help_linux_audio_driver else R.string.help_audio_driver }) {
+                                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        if (!directAudioSupported && directAudioEntry != null) {
+                            Text(
+                                "DirectAudio requires Proton ${com.winlator.star.core.DirectAudioSupport.SUPPORTED_LABEL}",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.5.sp,
+                                modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                            )
+                        }
+                        if (showScAudioSettings) {
+                            AudioSettingsDialog(
+                                initial = audioConfigFromEnv(envVarsStr, StringUtils.parseIdentifier(selectedAudioDriver)),
+                                scopeLabel = "this game",
+                                latencyLive = true,
+                                driverLabel = when (StringUtils.parseIdentifier(selectedAudioDriver)) {
+                                    "alsa" -> "ALSA"; "pulseaudio" -> "PulseAudio"; "directaudio" -> "DirectAudio"
+                                    else -> StringUtils.parseIdentifier(selectedAudioDriver)
+                                },
+                                driverId = StringUtils.parseIdentifier(selectedAudioDriver),
+                                onDismiss = { showScAudioSettings = false },
+                                onSave = { cfg ->
+                                    envVarsStr = audioConfigToEnv(envVarsStr, cfg, StringUtils.parseIdentifier(selectedAudioDriver))
+                                    showScAudioSettings = false
+                                }
+                            )
+                        }
+
+                        // Microphone (DirectAudio only). Opt-in per game, default OFF — a knowingly-granted
+                        // permission. ON seeds BANNER_AUDIO_DIRECT_MIC=1 into this shortcut's env; the
+                        // DirectAudio driver opens the AAudio INPUT stream itself when the flag is present
+                        // (the app never records). Greyed off DirectAudio, since only that driver consumes the
+                        // flag today. Keyed on the live envVarsStr so it can't capture a stale value and drift.
+                        run {
+                            val micCtx = LocalContext.current
+                            val micDriverActive = StringUtils.parseIdentifier(selectedAudioDriver) == "directaudio" && directAudioSupported
+                            val micOn = com.winlator.star.core.DirectAudioSupport.isMicEnabledInEnv(envVarsStr)
+                            val micPermLauncher = rememberLauncherForActivityResult(
+                                ActivityResultContracts.RequestPermission()
+                            ) { granted ->
+                                if (granted) {
+                                    envVarsStr = com.winlator.star.core.DirectAudioSupport.withMicEnabled(envVarsStr, true)
+                                } else {
+                                    envVarsStr = com.winlator.star.core.DirectAudioSupport.withMicEnabled(envVarsStr, false)
+                                    Toast.makeText(micCtx, "Microphone permission denied — mic stays off.", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Switch(
+                                    enabled = micDriverActive,
+                                    checked = micOn && micDriverActive,
+                                    onCheckedChange = { want ->
+                                        if (want) {
+                                            if (androidx.core.content.ContextCompat.checkSelfPermission(micCtx, android.Manifest.permission.RECORD_AUDIO)
+                                                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                                envVarsStr = com.winlator.star.core.DirectAudioSupport.withMicEnabled(envVarsStr, true)
+                                            } else {
+                                                micPermLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                            }
+                                        } else {
+                                            envVarsStr = com.winlator.star.core.DirectAudioSupport.withMicEnabled(envVarsStr, false)
+                                        }
+                                    }
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        "Microphone",
+                                        color = if (micDriverActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        if (micDriverActive) "Let games use the mic (DirectAudio captures input)"
+                                        else "Available on the DirectAudio driver",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 11.5.sp
+                                    )
+                                }
+                                LinuxHelp(isLinuxEntry, R.string.help_linux_microphone) { helpRes = it }
+                            }
+                        }
+
+                        // Emulator — display-only relabel (see EmulatorLabels). On arm64ec the non-FEX
+                        // backend is wowbox64, and on an x86_64 container this picker is inert (the
+                        // launcher always runs bin/box64) so the disabled field must read Box64 instead
+                        // of the stored "FEXCore" default. What save() persists is unchanged.
+                        // It names which x86 backend the Wine launcher runs under, and the Linux runtime
+                        // brings its own FEX; the preset it honours is on the Advanced tab.
+                        if (!isLinuxEntry) {
+                        val emulatorShown =
+                            if (archLoaded && !isArm64EC) EmulatorLabels.box64EntryOf(emulatorEntries)
+                            else EmulatorLabels.display(selectedEmulator, isArm64EC)
+                        DpDrop(
+                            dp, "emulator",
+                            label = "Emulator (32-bit)",
+                            options = EmulatorLabels.options(emulatorEntries, isArm64EC),
+                            selected = emulatorShown,
+                            onSelect = {
+                                selectedEmulator = EmulatorLabels.fromDisplay(it, emulatorEntries, isArm64EC)
+                            },
+                            enabled = isArm64EC
+                        )
+
+                        // x86-64 translator override (arm64ec only, once a Box64EC component exists).
+                        // "Container default" stores no extra: the game follows the container's
+                        // Emulator (64-bit) choice, which is what every existing shortcut does.
+                        if (isArm64EC && box64ECInstalled) {
+                            DpDrop(
+                                dp, "emulator64",
+                                label = "Emulator (64-bit)",
+                                options = emulator64Entries,
+                                selected = selectedEmulator64,
+                                onSelect = { selectedEmulator64 = it }
+                            )
+                        }
+
+                        // MIDI
+                        if (midiList.isNotEmpty()) {
+                            val midiDisplay = midiList.firstOrNull { it == selectedMidi } ?: midiList.first()
+                            DpDrop(
+                                dp, "midi",
+                                label = "MIDI Sound Font",
+                                options = midiList,
+                                selected = midiDisplay,
+                                onSelect = { selectedMidi = it }
+                            )
+                        }
+
+                        // LC_ALL — goes into the Wine environment (setupXEnvironment), which the gamescope
+                        // path returns before ever building; the session's locale comes from the runtime.
+                        DpField(
+                            dp, "lcAll",
+                            value = lcAll,
+                            onValueChange = { lcAll = it },
+                            label = "LC_ALL",
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        } // end of the Wine launcher rows (Emulator / MIDI / LC_ALL)
+
+                        // Fullscreen aspect-ratio mode (#71) — per-game override. Index 0 = use the
+                        // container default; indices 1..5 map to Container.FULLSCREEN_OFF/FIT/STRETCH/FILL/INTEGER.
+                        val fsOverrideLabels = listOf(
+                            stringResource(R.string.fullscreen_mode_default),
+                            stringResource(R.string.fullscreen_mode_off),
+                            stringResource(R.string.fullscreen_mode_fit),
+                            stringResource(R.string.fullscreen_mode_stretch),
+                            stringResource(R.string.fullscreen_mode_fill),
+                            stringResource(R.string.fullscreen_mode_integer)
+                        )
+                        val fsOverrideIdx = if (fullscreenModeOverride < 0) 0 else (fullscreenModeOverride + 1)
+                            .coerceIn(1, fsOverrideLabels.size - 1)
+                        // Applies on X11 and Wayland alike (the compositor fits the desktop the same way).
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            DpDrop(
+                                dp, "fullscreen",
+                                label = stringResource(R.string.fullscreen_mode),
+                                options = fsOverrideLabels,
+                                selected = fsOverrideLabels[fsOverrideIdx],
+                                onSelect = { sel ->
+                                    val idx = fsOverrideLabels.indexOf(sel)
+                                    fullscreenModeOverride = if (idx <= 0) -1 else idx - 1
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            LinuxHelp(isLinuxEntry, R.string.help_linux_fullscreen_mode) { helpRes = it }
+                        }
+
+                        // Close the session when this game exits (per-game override; container default is ON).
+                        // The watcher that arms it lives past the gamescope early return and watches for a
+                        // Windows exe leaving the prefix, so it never fires for a Linux entry.
+                        if (!isLinuxEntry) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpCheck(dp, "autoClose", checked = autoCloseOnExit, onCheckedChange = { autoCloseOnExit = it })
+                                Text("Close when game exits")
+                            }
+                        }
+                                }
+                                4 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Input section
+                        SectionBox(title = "Input") {
+                            // XInput/DInput, exclusive input and the controller count are how WinHandler
+                            // presents pads to a Wine game and what it writes into the prefix's joystick
+                            // registry keys. A Linux session's pads arrive as fake-evdev devices instead,
+                            // so those rows are conditioned off and the ones that still act on the host
+                            // side (touchscreen mode, on-screen-control auto-hide, player slots, gyro) stay.
+                            if (!isLinuxEntry) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpSwitch(
+                                    dp, "enableXInput",
+                                    checked = enableXInput,
+                                    onCheckedChange = { enableXInput = it },
+                                    enabled = exclusiveXInput
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.enable_xinput_for_wine_game), modifier = Modifier.weight(1f))
+                                IconButton(onClick = { helpRes = R.string.help_xinput }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpSwitch(
+                                    dp, "enableDInput",
+                                    checked = enableDInput,
+                                    onCheckedChange = { enableDInput = it },
+                                    enabled = exclusiveXInput
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.enable_dinput_for_wine_game), modifier = Modifier.weight(1f))
+                                IconButton(onClick = { helpRes = R.string.help_dinput }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpSwitch(
+                                    dp, "exclusiveXInput",
+                                    checked = exclusiveXInput,
+                                    onCheckedChange = { checked ->
+                                        exclusiveXInput = checked
+                                        if (!checked) { enableXInput = true; enableDInput = true }
+                                        else if (enableXInput && enableDInput) enableDInput = false
+                                    }
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text("Exclusive Input", modifier = Modifier.weight(1f))
+                                IconButton(onClick = { helpRes = R.string.help_exclusive_xinput }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpCheck(dp, "disableXInput", checked = disabledXInput, onCheckedChange = { disabledXInput = it })
+                                Text("Disable XInput")
+                            }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpCheck(dp, "simTouch", checked = simTouchScreen, onCheckedChange = { simTouchScreen = it })
+                                Text("Touchscreen Mode")
+                                LinuxHelp(isLinuxEntry, R.string.help_linux_touchscreen_mode) { helpRes = it }
+                            }
+                            if (!isLinuxEntry) {
+                                DpDrop(
+                                    dp, "numControllers",
+                                    label = "Num Controllers",
+                                    options = numControllersEntries,
+                                    selected = selectedNumControllers,
+                                    onSelect = { selectedNumControllers = it }
+                                )
+                            }
+
+                            // #333 per-game auto-hide override (tri-state): inherit container / On / Off.
+                            Spacer(Modifier.height(12.dp))
+                            run {
+                                val autoHideLabels = listOf("Use container default", "On", "Off")
+                                val autoHideIdx = when (autoHideControlsOnPad) { "1" -> 1; "0" -> 2; else -> 0 }
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    LabeledDropdown(
+                                        label = "Hide on-screen controls when a controller connects",
+                                        options = autoHideLabels,
+                                        selectedOption = autoHideLabels[autoHideIdx],
+                                        onSelect = {
+                                            autoHideControlsOnPad = when (autoHideLabels.indexOf(it)) { 1 -> "1"; 2 -> "0"; else -> "" }
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    LinuxHelp(isLinuxEntry, R.string.help_linux_autohide_controls) { helpRes = it }
+                                }
+                            }
+
+                            // Player Slots (per-game override). Empty override = inherit the container's
+                            // Player Slots; touching any slot makes this shortcut own the pins. The "Use
+                            // container default" button clears the override so it re-inherits. Editing an
+                            // empty override starts from an all-auto ("{}") view.
+                            Spacer(Modifier.height(12.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Player Slots", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                                IconButton(onClick = { helpRes = if (isLinuxEntry) R.string.help_linux_player_slots else R.string.help_player_slots }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
+                                if (controllerSlotOverridesJson.isNotEmpty()) {
+                                    TextButton(onClick = { controllerSlotOverridesJson = "" }) {
+                                        Text("Use container default")
+                                    }
+                                }
+                            }
+                            if (controllerSlotOverridesJson.isEmpty()) {
+                                Text(
+                                    "Inheriting the container's Player Slots. Pin a controller below to set a per-game override.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            PlayerSlotsEditor(
+                                savedOverridesJson = controllerSlotOverridesJson.ifEmpty { "{}" },
+                                onOverridesChange = { controllerSlotOverridesJson = it },
+                            )
+
+                            // Gyro (motion aim) per-game override. Deadzone/smoothing are deliberately
+                            // absent — those stay on the container (Container Settings -> Gyro).
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                DpSwitch(dp, "gyroEnabled", checked = gyroEnabled, onCheckedChange = { gyroEnabled = it })
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.gyro_enabled), modifier = Modifier.weight(1f))
+                                LinuxHelp(isLinuxEntry, R.string.help_linux_gyro_enabled) { helpRes = it }
+                            }
+                            if (gyroEnabled) {
+                                // Same pairing rule as the container editor: Tilt to Aim and the Mouse
+                                // target can't coexist (a held tilt is a constant pointer delta), so each
+                                // selection knocks the other back to a working value.
+                                val gyroModeLabels = listOf(
+                                    stringResource(R.string.gyro_mode_rate),
+                                    stringResource(R.string.gyro_mode_orientation),
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    DpDrop(
+                                        dp, "gyroMode",
+                                        label = stringResource(R.string.gyro_mode_label),
+                                        options = gyroModeLabels,
+                                        selected = gyroModeLabels.getOrElse(gyroMode) {
+                                            gyroModeLabels[Container.GYRO_MODE_DEFAULT]
+                                        },
+                                        onSelect = { opt ->
+                                            gyroMode = gyroModeLabels.indexOf(opt).coerceAtLeast(0)
+                                            if (gyroMode == Container.GYRO_MODE_ORIENTATION && gyroTarget == Container.GYRO_TARGET_MOUSE)
+                                                gyroTarget = Container.GYRO_TARGET_DEFAULT
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(onClick = { helpRes = R.string.help_gyro_mode }) {
+                                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                val gyroTargetLabels = listOf(
+                                    stringResource(R.string.gyro_target_right_stick),
+                                    stringResource(R.string.gyro_target_left_stick),
+                                    stringResource(R.string.gyro_target_mouse),
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    DpDrop(
+                                        dp, "gyroTarget",
+                                        label = stringResource(R.string.gyro_target_label),
+                                        options = gyroTargetLabels,
+                                        selected = gyroTargetLabels.getOrElse(gyroTarget) {
+                                            gyroTargetLabels[Container.GYRO_TARGET_DEFAULT]
+                                        },
+                                        onSelect = { opt ->
+                                            gyroTarget = gyroTargetLabels.indexOf(opt).coerceAtLeast(0)
+                                            if (gyroTarget == Container.GYRO_TARGET_MOUSE)
+                                                gyroMode = Container.GYRO_MODE_RATE
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(onClick = { helpRes = R.string.help_gyro_target }) {
+                                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                                val gyroActivatorLabels = listOf(
+                                    stringResource(R.string.gyro_activator_l1),
+                                    stringResource(R.string.gyro_activator_l2),
+                                    stringResource(R.string.gyro_activator_r1),
+                                    stringResource(R.string.gyro_activator_r3),
+                                    stringResource(R.string.gyro_activator_always),
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    DpDrop(
+                                        dp, "gyroActivator",
+                                        label = stringResource(R.string.gyro_activator_label),
+                                        options = gyroActivatorLabels,
+                                        selected = gyroActivatorLabels.getOrElse(gyroActivator) {
+                                            gyroActivatorLabels[Container.GYRO_ACTIVATOR_DEFAULT]
+                                        },
+                                        onSelect = { opt -> gyroActivator = gyroActivatorLabels.indexOf(opt).coerceAtLeast(0) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(onClick = { helpRes = R.string.help_gyro_activator }) {
+                                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                                // Hold vs Toggle for that button — hidden under "Always On", which has no
+                                // button to latch (same call the container editor makes).
+                                if (gyroActivator != Container.GYRO_ACTIVATOR_ALWAYS) {
+                                    val gyroActivationModeLabels = listOf(
+                                        stringResource(R.string.gyro_activation_hold),
+                                        stringResource(R.string.gyro_activation_toggle),
+                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        DpDrop(
+                                            dp, "gyroActivationMode",
+                                            label = stringResource(R.string.gyro_activation_mode_label),
+                                            options = gyroActivationModeLabels,
+                                            selected = gyroActivationModeLabels.getOrElse(gyroActivationMode) {
+                                                gyroActivationModeLabels[Container.GYRO_ACTIVATION_MODE_DEFAULT]
+                                            },
+                                            onSelect = { opt -> gyroActivationMode = gyroActivationModeLabels.indexOf(opt).coerceAtLeast(0) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        IconButton(onClick = { helpRes = R.string.help_gyro_activation_mode }) {
+                                            Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                        }
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "${stringResource(R.string.gyro_sensitivity_label)}: ${"%.1f".format(gyroSensitivity)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(onClick = { helpRes = R.string.help_gyro_sensitivity }) {
+                                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                                DpSlider(
+                                    dp, "gyroSensitivity",
+                                    value = gyroSensitivity,
+                                    onValueChange = { gyroSensitivity = it },
+                                    valueRange = 0.1f..10f,
+                                    step = 0.5f,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    DpSwitch(dp, "gyroInvertX", checked = gyroInvertX, onCheckedChange = { gyroInvertX = it })
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.gyro_invert_x), modifier = Modifier.weight(1f))
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    DpSwitch(dp, "gyroInvertY", checked = gyroInvertY, onCheckedChange = { gyroInvertY = it })
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.gyro_invert_y), modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+
+                                }
+                                1 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                RecommendedComponentsSection(
+                                    container = shortcut.container,
+                                    exeFile = gameExe,
+                                    gameDir = gameDir,
+                                    shortcutBaseName = shortcut.name,
+                                )
+                                // Every component, with what this game needs at the top, installed into
+                                // the game's container (the same list as the container's Win Components tab).
+                                var showAllComponents by remember { mutableStateOf(false) }
+                                OutlinedButton(onClick = { showAllComponents = true }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("All components")
+                                }
+                                if (showAllComponents) {
+                                    ComponentsSheet(
+                                        container = shortcut.container,
+                                        onDismiss = { showAllComponents = false },
+                                        exeFile = gameExe,
+                                        gameDir = gameDir,
+                                    )
+                                }
+                                ScWinComponentsTab(winComponents)
+                            }
+                                2 -> ScEnvVarsTab(envVarsStr, { envVarsStr = it }, gameDir, isLinuxEntry)
+                                3 -> ScAdvancedTab(
+                shortcut = shortcut,
+                onPresetListChanged = {
+                    box64Presets = Box64PresetManager.getPresets("box64", context)
+                    fexCorePresets = FEXCorePresetManager.getPresets(context)
+                },
+                isArm64EC = isArm64EC,
+                isLinuxEntry = isLinuxEntry,
+                box64Versions = box64Versions,
+                selectedBox64Version = selectedBox64Version,
+                onBox64VersionChange = { selectedBox64Version = it },
+                box64Presets = box64Presets,
+                selectedBox64PresetIndex = selectedBox64PresetIndex,
+                onBox64PresetIndexChange = { selectedBox64PresetIndex = it },
+                fexCoreVersions = fexCoreVersions,
+                selectedFexCoreVersion = selectedFexCoreVersion,
+                onFexVersionChange = { selectedFexCoreVersion = it },
+                fexCorePresets = fexCorePresets,
+                selectedFexPresetIndex = selectedFexCorePresetIndex,
+                onFexPresetIndexChange = { selectedFexCorePresetIndex = it },
+                controlsProfiles = controlsProfiles,
+                selectedControlsProfileIndex = selectedControlsProfileIndex,
+                onControlsProfileChange = { selectedControlsProfileIndex = it },
+                startupSelectionEntries = startupSelectionEntries,
+                selectedStartupSelection = selectedStartupSelection,
+                onStartupChange = { selectedStartupSelection = it },
+                startupServicesEnabled = startupServicesEnabled,
+                onStartupServiceToggle = { raw, on ->
+                    startupServicesEnabled =
+                        if (on) startupServicesEnabled + raw else startupServicesEnabled - raw
+                },
+                cpuListViewRef = cpuListViewRef,
+                initialCpuList = shortcut.getExtra("cpuList", shortcut.container.getCPUList(true)),
+                onCpuListSnapshot = { shortcut.putExtra("cpuList", it) },
+                linuxClientCpuListViewRef = linuxClientCpuListViewRef,
+                initialLinuxClientCpuList = shortcut.getExtra("linuxClientCpuList", shortcut.container.getCPUList(true)),
+                onLinuxClientCpuListSnapshot = { shortcut.putExtra("linuxClientCpuList", it) },
+                linuxGameCpuListViewRef = linuxGameCpuListViewRef,
+                initialLinuxGameCpuList = shortcut.getExtra("linuxGameCpuList", shortcut.container.getCPUList(true)),
+                onLinuxGameCpuListSnapshot = { shortcut.putExtra("linuxGameCpuList", it) },
+                sharpnessEffectEntries = sharpnessEffectEntries,
+                selectedSharpnessEffect = selectedSharpnessEffect,
+                onSharpnessEffectChange = { selectedSharpnessEffect = it },
+                sharpnessLevel = sharpnessLevel,
+                onSharpnessLevelChange = { sharpnessLevel = it },
+                sharpnessDenoise = sharpnessDenoise,
+                onSharpnessDenoiseChange = { sharpnessDenoise = it },
+                reshadeLoadout = reshadeLoadout,
+                reshadeEffects = reshadeEffects,
+                onReshadeCatalogChanged = {
+                    reshadeEffects = ReshadeManager.scanEffects(context)
+                    reshadeLoadout.reconcile(reshadeEffects)
+                },
+                reshadeSupported = StringUtils.parseIdentifier(selectedDxWrapper).let { it.contains("dxvk") || it.contains("vegas") },
+                onShowBox64DownloadSheet = { showBox64DownloadSheet = true },
+                onShowFexCoreDownloadSheet = { showFexCoreDownloadSheet = true },
+                box64ECVersions = box64ECVersions,
+                selectedBox64ECVersion = selectedBox64ECVersion,
+                onBox64ECVersionChange = { selectedBox64ECVersion = it },
+                onShowBox64ECDownloadSheet = { showBox64ECDownloadSheet = true },
+                forceSsbs = forceSsbs,
+                onForceSsbsChange = { forceSsbs = it },
+            )
+                                5 -> ScTvTab(
+                                    dp = dp,
+                                    display = tvDisplay,
+                                    // This game's own render resolution, for the "instead of…" subtitle —
+                                    // taken from the LIVE General-tab state, not the saved extra, so the
+                                    // two tabs can't disagree while the dialog is open.
+                                    gameScreenSize = if (selectedScreenSize == "Custom") "${customWidth}x${customHeight}"
+                                                     else StringUtils.parseIdentifier(selectedScreenSize),
+                                    tvLaunch = tvLaunch,
+                                    onTvLaunchChange = { tvLaunch = it },
+                                    tvModeId = tvModeId,
+                                    onTvModeIdChange = { tvModeId = it },
+                                    tvMatchRes = tvMatchRes,
+                                    onTvMatchResChange = { tvMatchRes = it },
+                                )
+                                6 -> ScLinuxComponentsTab(dp) { linuxComponentIds = it }
+                            }
+                        }
                     }
-                    Spacer(Modifier.width(8.dp))
-                    DpButton(dp, "ok", onActivate = { save(); onDismiss() }, onLeftId = "cancel") {
-                        TextButton(
-                            onClick = { save(); onDismiss() },
-                            // Definite height overrides TextButton's internal 40dp defaultMinSize
-                            // floor (which heightIn(min=…) can't lower), so the footer bar is genuinely
-                            // short — roughly matching the slim title bar at the top.
-                            modifier = Modifier.height(30.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
-                        ) { Text(stringResource(android.R.string.ok)) }
+
+                    // ── Responsive tab layout ────────────────────────────────────────────────────────
+                    // Portrait: the tab strip is pinned across the TOP (mirrors the container editor's
+                    // top tab bar via the shared RailTopTabs). Landscape: the shared collapsible left rail
+                    // beside the content. Left/Right on the focused "tabs" node still switches tabs for
+                    // D-pad/controller users in both orientations, and L1/R1 switch from anywhere.
+                    val railState = rememberRailState("shortcut")
+                    val railItems = tabTitles.mapIndexed { position, tab ->
+                        val contentIndex = tabIndices[position]
+                        RailItem(tab, shortcutTabIcon(tab), contentIndex == selectedTab) { selectedTab = contentIndex }
+                    }
+                    // Same "What is all this?" glossary link the container editor surfaces on its rail.
+                    val railLinks = listOf(RailLink("What is all this?", Icons.Filled.Help) { glossaryQuery = "" })
+                    if (isPortrait) {
+                        Column(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            // Left/Right and L1/R1 step through the strip, so DpTabs works in POSITIONS.
+                            DpTabs(dp, "tabs", selected = tabIndices.indexOf(selectedTab).coerceAtLeast(0),
+                                   count = tabTitles.size, onSelect = { selectedTab = tabIndices[it] }) {
+                                RailTopTabs(items = railItems, links = railLinks)
+                            }
+                            // Weighted so the internally-scrolling content takes exactly the space left
+                            // between the pinned tab strip and the pinned footer (never overflows it).
+                            Box(modifier = Modifier.weight(1f).fillMaxWidth()) { mainContent() }
+                        }
+                    } else {
+                        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            DpTabs(dp, "tabs", selected = tabIndices.indexOf(selectedTab).coerceAtLeast(0),
+                                   count = tabTitles.size, onSelect = { selectedTab = tabIndices[it] }) {
+                                CollapsibleRail(
+                                    state = railState,
+                                    title = shortcut.name,
+                                    links = railLinks,
+                                    sections = listOf(RailSection(header = null, items = railItems)),
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f).fillMaxHeight()) { mainContent() }
+                        }
+                    }
+
+                    Divider(color = DividerColor)
+                    // Compact footer — reduced padding + shrunk button height so the OK/Cancel bar
+                    // matches the slimmed title bar above and frees vertical room for content.
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        DpButton(dp, "cancel", onActivate = requestClose, onRightId = "ok") {
+                            TextButton(
+                                onClick = requestClose,
+                                // Definite height overrides TextButton's internal 40dp defaultMinSize
+                                // floor (which heightIn(min=…) can't lower), so the footer bar is genuinely
+                                // short — roughly matching the slim title bar at the top.
+                                modifier = Modifier.height(30.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                            ) { Text(stringResource(android.R.string.cancel)) }
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        DpButton(dp, "ok", onActivate = { save(); onDismiss() }, onLeftId = "cancel") {
+                            TextButton(
+                                onClick = { save(); onDismiss() },
+                                // Definite height overrides TextButton's internal 40dp defaultMinSize
+                                // floor (which heightIn(min=…) can't lower), so the footer bar is genuinely
+                                // short — roughly matching the slim title bar at the top.
+                                modifier = Modifier.height(30.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                            ) { Text(stringResource(android.R.string.ok)) }
+                        }
                     }
                 }
             }
+
+        // Config dialogs + download sheets are composed INSIDE the settings Dialog's window so the
+        // ModalBottomSheet (ContentDownloadSheet) renders on top of it. When they were outside the
+        // Dialog, the bottom sheet's window appeared BEHIND the settings dialog (couldn't be used).
+        if (showGfxConfig) {
+            GraphicsDriverConfigDialog(
+                graphicsDriver = StringUtils.parseIdentifier(selectedGfxDriver),
+                initialConfig = graphicsDriverConfig,
+                onConfirm = { graphicsDriverConfig = it; showGfxConfig = false },
+                onDismiss = { showGfxConfig = false },
+                waylandCompositorNote = effectiveWaylandShortcut
+            )
+        }
+        if (showWaylandDriverCfg) {
+            WaylandDriverSettingsDialog(
+                initialConfig = graphicsDriverConfig,
+                onConfirm = { graphicsDriverConfig = it; showWaylandDriverCfg = false },
+                onDismiss = { showWaylandDriverCfg = false }
+            )
+        }
+        val isVegasCfg = StringUtils.parseIdentifier(selectedDxWrapper).contains("vegas")
+        // See ContainerDetailScreen: relax the #113 DXVK-2.x filter only for the Mali "Wrapper + compat
+        // + bcn" driver, so per-game shortcuts can also reach the DXVK 1.10.3 workaround (#137).
+        val relaxDxvkFilter = StringUtils.parseIdentifier(selectedGfxDriver) == "wrapper-compat-bcn"
+        if (showDxvkConfig) {
+            DxvkConfigDialog(
+                isArm64EC = isArm64EC,
+                isVegas = isVegasCfg,
+                relaxDxvkFilter = relaxDxvkFilter,
+                initialConfig = dxWrapperConfig,
+                onConfirm = { dxWrapperConfig = it; showDxvkConfig = false },
+                onDismiss = { showDxvkConfig = false },
+                onDownloadDxvk = { showDxvkConfig = false; if (isVegasCfg) showVegasDownloadSheet = true else showDxvkDownloadSheet = true },
+                onDownloadVkd3d = { showDxvkConfig = false; showVkd3dDownloadSheet = true },
+                onDownloadD7vk = { showDxvkConfig = false; showD7vkDownloadSheet = true }
+            )
+        }
+        if (showWineD3DConfig) {
+            WineD3DConfigDialog(
+                initialConfig = dxWrapperConfig,
+                onConfirm = { dxWrapperConfig = it; showWineD3DConfig = false },
+                onDismiss = { showWineD3DConfig = false }
+            )
         }
 
-    // Config dialogs + download sheets are composed INSIDE the settings Dialog's window so the
-    // ModalBottomSheet (ContentDownloadSheet) renders on top of it. When they were outside the
-    // Dialog, the bottom sheet's window appeared BEHIND the settings dialog (couldn't be used).
-    if (showGfxConfig) {
-        GraphicsDriverConfigDialog(
-            graphicsDriver = StringUtils.parseIdentifier(selectedGfxDriver),
-            initialConfig = graphicsDriverConfig,
-            onConfirm = { graphicsDriverConfig = it; showGfxConfig = false },
-            onDismiss = { showGfxConfig = false },
-            waylandCompositorNote = effectiveWaylandShortcut
-        )
-    }
-    if (showWaylandDriverCfg) {
-        WaylandDriverSettingsDialog(
-            initialConfig = graphicsDriverConfig,
-            onConfirm = { graphicsDriverConfig = it; showWaylandDriverCfg = false },
-            onDismiss = { showWaylandDriverCfg = false }
-        )
-    }
-    val isVegasCfg = StringUtils.parseIdentifier(selectedDxWrapper).contains("vegas")
-    // See ContainerDetailScreen: relax the #113 DXVK-2.x filter only for the Mali "Wrapper + compat
-    // + bcn" driver, so per-game shortcuts can also reach the DXVK 1.10.3 workaround (#137).
-    val relaxDxvkFilter = StringUtils.parseIdentifier(selectedGfxDriver) == "wrapper-compat-bcn"
-    if (showDxvkConfig) {
-        DxvkConfigDialog(
-            isArm64EC = isArm64EC,
-            isVegas = isVegasCfg,
-            relaxDxvkFilter = relaxDxvkFilter,
-            initialConfig = dxWrapperConfig,
-            onConfirm = { dxWrapperConfig = it; showDxvkConfig = false },
-            onDismiss = { showDxvkConfig = false },
-            onDownloadDxvk = { showDxvkConfig = false; if (isVegasCfg) showVegasDownloadSheet = true else showDxvkDownloadSheet = true },
-            onDownloadVkd3d = { showDxvkConfig = false; showVkd3dDownloadSheet = true },
-            onDownloadD7vk = { showDxvkConfig = false; showD7vkDownloadSheet = true }
-        )
-    }
-    if (showWineD3DConfig) {
-        WineD3DConfigDialog(
-            initialConfig = dxWrapperConfig,
-            onConfirm = { dxWrapperConfig = it; showWineD3DConfig = false },
-            onDismiss = { showWineD3DConfig = false }
-        )
-    }
+        // Per-field "?" help + newcomer glossary — composed INSIDE the settings Dialog's window (like the
+        // config dialogs above) so HelpDialog / the glossary ModalBottomSheet render on top of it.
+        helpRes?.let { HelpDialog(it) { helpRes = null } }
+        glossaryQuery?.let { ContainerGlossarySheet(initialQuery = it, onDismiss = { glossaryQuery = null }) }
+        if (showUnsavedPrompt) {
+            UnsavedChangesDialog(
+                onSave = { showUnsavedPrompt = false; save(); onDismiss() },
+                onDiscard = { showUnsavedPrompt = false; onDismiss() },
+                onKeepEditing = { showUnsavedPrompt = false },
+            )
+        }
 
-    // Per-field "?" help + newcomer glossary — composed INSIDE the settings Dialog's window (like the
-    // config dialogs above) so HelpDialog / the glossary ModalBottomSheet render on top of it.
-    helpRes?.let { HelpDialog(it) { helpRes = null } }
-    glossaryQuery?.let { ContainerGlossarySheet(initialQuery = it, onDismiss = { glossaryQuery = null }) }
-    if (showUnsavedPrompt) {
-        UnsavedChangesDialog(
-            onSave = { showUnsavedPrompt = false; save(); onDismiss() },
-            onDiscard = { showUnsavedPrompt = false; onDismiss() },
-            onKeepEditing = { showUnsavedPrompt = false },
-        )
-    }
-
-    if (showBox64DownloadSheet) {
-        // Arch-match the download sheet to the selector above it: arm64ec containers use WOWBox64,
-        // everything else Box64 (mirrors ContainerDetailScreen). Was hardcoded to Box64, so the
-        // "download more" button on an arm64ec shortcut opened the wrong content type.
-        ContentDownloadSheet(
-            contentType = if (isArm64EC)
-                com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64
-            else
-                com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_BOX64,
-            onDismiss = { showBox64DownloadSheet = false },
-            onContentChanged = {}
-        )
-    }
-    if (showFexCoreDownloadSheet) {
-        ContentDownloadSheet(
-            contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
-            onDismiss = { showFexCoreDownloadSheet = false },
-            onContentChanged = {}
-        )
-    }
-    if (showBox64ECDownloadSheet) {
-        ContentDownloadSheet(
-            contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_BOX64EC,
-            onDismiss = { showBox64ECDownloadSheet = false },
-            onContentChanged = {}
-        )
-    }
-    if (showDxvkDownloadSheet) {
-        ContentDownloadSheet(
-            contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_DXVK,
-            onDismiss = { showDxvkDownloadSheet = false },
-            onContentChanged = {}
-        )
-    }
-    if (showVkd3dDownloadSheet) {
-        ContentDownloadSheet(
-            contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
-            onDismiss = { showVkd3dDownloadSheet = false },
-            onContentChanged = {}
-        )
-    }
-    if (showD7vkDownloadSheet) {
-        ContentDownloadSheet(
-            contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_D7VK,
-            onDismiss = { showD7vkDownloadSheet = false },
-            onContentChanged = {}
-        )
-    }
-    if (showVegasDownloadSheet) {
-        VegasDownloadSheet(
-            onDismiss = { showVegasDownloadSheet = false },
-            onContentChanged = {}
-        )
-    }
+        if (showBox64DownloadSheet) {
+            // Arch-match the download sheet to the selector above it: arm64ec containers use WOWBox64,
+            // everything else Box64 (mirrors ContainerDetailScreen). Was hardcoded to Box64, so the
+            // "download more" button on an arm64ec shortcut opened the wrong content type.
+            ContentDownloadSheet(
+                contentType = if (isArm64EC)
+                    com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_WOWBOX64
+                else
+                    com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_BOX64,
+                onDismiss = { showBox64DownloadSheet = false },
+                onContentChanged = {}
+            )
+        }
+        if (showFexCoreDownloadSheet) {
+            ContentDownloadSheet(
+                contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
+                onDismiss = { showFexCoreDownloadSheet = false },
+                onContentChanged = {}
+            )
+        }
+        if (showBox64ECDownloadSheet) {
+            ContentDownloadSheet(
+                contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_BOX64EC,
+                onDismiss = { showBox64ECDownloadSheet = false },
+                onContentChanged = {}
+            )
+        }
+        if (showDxvkDownloadSheet) {
+            ContentDownloadSheet(
+                contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_DXVK,
+                onDismiss = { showDxvkDownloadSheet = false },
+                onContentChanged = {}
+            )
+        }
+        if (showVkd3dDownloadSheet) {
+            ContentDownloadSheet(
+                contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
+                onDismiss = { showVkd3dDownloadSheet = false },
+                onContentChanged = {}
+            )
+        }
+        if (showD7vkDownloadSheet) {
+            ContentDownloadSheet(
+                contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_D7VK,
+                onDismiss = { showD7vkDownloadSheet = false },
+                onContentChanged = {}
+            )
+        }
+        if (showVegasDownloadSheet) {
+            VegasDownloadSheet(
+                onDismiss = { showVegasDownloadSheet = false },
+                onContentChanged = {}
+            )
+        }
+        }
     } // settings Dialog
 }
 

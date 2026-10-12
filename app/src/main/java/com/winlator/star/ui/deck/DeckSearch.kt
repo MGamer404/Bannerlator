@@ -73,6 +73,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.winlator.star.container.Shortcut
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.Screen
 import com.winlator.star.ui.deck.settings.DeckSettingsRoutes
 import com.winlator.star.ui.screens.ShortcutsViewModel
@@ -148,91 +149,93 @@ internal fun DeckSearchOverlay(
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         DeckDialogBars()
-        BackHandler(onBack = onDismiss)
-        Box(
-            contentAlignment = Alignment.TopCenter,
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(onClick = onDismiss, indication = null, interactionSource = remember { MutableInteractionSource() })
-                .padding(horizontal = if (compact) 12.dp else 48.dp, vertical = if (compact) 16.dp else 40.dp),
-        ) {
-            val shape = RoundedCornerShape(28.dp)
-            Column(
+        DeckDialogScaled {
+            BackHandler(onBack = onDismiss)
+            Box(
+                contentAlignment = Alignment.TopCenter,
                 modifier = Modifier
-                    .widthIn(max = 900.dp)
-                    .fillMaxWidth()
-                    .clip(shape)
-                    .background(cs.surfaceContainerHigh)
-                    .border(1.dp, deckLine(), shape)
-                    .clickable(onClick = {}, indication = null, interactionSource = remember { MutableInteractionSource() })
-                    .padding(if (compact) 16.dp else 24.dp),
+                    .fillMaxSize()
+                    .clickable(onClick = onDismiss, indication = null, interactionSource = remember { MutableInteractionSource() })
+                    .padding(horizontal = if (compact) 12.dp else 48.dp, vertical = if (compact) 16.dp else 40.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Search everything",
-                        color = cs.onSurface,
-                        fontFamily = SoraFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = if (compact) 20.sp else 24.sp,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .deckFocusRing(RoundedCornerShape(14.dp), scaleTo = 1f)
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable(onClick = onDismiss)
-                            .size(44.dp),
-                    ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close", tint = cs.onSurface)
-                    }
-                }
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    singleLine = true,
-                    placeholder = { Text("Games, screens and tools") },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = {
-                        games.firstOrNull()?.let { onOpenGame(it.file.path) } ?: places.firstOrNull()?.let { openDestination(it, onOpenRoute, onLaunchStore, onAbout) }
-                    }),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = cs.primary, unfocusedBorderColor = deckLine()),
+                val shape = RoundedCornerShape(28.dp)
+                Column(
                     modifier = Modifier
+                        .widthIn(max = 900.dp)
                         .fillMaxWidth()
-                        .padding(vertical = 14.dp)
-                        .focusRequester(fieldRequester),
-                )
-                LazyColumn(modifier = Modifier.heightIn(max = 560.dp)) {
-                    if (games.isNotEmpty()) {
-                        item(key = "h-games") {
-                            DeckSectionLabel(if (q.isEmpty()) "Recently played" else "Games · ${games.size}")
-                        }
-                        items(games, key = { "g:" + it.file.path }) { s ->
-                            SearchResultRow(
-                                title = s.name,
-                                subtitle = storeLabelOf(s) + " · " + playtimeLabel(stats[s.file.path]?.ms ?: 0L),
-                                icon = Icons.Filled.SportsEsports,
-                                cover = s,
-                                onClick = { onOpenGame(s.file.path) },
-                            )
+                        .clip(shape)
+                        .background(cs.surfaceContainerHigh)
+                        .border(1.dp, deckLine(), shape)
+                        .clickable(onClick = {}, indication = null, interactionSource = remember { MutableInteractionSource() })
+                        .padding(if (compact) 16.dp else 24.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "Search everything",
+                            color = cs.onSurface,
+                            fontFamily = SoraFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = if (compact) 20.sp else 24.sp,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .deckFocusRing(RoundedCornerShape(14.dp), scaleTo = 1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable(onClick = onDismiss)
+                                .size(44.dp),
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Close", tint = cs.onSurface)
                         }
                     }
-                    if (places.isNotEmpty()) {
-                        item(key = "h-places") { DeckSectionLabel("Screens and tools · ${places.size}", Modifier.padding(top = 8.dp)) }
-                        items(places, key = { "d:" + it.title }) { d ->
-                            SearchResultRow(d.title, d.path, d.icon, null) { openDestination(d, onOpenRoute, onLaunchStore, onAbout) }
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        placeholder = { Text("Games, screens and tools") },
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            games.firstOrNull()?.let { onOpenGame(it.file.path) } ?: places.firstOrNull()?.let { openDestination(it, onOpenRoute, onLaunchStore, onAbout) }
+                        }),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = cs.primary, unfocusedBorderColor = deckLine()),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 14.dp)
+                            .focusRequester(fieldRequester),
+                    )
+                    LazyColumn(modifier = Modifier.heightIn(max = 560.dp)) {
+                        if (games.isNotEmpty()) {
+                            item(key = "h-games") {
+                                DeckSectionLabel(if (q.isEmpty()) "Recently played" else "Games · ${games.size}")
+                            }
+                            items(games, key = { "g:" + it.file.path }) { s ->
+                                SearchResultRow(
+                                    title = s.name,
+                                    subtitle = storeLabelOf(s) + " · " + playtimeLabel(stats[s.file.path]?.ms ?: 0L),
+                                    icon = Icons.Filled.SportsEsports,
+                                    cover = s,
+                                    onClick = { onOpenGame(s.file.path) },
+                                )
+                            }
                         }
-                    }
-                    if (q.isNotEmpty() && games.isEmpty() && places.isEmpty()) {
-                        item(key = "none") {
-                            Text(
-                                "Nothing matches \"${query.trim()}\".",
-                                color = cs.onSurfaceVariant,
-                                fontSize = 14.sp,
-                                modifier = Modifier.padding(12.dp),
-                            )
+                        if (places.isNotEmpty()) {
+                            item(key = "h-places") { DeckSectionLabel("Screens and tools · ${places.size}", Modifier.padding(top = 8.dp)) }
+                            items(places, key = { "d:" + it.title }) { d ->
+                                SearchResultRow(d.title, d.path, d.icon, null) { openDestination(d, onOpenRoute, onLaunchStore, onAbout) }
+                            }
+                        }
+                        if (q.isNotEmpty() && games.isEmpty() && places.isEmpty()) {
+                            item(key = "none") {
+                                Text(
+                                    "Nothing matches \"${query.trim()}\".",
+                                    color = cs.onSurfaceVariant,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.padding(12.dp),
+                                )
+                            }
                         }
                     }
                 }

@@ -114,6 +114,7 @@ import com.winlator.star.androidgames.AndroidGames
 import com.winlator.star.container.Shortcut
 import com.winlator.star.store.SteamFriendsAction
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.screens.GameMenuAction
 import com.winlator.star.ui.screens.gameMenuOffers
 import com.winlator.star.ui.screens.ShortcutActionDialogs
@@ -577,52 +578,54 @@ private fun LibraryFilterDialog(
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         DeckDialogBars()
-        val shape = RoundedCornerShape(26.dp)
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier
-                .padding(16.dp)
-                .widthIn(max = 640.dp)
-                .fillMaxWidth()
-                .clip(shape)
-                .background(cs.surfaceContainerHigh)
-                .border(1.dp, deckLine(), shape)
-                .verticalScroll(rememberScrollState())
-                .padding(22.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Filter & sort", color = cs.onSurface, fontFamily = SoraFamily, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.weight(1f))
-                Text("Showing $shown of $total", color = cs.onSurfaceVariant, fontSize = 13.5.sp)
-            }
-            DeckSectionLabel("Sort by", Modifier.padding(top = 8.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                LibrarySort.entries.forEachIndexed { i, s ->
-                    DeckChoiceChip(
-                        s.label,
-                        selected = filter.sort == s,
-                        modifier = if (i == 0) Modifier.focusRequester(firstRequester) else Modifier,
-                    ) { onChange(filter.copy(sort = s)) }
+        DeckDialogScaled {
+            val shape = RoundedCornerShape(26.dp)
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .padding(16.dp)
+                    .widthIn(max = 640.dp)
+                    .fillMaxWidth()
+                    .clip(shape)
+                    .background(cs.surfaceContainerHigh)
+                    .border(1.dp, deckLine(), shape)
+                    .verticalScroll(rememberScrollState())
+                    .padding(22.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Filter & sort", color = cs.onSurface, fontFamily = SoraFamily, fontWeight = FontWeight.Bold, fontSize = 22.sp, modifier = Modifier.weight(1f))
+                    Text("Showing $shown of $total", color = cs.onSurfaceVariant, fontSize = 13.5.sp)
                 }
-            }
-            DeckSectionLabel("Store", Modifier.padding(top = 8.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                (STORE_SHELVES.map { it.first } + "Linux").forEach { label ->
-                    val on = label in filter.stores
-                    DeckChoiceChip(label, selected = on) {
-                        onChange(filter.copy(stores = if (on) filter.stores - label else filter.stores + label))
+                DeckSectionLabel("Sort by", Modifier.padding(top = 8.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LibrarySort.entries.forEachIndexed { i, s ->
+                        DeckChoiceChip(
+                            s.label,
+                            selected = filter.sort == s,
+                            modifier = if (i == 0) Modifier.focusRequester(firstRequester) else Modifier,
+                        ) { onChange(filter.copy(sort = s)) }
                     }
                 }
-            }
-            DeckSectionLabel("Played", Modifier.padding(top = 8.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                PlayedFilter.entries.forEach { p ->
-                    DeckChoiceChip(p.label, selected = filter.played == p) { onChange(filter.copy(played = p)) }
+                DeckSectionLabel("Store", Modifier.padding(top = 8.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    (STORE_SHELVES.map { it.first } + "Linux").forEach { label ->
+                        val on = label in filter.stores
+                        DeckChoiceChip(label, selected = on) {
+                            onChange(filter.copy(stores = if (on) filter.stores - label else filter.stores + label))
+                        }
+                    }
                 }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 14.dp)) {
-                DeckButton("Clear filters", Icons.Filled.Close, { onChange(LibraryFilter(sort = filter.sort)) })
-                Spacer(Modifier.weight(1f))
-                DeckButton("Done", null, onDismiss, primary = true, glyph = "B")
+                DeckSectionLabel("Played", Modifier.padding(top = 8.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PlayedFilter.entries.forEach { p ->
+                        DeckChoiceChip(p.label, selected = filter.played == p) { onChange(filter.copy(played = p)) }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 14.dp)) {
+                    DeckButton("Clear filters", Icons.Filled.Close, { onChange(LibraryFilter(sort = filter.sort)) })
+                    Spacer(Modifier.weight(1f))
+                    DeckButton("Done", null, onDismiss, primary = true, glyph = "B")
+                }
             }
         }
     }

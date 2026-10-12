@@ -61,6 +61,7 @@ import com.winlator.star.store.download.InstallProgressDialog
 import com.winlator.star.store.download.formatEta
 import com.winlator.star.store.download.startContentDownload
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.findActivity
 import com.winlator.star.ui.screens.adrenodownload.AdrenoDriverListPane
 import com.winlator.star.ui.screens.contents.RemoteSourceRepository
@@ -335,144 +336,146 @@ fun ContentDownloadSheet(
         val cs = MaterialTheme.colorScheme
         Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             DeckDialogBars()
-            Surface(
-                modifier = Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.94f),
-                shape = RoundedCornerShape(24.dp),
-                color = cs.surface,
-                contentColor = cs.onSurface,
-                border = BorderStroke(1.dp, cs.outline),
-            ) {
-                Column(Modifier.fillMaxSize()) {
-                    // ── Header (landscape): compact single line — title + install-from-file. Subtitle
-                    // dropped and padding tightened so the rail + panes get the vertical room. ──
-                    Row(
-                        Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 6.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("WIN Components", color = cs.onSurface, fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleSmall)
-                        Spacer(Modifier.width(16.dp))
-                        // Component-source filter lives in the header (next to the title) in landscape, so the
-                        // whole rail is free for categories.
-                        HeaderSourceControl(
-                            modifier = Modifier.weight(1f),
-                            includeCommunity = includeCommunity,
-                            communityGroups = communityGroups,
-                            activeSources = activeSources,
-                            onToggle = { on ->
-                                includeCommunity = on
-                                srcPrefs.edit().putBoolean(COMMUNITY_KEY, on).apply()
-                                if (on) selectAllOnLoad = true else activeSources = setOf(OFFICIAL_KEY)
-                            },
-                            onChipToggle = { key ->
-                                activeSources = activeSources.toMutableSet().apply {
-                                    if (contains(key)) remove(key) else add(key)
-                                    if (isEmpty()) add(OFFICIAL_KEY)
-                                }
-                            },
-                        )
-                        InstallFromFileButton(onBrowseFiles, onPickSystem, iconButtonModifier = Modifier.size(36.dp))
-                    }
-                    Divider(color = cs.outline)
-
-                    // ── Master-detail body ──
-                    Row(Modifier.fillMaxWidth().weight(1f)) {
-                        ComponentRail(
-                            modifier = Modifier.width(238.dp).fillMaxHeight().background(cs.surfaceContainer),
-                            selectedType = selectedType,
-                            gpuSelected = gpuDriversSelected,
-                            countFor = { t -> profiles.count { it.type == t } },
-                            gpuDriverCount = adrenoDriverCount,
-                            onSelectType = { selectedType = it; gpuDriversSelected = false },
-                            onSelectGpu = { gpuDriversSelected = true },
-                        )
-                        Box(Modifier.width(1.dp).fillMaxHeight().background(cs.outline))
-                        Column(Modifier.weight(1f).fillMaxHeight()) {
-                          if (gpuDriversSelected) {
-                            // ── GPU Drivers pane: the adrenotools driver browser (its own subsystem, no
-                            // ContentProfile), rendered by the SHARED AdrenoDriverListPane so a driver
-                            // installed here lands exactly where the standalone sheet puts it. Header mirrors
-                            // the component detail header; the Manage-sources (Tune) button lives here and
-                            // drives the pane's own dialog via showDriverManage. ──
-                            Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 6.dp)) {
-                                // Compact single line: "GPU Drivers   Turnip / adrenotools" + manage button.
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                    Text("GPU Drivers", color = cs.onSurface,
-                                        style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Turnip / adrenotools", color = cs.onSurfaceVariant,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                    IconButton(onClick = { showDriverManage = true }, modifier = Modifier.size(36.dp)) {
-                                        Icon(Icons.Filled.Tune, contentDescription = "Manage sources",
-                                            tint = cs.onSurfaceVariant)
-                                    }
-                                }
-                            }
-                            AdrenoDriverListPane(
-                                showManage = showDriverManage,
-                                onManageDismiss = { showDriverManage = false },
-                                onDriverInstalled = { driverRefreshKey++; onContentChanged() },
-                                cardStyle = true,
-                            )
-                          } else {
-                            // Detail header: selected component + (if it's in the passed scope) its active
-                            // version + a one-line role. Active only shows for the type the user opened.
-                            val activeVer = inUseKey?.takeIf { it.isNotEmpty() && selectedType in contentTypes }
-                            Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 6.dp)) {
-                                // Compact single line: "<type>   active: <ver>  ·  <role>".
-                                val role = roleFor(selectedType)
-                                val sub = buildString {
-                                    if (activeVer != null) append("active: $activeVer")
-                                    if (role.isNotEmpty()) { if (isNotEmpty()) append("  ·  "); append(role) }
-                                }
-                                Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth()) {
-                                    Text(selectedType.toString(), color = cs.onSurface,
-                                        style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                    if (sub.isNotEmpty()) {
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(sub, color = cs.onSurfaceVariant,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f))
-                                    }
-                                }
-                            }
-
-                            // Source control lives in the header in landscape (see HeaderSourceControl) so
-                            // the version list gets the pane's full height and the rail is all categories.
-                            ComponentVersionSections(
-                                isLoadingRemote = isLoadingRemote,
-                                profiles = profiles,
-                                selectedType = selectedType,
-                                filterByType = true, // rail always scopes the pane to one type
+            DeckDialogScaled {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(0.96f).fillMaxHeight(0.94f),
+                    shape = RoundedCornerShape(24.dp),
+                    color = cs.surface,
+                    contentColor = cs.onSurface,
+                    border = BorderStroke(1.dp, cs.outline),
+                ) {
+                    Column(Modifier.fillMaxSize()) {
+                        // ── Header (landscape): compact single line — title + install-from-file. Subtitle
+                        // dropped and padding tightened so the rail + panes get the vertical room. ──
+                        Row(
+                            Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 6.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("WIN Components", color = cs.onSurface, fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall)
+                            Spacer(Modifier.width(16.dp))
+                            // Component-source filter lives in the header (next to the title) in landscape, so the
+                            // whole rail is free for categories.
+                            HeaderSourceControl(
+                                modifier = Modifier.weight(1f),
+                                includeCommunity = includeCommunity,
                                 communityGroups = communityGroups,
                                 activeSources = activeSources,
-                                includeCommunity = includeCommunity,
-                                communityLoading = communityLoading,
-                                contentStates = contentStates,
-                                inUseKey = inUseKey,
-                                onDownload = startDownload,
-                                onInfo = { showInfoProfile = it },
-                                onRemove = { confirmRemoveProfile = it },
+                                onToggle = { on ->
+                                    includeCommunity = on
+                                    srcPrefs.edit().putBoolean(COMMUNITY_KEY, on).apply()
+                                    if (on) selectAllOnLoad = true else activeSources = setOf(OFFICIAL_KEY)
+                                },
+                                onChipToggle = { key ->
+                                    activeSources = activeSources.toMutableSet().apply {
+                                        if (contains(key)) remove(key) else add(key)
+                                        if (isEmpty()) add(OFFICIAL_KEY)
+                                    }
+                                },
                             )
-                          }
+                            InstallFromFileButton(onBrowseFiles, onPickSystem, iconButtonModifier = Modifier.size(36.dp))
                         }
-                    }
-                    Divider(color = cs.outline)
+                        Divider(color = cs.outline)
 
-                    // ── Footer (landscape): compact — terse hint + Close, minimal vertical padding so the
-                    // reclaimed height goes to the version list. ──
-                    Row(
-                        Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("Tap a version to install",
-                            color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                        TextButton(onClick = onDismiss,
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
-                            Text("Close", color = cs.primary)
+                        // ── Master-detail body ──
+                        Row(Modifier.fillMaxWidth().weight(1f)) {
+                            ComponentRail(
+                                modifier = Modifier.width(238.dp).fillMaxHeight().background(cs.surfaceContainer),
+                                selectedType = selectedType,
+                                gpuSelected = gpuDriversSelected,
+                                countFor = { t -> profiles.count { it.type == t } },
+                                gpuDriverCount = adrenoDriverCount,
+                                onSelectType = { selectedType = it; gpuDriversSelected = false },
+                                onSelectGpu = { gpuDriversSelected = true },
+                            )
+                            Box(Modifier.width(1.dp).fillMaxHeight().background(cs.outline))
+                            Column(Modifier.weight(1f).fillMaxHeight()) {
+                              if (gpuDriversSelected) {
+                                // ── GPU Drivers pane: the adrenotools driver browser (its own subsystem, no
+                                // ContentProfile), rendered by the SHARED AdrenoDriverListPane so a driver
+                                // installed here lands exactly where the standalone sheet puts it. Header mirrors
+                                // the component detail header; the Manage-sources (Tune) button lives here and
+                                // drives the pane's own dialog via showDriverManage. ──
+                                Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 6.dp)) {
+                                    // Compact single line: "GPU Drivers   Turnip / adrenotools" + manage button.
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                        Text("GPU Drivers", color = cs.onSurface,
+                                            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Turnip / adrenotools", color = cs.onSurfaceVariant,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                        IconButton(onClick = { showDriverManage = true }, modifier = Modifier.size(36.dp)) {
+                                            Icon(Icons.Filled.Tune, contentDescription = "Manage sources",
+                                                tint = cs.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                                AdrenoDriverListPane(
+                                    showManage = showDriverManage,
+                                    onManageDismiss = { showDriverManage = false },
+                                    onDriverInstalled = { driverRefreshKey++; onContentChanged() },
+                                    cardStyle = true,
+                                )
+                              } else {
+                                // Detail header: selected component + (if it's in the passed scope) its active
+                                // version + a one-line role. Active only shows for the type the user opened.
+                                val activeVer = inUseKey?.takeIf { it.isNotEmpty() && selectedType in contentTypes }
+                                Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 6.dp)) {
+                                    // Compact single line: "<type>   active: <ver>  ·  <role>".
+                                    val role = roleFor(selectedType)
+                                    val sub = buildString {
+                                        if (activeVer != null) append("active: $activeVer")
+                                        if (role.isNotEmpty()) { if (isNotEmpty()) append("  ·  "); append(role) }
+                                    }
+                                    Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth()) {
+                                        Text(selectedType.toString(), color = cs.onSurface,
+                                            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                        if (sub.isNotEmpty()) {
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(sub, color = cs.onSurfaceVariant,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+
+                                // Source control lives in the header in landscape (see HeaderSourceControl) so
+                                // the version list gets the pane's full height and the rail is all categories.
+                                ComponentVersionSections(
+                                    isLoadingRemote = isLoadingRemote,
+                                    profiles = profiles,
+                                    selectedType = selectedType,
+                                    filterByType = true, // rail always scopes the pane to one type
+                                    communityGroups = communityGroups,
+                                    activeSources = activeSources,
+                                    includeCommunity = includeCommunity,
+                                    communityLoading = communityLoading,
+                                    contentStates = contentStates,
+                                    inUseKey = inUseKey,
+                                    onDownload = startDownload,
+                                    onInfo = { showInfoProfile = it },
+                                    onRemove = { confirmRemoveProfile = it },
+                                )
+                              }
+                            }
+                        }
+                        Divider(color = cs.outline)
+
+                        // ── Footer (landscape): compact — terse hint + Close, minimal vertical padding so the
+                        // reclaimed height goes to the version list. ──
+                        Row(
+                            Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Tap a version to install",
+                                color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            TextButton(onClick = onDismiss,
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                                Text("Close", color = cs.primary)
+                            }
                         }
                     }
                 }
@@ -487,70 +490,72 @@ fun ContentDownloadSheet(
             contentColor = MaterialTheme.colorScheme.onSurface,
         ) {
             DeckDialogBars()
-            Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(bottom = 12.dp)) {
-                // Title + "install from file"
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        if (multiType) "Compatibility Layer" else "${contentTypes.first()} Downloads",
-                        color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    // Install-from-file entry point. Progress now lives in the content-card dialog.
-                    InstallFromFileButton(onBrowseFiles, onPickSystem)
-                }
-                Spacer(Modifier.height(12.dp))
-
-                // Wine / Proton chips (only when more than one type is shown).
-                if (multiType) {
+            DeckDialogScaled {
+                Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(bottom = 12.dp)) {
+                    // Title + "install from file"
                     Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        contentTypes.forEach { t -> TypeChip(t.toString(), t == selectedType) { selectedType = t } }
+                        Text(
+                            if (multiType) "Compatibility Layer" else "${contentTypes.first()} Downloads",
+                            color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // Install-from-file entry point. Progress now lives in the content-card dialog.
+                        InstallFromFileButton(onBrowseFiles, onPickSystem)
                     }
                     Spacer(Modifier.height(12.dp))
-                }
-                Divider(color = MaterialTheme.colorScheme.outline)
 
-                // ── Component source control: Official (contents.json) default, opt-in community repos.
-                SourceToggleBox(
-                    includeCommunity = includeCommunity,
-                    communityGroups = communityGroups,
-                    activeSources = activeSources,
-                    onToggle = { on ->
-                        includeCommunity = on
-                        srcPrefs.edit().putBoolean(COMMUNITY_KEY, on).apply()
-                        if (on) selectAllOnLoad = true else activeSources = setOf(OFFICIAL_KEY)
-                    },
-                    onChipToggle = { key ->
-                        activeSources = activeSources.toMutableSet().apply {
-                            if (contains(key)) remove(key) else add(key)
-                            if (isEmpty()) add(OFFICIAL_KEY) // never let the user empty the list
+                    // Wine / Proton chips (only when more than one type is shown).
+                    if (multiType) {
+                        Row(
+                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            contentTypes.forEach { t -> TypeChip(t.toString(), t == selectedType) { selectedType = t } }
                         }
-                    },
-                )
+                        Spacer(Modifier.height(12.dp))
+                    }
+                    Divider(color = MaterialTheme.colorScheme.outline)
 
-                ComponentVersionSections(
-                    isLoadingRemote = isLoadingRemote,
-                    profiles = profiles,
-                    selectedType = selectedType,
-                    filterByType = multiType,
-                    communityGroups = communityGroups,
-                    activeSources = activeSources,
-                    includeCommunity = includeCommunity,
-                    communityLoading = communityLoading,
-                    contentStates = contentStates,
-                    inUseKey = inUseKey,
-                    onDownload = startDownload,
-                    onInfo = { showInfoProfile = it },
-                    onRemove = { confirmRemoveProfile = it },
-                )
+                    // ── Component source control: Official (contents.json) default, opt-in community repos.
+                    SourceToggleBox(
+                        includeCommunity = includeCommunity,
+                        communityGroups = communityGroups,
+                        activeSources = activeSources,
+                        onToggle = { on ->
+                            includeCommunity = on
+                            srcPrefs.edit().putBoolean(COMMUNITY_KEY, on).apply()
+                            if (on) selectAllOnLoad = true else activeSources = setOf(OFFICIAL_KEY)
+                        },
+                        onChipToggle = { key ->
+                            activeSources = activeSources.toMutableSet().apply {
+                                if (contains(key)) remove(key) else add(key)
+                                if (isEmpty()) add(OFFICIAL_KEY) // never let the user empty the list
+                            }
+                        },
+                    )
 
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Close", color = MaterialTheme.colorScheme.primary) }
+                    ComponentVersionSections(
+                        isLoadingRemote = isLoadingRemote,
+                        profiles = profiles,
+                        selectedType = selectedType,
+                        filterByType = multiType,
+                        communityGroups = communityGroups,
+                        activeSources = activeSources,
+                        includeCommunity = includeCommunity,
+                        communityLoading = communityLoading,
+                        contentStates = contentStates,
+                        inUseKey = inUseKey,
+                        onDownload = startDownload,
+                        onInfo = { showInfoProfile = it },
+                        onRemove = { confirmRemoveProfile = it },
+                    )
+
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onDismiss) { Text("Close", color = MaterialTheme.colorScheme.primary) }
+                    }
                 }
             }
         }

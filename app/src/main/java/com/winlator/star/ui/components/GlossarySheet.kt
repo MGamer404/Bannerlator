@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Container glossary — a plain-language "what is all this?" compendium for the
@@ -205,69 +206,71 @@ fun ContainerGlossarySheet(onDismiss: () -> Unit, initialQuery: String = "") {
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         DeckDialogBars()
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-            Text(
-                "What is all this?",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                "Plain-language explanations of the setup options. Tap a term to read what it does.",
-                style = MaterialTheme.typography.bodySmall,
-                color = cs.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
-            )
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                label = { Text("Search terms") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.padding(top = 8.dp))
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                sections.forEach { section ->
-                    item(key = "sec:${section.title}") {
-                        Text(
-                            section.title,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = cs.primary,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
-                        )
-                    }
-                    items(section.entries, key = { "${section.title}:${it.term}" }) { entry ->
-                        Surface(
-                            color = cs.surfaceVariant.copy(alpha = 0.4f),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(entry.term, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    entry.definition,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = cs.onSurfaceVariant,
-                                    modifier = Modifier.padding(top = 3.dp)
-                                )
+        DeckDialogScaled {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Text(
+                    "What is all this?",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Plain-language explanations of the setup options. Tap a term to read what it does.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
+                )
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Search terms") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.padding(top = 8.dp))
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    sections.forEach { section ->
+                        item(key = "sec:${section.title}") {
+                            Text(
+                                section.title,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = cs.primary,
+                                modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
+                            )
+                        }
+                        items(section.entries, key = { "${section.title}:${it.term}" }) { entry ->
+                            Surface(
+                                color = cs.surfaceVariant.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(entry.term, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        entry.definition,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = cs.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 3.dp)
+                                    )
+                                }
                             }
                         }
                     }
-                }
-                if (sections.isEmpty()) {
-                    item {
-                        Text(
-                            "No terms match \"$q\".",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = cs.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 16.dp)
-                        )
+                    if (sections.isEmpty()) {
+                        item {
+                            Text(
+                                "No terms match \"$q\".",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = cs.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 16.dp)
+                            )
+                        }
                     }
+                    item { Spacer(Modifier.padding(bottom = 16.dp)) }
                 }
-                item { Spacer(Modifier.padding(bottom = 16.dp)) }
             }
         }
     }

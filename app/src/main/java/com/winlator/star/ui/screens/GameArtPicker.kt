@@ -45,6 +45,7 @@ import coil.request.ImageRequest
 import com.winlator.star.store.StarLaunchBridge
 import com.winlator.star.store.SteamStoreSearch
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import com.winlator.star.ui.theme.OnSurfaceVariant
 import com.winlator.star.ui.theme.SurfaceVariant
 import kotlinx.coroutines.Dispatchers
@@ -144,67 +145,69 @@ fun GameArtPickerSheet(
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = cs.surface, contentColor = cs.onSurface) {
         DeckDialogBars()
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.85f).padding(bottom = 8.dp)) {
-            Text(
-                "Game art",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 2.dp),
-            )
-            Text(
-                "Tap an image to use it for $name",
-                style = MaterialTheme.typography.bodySmall,
-                color = OnSurfaceVariant,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 10.dp),
-            )
-            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 8.dp)) {
-                item(key = "files") {
-                    SourceHeader("Your files", "Any image on this device")
-                    Row(Modifier.padding(horizontal = 16.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(width = 90.dp, height = 135.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(SurfaceVariant)
-                                .border(1.dp, cs.outline, RoundedCornerShape(8.dp))
-                                .clickable { onPickFile() },
-                            contentAlignment = Alignment.Center,
+        DeckDialogScaled {
+            Column(Modifier.fillMaxWidth().fillMaxHeight(0.85f).padding(bottom = 8.dp)) {
+                Text(
+                    "Game art",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 2.dp),
+                )
+                Text(
+                    "Tap an image to use it for $name",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 10.dp),
+                )
+                LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 8.dp)) {
+                    item(key = "files") {
+                        SourceHeader("Your files", "Any image on this device")
+                        Row(Modifier.padding(horizontal = 16.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 90.dp, height = 135.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(SurfaceVariant)
+                                    .border(1.dp, cs.outline, RoundedCornerShape(8.dp))
+                                    .clickable { onPickFile() },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("Choose\nimage…", fontSize = 12.sp, color = cs.primary, textAlign = TextAlign.Center)
+                            }
+                        }
+                    }
+                    if (loading) {
+                        item(key = "loading") {
+                            Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.Center) {
+                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                                Text("  Looking online…", color = OnSurfaceVariant, fontSize = 13.sp)
+                            }
+                        }
+                    } else if (sources.isEmpty()) {
+                        item(key = "none") {
+                            Text(
+                                if (steamAppId == null) "Nothing found online. Link the game to Steam (search by name) for more art."
+                                else "Nothing found online for this game.",
+                                color = OnSurfaceVariant,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(20.dp),
+                            )
+                        }
+                    }
+                    items(sources, key = { it.title }) { source ->
+                        SourceHeader("${source.title} (${source.choices.size})", source.note)
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Text("Choose\nimage…", fontSize = 12.sp, color = cs.primary, textAlign = TextAlign.Center)
+                            items(source.choices, key = { it.url }) { choice ->
+                                ArtTile(choice) { onPick(choice.url) }
+                            }
                         }
                     }
                 }
-                if (loading) {
-                    item(key = "loading") {
-                        Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.Center) {
-                            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                            Text("  Looking online…", color = OnSurfaceVariant, fontSize = 13.sp)
-                        }
-                    }
-                } else if (sources.isEmpty()) {
-                    item(key = "none") {
-                        Text(
-                            if (steamAppId == null) "Nothing found online. Link the game to Steam (search by name) for more art."
-                            else "Nothing found online for this game.",
-                            color = OnSurfaceVariant,
-                            fontSize = 13.sp,
-                            modifier = Modifier.padding(20.dp),
-                        )
-                    }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Close") }
                 }
-                items(sources, key = { it.title }) { source ->
-                    SourceHeader("${source.title} (${source.choices.size})", source.note)
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(source.choices, key = { it.url }) { choice ->
-                            ArtTile(choice) { onPick(choice.url) }
-                        }
-                    }
-                }
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onDismiss) { Text("Close") }
             }
         }
     }

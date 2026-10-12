@@ -84,6 +84,7 @@ import com.winlator.star.store.SteamLiteComponent
 import com.winlator.star.store.SteamPrefs
 import com.winlator.star.store.SteamRepository
 import com.winlator.star.ui.DeckDialogBars
+import com.winlator.star.ui.DeckDialogScaled
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -387,24 +388,26 @@ fun LaunchMethodSheet(
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         DeckDialogBars()
-        if (landscape) {
-            LandscapeCard(
-                shortcut, source, appId, isSteam, hasDetails, enabledMethods, accent,
-                method, { method = it }, goldbergMode, { goldbergMode = it },
-                rememberChoice, { rememberChoice = it }, controllerPassthrough, onPassthroughToggle, steamInput, onSteamInputToggle,
-                secureLaunch, { secureLaunch = it; vacTouched = true }, detectedVac,
-                helpText, toggleHelp, { helpText = null }, onDismiss, doLaunch, openDetails,
-                onVerifyFiles, onUpdateFiles, steamLiteClient, appSteamClient,
-            )
-        } else {
-            PortraitCard(
-                shortcut, source, appId, isSteam, hasDetails, enabledMethods, accent,
-                method, { method = it }, goldbergMode, { goldbergMode = it },
-                rememberChoice, { rememberChoice = it }, controllerPassthrough, onPassthroughToggle, steamInput, onSteamInputToggle,
-                secureLaunch, { secureLaunch = it; vacTouched = true }, detectedVac,
-                helpText, toggleHelp, { helpText = null }, onDismiss, doLaunch, openDetails,
-                onVerifyFiles, onUpdateFiles, steamLiteClient, appSteamClient,
-            )
+        DeckDialogScaled {
+            if (landscape) {
+                LandscapeCard(
+                    shortcut, source, appId, isSteam, hasDetails, enabledMethods, accent,
+                    method, { method = it }, goldbergMode, { goldbergMode = it },
+                    rememberChoice, { rememberChoice = it }, controllerPassthrough, onPassthroughToggle, steamInput, onSteamInputToggle,
+                    secureLaunch, { secureLaunch = it; vacTouched = true }, detectedVac,
+                    helpText, toggleHelp, { helpText = null }, onDismiss, doLaunch, openDetails,
+                    onVerifyFiles, onUpdateFiles, steamLiteClient, appSteamClient,
+                )
+            } else {
+                PortraitCard(
+                    shortcut, source, appId, isSteam, hasDetails, enabledMethods, accent,
+                    method, { method = it }, goldbergMode, { goldbergMode = it },
+                    rememberChoice, { rememberChoice = it }, controllerPassthrough, onPassthroughToggle, steamInput, onSteamInputToggle,
+                    secureLaunch, { secureLaunch = it; vacTouched = true }, detectedVac,
+                    helpText, toggleHelp, { helpText = null }, onDismiss, doLaunch, openDetails,
+                    onVerifyFiles, onUpdateFiles, steamLiteClient, appSteamClient,
+                )
+            }
         }
     }
 }
