@@ -672,14 +672,17 @@ private fun AppShell(
             onAbout = onAboutRequested,
             onLaunchStore = onLaunchStore,
         )
-        if (showAllFilesDialog) {
-            AllFilesAccessDialog(
-                onConfirm = onConfirmAllFilesDialog,
-                onDismiss = onDismissAllFilesDialog,
-            )
-        }
-        if (showAboutDialog) {
-            AboutDialog(onDismiss = onDismissAboutDialog)
+        // Outside the shell, so they take the Deck theme and size here.
+        com.winlator.star.ui.deck.DeckTheme {
+            if (showAllFilesDialog) {
+                AllFilesAccessDialog(
+                    onConfirm = onConfirmAllFilesDialog,
+                    onDismiss = onDismissAllFilesDialog,
+                )
+            }
+            if (showAboutDialog) {
+                AboutDialog(onDismiss = onDismissAboutDialog)
+            }
         }
     } else {
         ClassicAppShell(
