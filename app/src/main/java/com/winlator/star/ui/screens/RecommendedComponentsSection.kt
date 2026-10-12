@@ -43,6 +43,7 @@ import com.winlator.star.components.ComponentCatalog
 import com.winlator.star.components.ComponentExecInstaller
 import com.winlator.star.components.ComponentInstallReturn
 import com.winlator.star.components.ComponentInstaller
+import com.winlator.star.components.ComponentUninstaller
 import com.winlator.star.components.DependencyDetector
 import com.winlator.star.components.DependencyDetector.Recommendation
 import com.winlator.star.components.PrefixInstalledDetector
@@ -95,6 +96,9 @@ fun RecommendedComponentsSection(
     var installing by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
     var confirmExec by remember { mutableStateOf<Component?>(null) }
+    // Removing an installed chip's component: the one going out, and the one awaiting confirmation.
+    var removing by remember { mutableStateOf<String?>(null) }
+    var confirmRemove by remember { mutableStateOf<Pair<Component, ComponentUninstaller.Plan>?>(null) }
 
     // Installed-state persistence — identical scheme to ComponentsSheet so a component installed there
     // (or on a prior visit) shows as checked here, and vice-versa.
@@ -149,9 +153,9 @@ fun RecommendedComponentsSection(
         }
     }
 
-    // A chip tap: gate on the prefix, then route to the same installer ComponentsSheet would.
-    fun onChipTap(c: Component) {
-        if (installing != null) return
+    // Install: gate on the prefix, then route to the same installer ComponentsSheet would.
+    fun install(c: Component) {
+        if (installing != null || removing != null) return
         // The prefix must exist first — at import time it usually doesn't. Gate here rather than let
         // the installer return a failure, so the message is actionable.
         if (!File(container.rootDir, ".wine").isDirectory) {
@@ -186,6 +190,49 @@ fun RecommendedComponentsSection(
                 }
             }
         }
+    }
+
+    // An installed chip's tap: works out how it would come out of the container, then asks first.
+    fun askRemove(c: Component) {
+        if (installing != null || removing != null) return
+        scope.launch {
+            val plan = withContext(Dispatchers.IO) { ComponentUninstaller.plan(context, container, c.name, installed, catalog) }
+            confirmRemove = c to plan
+        }
+    }
+
+    fun remove(plan: ComponentUninstaller.Plan) {
+        removing = plan.name
+        scope.launch {
+            val out = withContext(Dispatchers.IO) { ComponentUninstaller.uninstall(context, container, plan) }
+            removing = null
+            when (out) {
+                is ComponentUninstaller.Outcome.Removed -> {
+                    installed = installed - setOf(plan.name, "${plan.name}_dll")
+                    if (out.notes.isNotEmpty()) message = "Removed ${plan.name}. " + out.notes.joinToString(". ") + "."
+                }
+                // Its own uninstaller is running in the container; the app restarts when that closes.
+                is ComponentUninstaller.Outcome.Launched -> installed = installed - setOf(plan.name, "${plan.name}_dll")
+                is ComponentUninstaller.Outcome.Failed -> message = "Couldn't remove ${plan.name}: ${out.message}"
+            }
+        }
+    }
+
+    // A chip tap: an installed one offers removal, any other installs.
+    fun onChipTap(c: Component) {
+        if (c.name in installed) askRemove(c) else install(c)
+    }
+
+    confirmRemove?.let { (c, plan) ->
+        ComponentRemoveDialog(
+            plan = plan,
+            containerName = container.name,
+            forGame = shortcutBaseName != null,
+            containerColor = cs.surfaceContainerHigh,
+            onRemove = { confirmRemove = null; remove(plan) },
+            onReinstall = { confirmRemove = null; install(c) },
+            onDismiss = { confirmRemove = null },
+        )
     }
 
     message?.let { m ->
@@ -250,28 +297,28 @@ fun RecommendedComponentsSection(
             RecommendedChipGroup(
                 title = "Recommended",
                 subtitle = "Redistributables this game bundles or Steam installs with it.",
-                recs = bundled, catalog = catalog, installed = installed, installing = installing,
+                recs = bundled, catalog = catalog, installed = installed, installing = installing ?: removing,
                 cs = cs, onChipTap = ::onChipTap,
             )
             Spacer(Modifier.height(12.dp))
             RecommendedChipGroup(
                 title = "Optional",
                 subtitle = "Ships with the game — install only if it misbehaves.",
-                recs = shipped, catalog = catalog, installed = installed, installing = installing,
+                recs = shipped, catalog = catalog, installed = installed, installing = installing ?: removing,
                 cs = cs, onChipTap = ::onChipTap,
             )
         } else if (shipped.isNotEmpty()) {
             RecommendedChipGroup(
                 title = "Optional components",
                 subtitle = "Ships with the game — install only if it misbehaves.",
-                recs = shipped, catalog = catalog, installed = installed, installing = installing,
+                recs = shipped, catalog = catalog, installed = installed, installing = installing ?: removing,
                 cs = cs, onChipTap = ::onChipTap,
             )
         } else {
             RecommendedChipGroup(
                 title = "Recommended components",
-                subtitle = "Redistributables this game needs — tap to install into its container.",
-                recs = bundled, catalog = catalog, installed = installed, installing = installing,
+                subtitle = "Redistributables this game needs — tap to install into its container, or tap an installed one to remove it.",
+                recs = bundled, catalog = catalog, installed = installed, installing = installing ?: removing,
                 cs = cs, onChipTap = ::onChipTap,
             )
         }

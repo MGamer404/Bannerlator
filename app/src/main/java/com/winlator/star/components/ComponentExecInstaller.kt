@@ -135,6 +135,8 @@ object ComponentExecInstaller {
     fun startInstall(context: Context, container: Container, c: Component, onProgress: (Float) -> Unit): Result {
         if (!File(container.rootDir, ".wine").isDirectory)
             return Result.Error("Container has no Wine prefix yet — launch it once first.")
+        // A snapshot left by an install of it that was discarded would compare against a stale prefix.
+        ComponentUndo.dropSession(container.rootDir, c.name)
         return runFrom(context, container, c.name, c.steps, 0, onProgress)
     }
 
@@ -171,6 +173,9 @@ object ComponentExecInstaller {
         val systemReg = File(root, ".wine/system.reg")
         val tmp = File(context.cacheDir, "compexec_${name}").apply { mkdirs() }
         val total = steps.size.coerceAtLeast(1)
+        // What a catalog component changes is noted so it can be taken back out (ComponentUndo): the
+        // local steps exactly as they run, the installers by comparing the prefix around their sessions.
+        val journal = if (ComponentUndo.tracks(root, name)) ComponentUndo.open(root, name) else null
         try {
             var i = startCursor
             while (i < steps.size) {
@@ -187,18 +192,23 @@ object ComponentExecInstaller {
                         // multi-redist plan mark each redist installed, not just the umbrella component.
                         val marker = installFields(step).first.optString("component_marker")
                         if (marker.isNotEmpty()) recordInstalled(context, container.id, marker)
+                        journal?.close()
+                        // The first installer's session: list the prefix before it, compared when the plan is done.
+                        if (journal != null && !ComponentUndo.hasSession(root, name)) ComponentUndo.beginSession(root, name)
                         launchInstaller(context, container, name, step, onProgress)
                         return Result.Launched
                     }
                     step.action == "set_windows" -> setWindowsVersion(systemReg, step.str("version"))
                     step.action == "uninstall" -> { /* needs Wine; skipped in v1 (mscoree override handles .NET) */ }
-                    step.action in FILE_DROP_ACTIONS -> ComponentInstaller.runStep(step, tmp, system32, syswow64, userReg)
+                    step.action in FILE_DROP_ACTIONS -> ComponentInstaller.runStep(step, tmp, system32, syswow64, userReg, journal)
                     else -> throw IllegalStateException("unsupported action: ${step.action}")
                 }
                 i++
             }
             // Reached the end with no further installer — done. Drop the staged installer exes.
             File(root, ".wine/drive_c/windows/temp/bannerlator_components").deleteRecursively()
+            journal?.close()
+            ComponentUndo.finishSession(root, name)
             clearPlan(context)
             // Record the install at the SOURCE so it sticks even though completion happens after the
             // container session restarts the app (the resume path lands here too). Same store/key the
@@ -208,9 +218,13 @@ object ComponentExecInstaller {
             return Result.Done
         } catch (e: Exception) {
             e.printStackTrace()
+            // Whatever the sessions did is still noted, so a reinstall keeps the true originals.
+            journal?.close()
+            ComponentUndo.finishSession(root, name)
             clearPlan(context)
             return Result.Error(e.message ?: e.javaClass.simpleName)
         } finally {
+            journal?.close()
             tmp.deleteRecursively()
         }
     }
@@ -266,15 +280,11 @@ object ComponentExecInstaller {
             if (!Downloader.downloadFile(url, installer) { f -> onProgress(f) })
                 throw IllegalStateException("$name: download failed ($safe)")
         }
-        val safe = installer.name
-
         // Wine runs an .exe directly and associates .msi with msiexec, so handing either to
         // `wine <path>` works. The container session already opens a Wine desktop
         // (XServerDisplayActivity: `wine explorer /desktop=shell,…`), so instead of running the
         // installer SILENTLY (which draws nothing → the user just sees a black desktop), we strip
         // the silent flags so the installer's own wizard is visible and clickable on that desktop.
-        val winPath = WinePath.resolveWindowsPath(container, installer.absolutePath)
-        val execTarget = WinePath.escapeForExec(winPath)
         val execArgs = visibleArgs(fields.optString("arguments").trim())
 
         // Env vars = whatever's in the environment object that isn't a file field (e.g. WINEDLLOVERRIDES).
@@ -288,12 +298,40 @@ object ComponentExecInstaller {
             }
         }
 
+        startSession(context, container, name, "installer", installer, execArgs, envPairs.toString(), installer.name)
+    }
+
+    /**
+     * Runs the Windows Installer products [productCodes] (the `{GUID}`s under the prefix's Uninstall
+     * key) back out with msiexec in a container session, as an installer runs: their own uninstall,
+     * for a component installed before removal was recorded. The app restarts when it ends.
+     */
+    fun launchUninstaller(context: Context, container: Container, name: String, productCodes: List<String>) {
+        val codes = productCodes.filter { PRODUCT_CODE.matches(it) }
+        if (codes.isEmpty()) throw IllegalStateException("$name: no uninstaller to run")
+        val dir = File(container.rootDir, ".wine/drive_c/windows/temp/bannerlator_components").apply { mkdirs() }
+        val script = File(dir, "uninstall_${name.replace(Regex("[^A-Za-z0-9._-]"), "_")}.bat")
+        // /qb: msiexec's progress window only; the removal was already confirmed in the app.
+        script.writeText(codes.joinToString("\r\n", postfix = "\r\n") { "msiexec /x $it /qb" })
+        // Wine runs a batch file through cmd, which stays up until the last msiexec is done.
+        startSession(context, container, name, "uninstaller", script, "", "", "cmd.exe", label = "$name (removing)")
+    }
+
+    private val PRODUCT_CODE = Regex("""\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}""")
+
+    /** Opens the container on [file] (`wine <file> <execArgs>`); the session closes itself once [watch] has exited. */
+    private fun startSession(
+        context: Context, container: Container, name: String, what: String,
+        file: File, execArgs: String, envPairs: String, watch: String, label: String? = null,
+    ) {
+        val winPath = WinePath.resolveWindowsPath(container, file.absolutePath)
+        val execTarget = WinePath.escapeForExec(winPath)
         val desktopDir = File(context.filesDir, "desktops").apply { mkdirs() }
         val shortcutName = "component_${name}"
         val shortcut = File(desktopDir, "$shortcutName.desktop").apply {
             writeText(buildString {
                 append("[Desktop Entry]\n")
-                append("Name=").append(name).append(" installer\n")
+                append("Name=").append(name).append(' ').append(what).append("\n")
                 append("Exec=wine ").append(execTarget).append("\n")
                 append("Icon=").append(shortcutName).append("\n")
                 append("Type=Application\n")
@@ -311,7 +349,9 @@ object ComponentExecInstaller {
         intent.putExtra("shortcut_name", shortcut.nameWithoutExtension)
         // Tells XServerDisplayActivity to auto-close the session once this installer process exits,
         // so the user doesn't have to manually exit the container after each installer.
-        intent.putExtra("component_installer_exe", safe)
+        intent.putExtra("component_installer_exe", watch)
+        // What the session's status lines call it (else the watched exe's name).
+        if (label != null) intent.putExtra("component_installer_label", label)
         if (context !is android.app.Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
     }

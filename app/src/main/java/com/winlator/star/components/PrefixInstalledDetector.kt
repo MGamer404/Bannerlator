@@ -1,5 +1,6 @@
 package com.winlator.star.components
 
+import com.winlator.star.components.offline.WineRegistryFile
 import com.winlator.star.container.Container
 import java.io.File
 
@@ -30,6 +31,43 @@ object PrefixInstalledDetector {
             out
         } catch (_: Throwable) {
             emptySet()
+        }
+    }
+
+    // The Uninstall entries a detected component's own installer registers, by the start of their
+    // display name. Each of these products is a Windows Installer package.
+    private val PRODUCTS = mapOf(
+        "physx" to listOf("NVIDIA PhysX"),
+        "XLiveRedist" to listOf("Microsoft Games for Windows"),
+        "mono" to listOf("Wine Mono"),
+        "oalinst" to listOf("OpenAL"),
+    )
+    private val UNINSTALL_KEY = Regex("""(?i)^Software\\(?:Wow6432Node\\)?Microsoft\\Windows\\CurrentVersion\\Uninstall\\(\{[0-9A-F-]{36}\})$""")
+
+    /**
+     * For [name] when it was installed before Bannerlator recorded what a component changes: the
+     * Windows Installer products in the prefix that are its own (display name to product code), whose
+     * uninstall msiexec can run. Empty when there is none, or for a component not listed above -
+     * nothing is guessed from a name alone.
+     */
+    fun msiProducts(container: Container, name: String): List<Pair<String, String>> {
+        val wanted = PRODUCTS[name] ?: return emptyList()
+        return try {
+            val system = File(container.rootDir, ".wine/system.reg")
+            if (!system.isFile) return emptyList()
+            val byKey = HashMap<String, HashMap<String, String>>()
+            for (v in WineRegistryFile(system).values()) {
+                val code = UNINSTALL_KEY.find(v[0])?.groupValues?.get(1) ?: continue
+                byKey.getOrPut(code.uppercase()) { HashMap() }[v[1]] = v[2]
+            }
+            byKey.mapNotNull { (code, values) ->
+                val shown = values["displayname"]?.let { WineRegistryFile.stringOf(it) } ?: return@mapNotNull null
+                val msi = values["windowsinstaller"]?.endsWith("dword:00000001") == true ||
+                    values["uninstallstring"]?.let { WineRegistryFile.stringOf(it) }?.contains("msiexec", ignoreCase = true) == true
+                if (msi && wanted.any { shown.startsWith(it, ignoreCase = true) }) shown to code else null
+            }.distinctBy { it.second }.sortedBy { it.first }
+        } catch (_: Throwable) {
+            emptyList()
         }
     }
 

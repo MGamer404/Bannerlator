@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -43,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,6 +55,7 @@ import com.winlator.star.components.ComponentCatalog
 import com.winlator.star.components.ComponentExecInstaller
 import com.winlator.star.components.ComponentInstallReturn
 import com.winlator.star.components.ComponentInstaller
+import com.winlator.star.components.ComponentUninstaller
 import com.winlator.star.components.DependencyDetector
 import com.winlator.star.components.GameRecommendations
 import com.winlator.star.components.PrefixInstalledDetector
@@ -61,6 +64,7 @@ import com.winlator.star.ui.deck.DeckGlyph
 import com.winlator.star.ui.deck.GlyphKind
 import com.winlator.star.ui.deck.deckFocusRing
 import com.winlator.star.ui.deck.deckLine
+import com.winlator.star.ui.screens.ComponentRemoveDialog
 import com.winlator.star.ui.screens.OutlinedAlertDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,7 +77,8 @@ import java.io.File
 // rows), then every component of the catalog with a search. Installs go into the container's prefix
 // through exactly what the classic ComponentsSheet and RecommendedComponentsSection call, with the same
 // "component_installs" record, so the classic screens and this page agree on what is installed.
-// Nothing installs until its row is pressed.
+// Nothing installs until its row is pressed. A on an installed row asks to remove it (ComponentUninstaller),
+// which takes it back out of the container's prefix only once confirmed.
 
 /**
  * The page's catalog, recommendations and install state. [shortcutBaseName], [exeFile] and [gameDir]
@@ -112,6 +117,11 @@ internal class DeckComponentsState(
     var showSession by mutableStateOf(false)
     var message by mutableStateOf<String?>(null)
     var confirmExec by mutableStateOf<Component?>(null)
+    /** The component going back out of the container (its row shows the progress). */
+    var removing by mutableStateOf<String?>(null)
+        private set
+    /** An installed row was pressed: how it would come out, awaiting the confirmation. */
+    var confirmRemove by mutableStateOf<Pair<Component, ComponentUninstaller.Plan>?>(null)
     val searchFocus = FocusRequester()
 
     private val main = Handler(Looper.getMainLooper())
@@ -146,7 +156,7 @@ internal class DeckComponentsState(
 
     /** Re-reads what is installed, e.g. after coming back from another screen. */
     suspend fun refreshInstalled() {
-        if (installing == null) installed = readInstalled()
+        if (installing == null && removing == null) installed = readInstalled()
     }
 
     /** The catalog's file-drop `_dll` variant when it has one: it copies DLLs straight in, with no container session. */
@@ -166,9 +176,14 @@ internal class DeckComponentsState(
         byName[base]?.let { it to r }
     }.distinctBy { it.first.name }
 
-    /** A row was pressed: install [c] into the container, routed as the classic sheet routes it. */
-    fun install(c: Component) {
-        if (installing != null || c.name in installed) return
+    /** A row was pressed: an installed one asks to remove it, any other installs. */
+    fun press(c: Component) {
+        if (c.name in installed) askRemove(c) else install(c)
+    }
+
+    /** Install [c] into the container, routed as the classic sheet routes it. [again]: a reinstall of one it has. */
+    fun install(c: Component, again: Boolean = false) {
+        if (installing != null || removing != null || !again && c.name in installed) return
         val target = targetOf(c)
         blockedReason(target)?.let { message = it; return }
         // The installers need the container's prefix; a container that never started has none yet.
@@ -221,6 +236,41 @@ internal class DeckComponentsState(
                     message = "Couldn't install ${c.name}: ${res.message}"
                     ComponentInstallReturn.clear(context)
                 }
+            }
+        }
+    }
+
+    /** Works out how [c] would come out of the container, then asks (the dialog's Remove runs [remove]). */
+    fun askRemove(c: Component) {
+        if (installing != null || removing != null) return
+        scope.launch {
+            confirmRemove = c to withContext(Dispatchers.IO) { ComponentUninstaller.plan(context, container, c.name, installed, byName) }
+        }
+    }
+
+    /** Takes [plan]'s component back out of the container's prefix: confirmed in the dialog first. */
+    fun remove(plan: ComponentUninstaller.Plan) {
+        // Its own uninstaller runs in a container session, which restarts the app and would drop the draft.
+        if (plan.viaUninstaller && hasUnsavedEdits()) {
+            message = "Save or discard your changes first: removing ${plan.name} opens the container and the app restarts when it closes."
+            return
+        }
+        removing = plan.name; progress = 0f; stage = ""
+        scope.launch {
+            val out = withContext(Dispatchers.IO) {
+                ComponentUninstaller.uninstall(context, container, plan,
+                    { f -> main.post { progress = f } },
+                    { t -> main.post { stage = t } })
+            }
+            removing = null
+            when (out) {
+                is ComponentUninstaller.Outcome.Removed -> {
+                    installed = installed - setOf(plan.name, "${plan.name}_dll")
+                    if (out.notes.isNotEmpty()) message = "Removed ${plan.name}. " + out.notes.joinToString(". ") + "."
+                }
+                // Its own uninstaller is running in the container; the app restarts when that closes.
+                is ComponentUninstaller.Outcome.Launched -> installed = installed - setOf(plan.name, "${plan.name}_dll")
+                is ComponentUninstaller.Outcome.Failed -> message = "Couldn't remove ${plan.name}: ${out.message}"
             }
         }
     }
@@ -318,9 +368,19 @@ internal class DeckComponentsState(
     }
 }
 
-/** The page's dialogs: why an install can't run or failed, and the confirmation before a container session. */
+/** The page's dialogs: why an install can't run or failed, the confirmation before a container session, and before a removal. */
 @Composable
 internal fun DeckComponentsDialogs(state: DeckComponentsState) {
+    state.confirmRemove?.let { (c, plan) ->
+        ComponentRemoveDialog(
+            plan = plan,
+            containerName = state.container.name,
+            forGame = state.forGame,
+            onRemove = { state.confirmRemove = null; state.remove(plan) },
+            onReinstall = { state.confirmRemove = null; state.install(c, again = true) },
+            onDismiss = { state.confirmRemove = null },
+        )
+    }
     state.message?.let { m ->
         OutlinedAlertDialog(
             onDismissRequest = { state.message = null },
@@ -351,21 +411,22 @@ internal fun DeckComponentsDialogs(state: DeckComponentsState) {
 
 // ── Rows ────────────────────────────────────────────────────────────────────────────────────────
 
-/** One component: name, why or what it is, and its state. The whole row is the focus target; A installs. */
+/** One component: name, why or what it is, and its state. The whole row is the focus target; A installs, or on an installed one asks to remove it. */
 @Composable
 private fun ComponentRow(state: DeckComponentsState, c: Component, note: String?) {
     val cs = MaterialTheme.colorScheme
     val reason = state.blockedReason(state.targetOf(c))
     val isInstalled = c.name in state.installed
-    val isInstalling = state.installing == c.name
-    val busy = state.installing != null
+    val isRemoving = state.removing == c.name
+    val isInstalling = state.installing == c.name || isRemoving
+    val busy = state.installing != null || state.removing != null
     val stage = if (isInstalling) state.stage else ""
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .deckFocusRing(RoundedCornerShape(12.dp), scaleTo = 1f)
-            // Stays focusable when there is nothing to do, so the pad can still walk the list; install() ignores it then.
-            .clickable { state.install(c) }
+            // Stays focusable when there is nothing to do, so the pad can still walk the list; press() ignores it then.
+            .clickable { state.press(c) }
             .padding(horizontal = 18.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -373,6 +434,7 @@ private fun ComponentRow(state: DeckComponentsState, c: Component, note: String?
                 Text(c.name, color = cs.onSurface, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val sub = when {
                     stage.isNotEmpty() -> stage
+                    isRemoving -> "Removing…"
                     isInstalled && note != null -> "Installed · $note"
                     isInstalled -> "Installed"
                     note != null -> note
@@ -386,7 +448,11 @@ private fun ComponentRow(state: DeckComponentsState, c: Component, note: String?
             }
             when {
                 isInstalling -> CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp)
-                isInstalled -> Icon(Icons.Filled.CheckCircle, contentDescription = "Installed", tint = cs.primary, modifier = Modifier.size(24.dp))
+                // Installed: the check, and what A does on it.
+                isInstalled -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(Icons.Filled.CheckCircle, contentDescription = "Installed", tint = cs.primary, modifier = Modifier.size(24.dp))
+                    StatePill("Remove", accent = false, dim = busy, icon = Icons.Filled.Delete)
+                }
                 reason != null -> StatePill("N/A", accent = false, dim = false)
                 else -> StatePill(if (state.opensContainer(c)) "Run installer" else "Install", accent = true, dim = busy)
             }
@@ -404,7 +470,7 @@ private fun ComponentRow(state: DeckComponentsState, c: Component, note: String?
 }
 
 @Composable
-private fun StatePill(label: String, accent: Boolean, dim: Boolean) {
+private fun StatePill(label: String, accent: Boolean, dim: Boolean, icon: ImageVector? = if (accent) Icons.Filled.Download else null) {
     val cs = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(22.dp)
     val ink = when {
@@ -421,7 +487,7 @@ private fun StatePill(label: String, accent: Boolean, dim: Boolean) {
             .border(1.5.dp, if (accent && !dim) cs.primary else deckLine().copy(alpha = 0.6f), shape)
             .padding(horizontal = 14.dp, vertical = 7.dp),
     ) {
-        if (accent) Icon(Icons.Filled.Download, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp))
+        icon?.let { Icon(it, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp)) }
         Text(label, color = ink, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1)
     }
 }

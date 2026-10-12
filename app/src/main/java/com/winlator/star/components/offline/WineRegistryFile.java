@@ -224,7 +224,7 @@ public final class WineRegistryFile {
     private static final Pattern NAME = Pattern.compile("^\"((?:[^\"\\\\]|\\\\.)*)\"=");
 
     /** The text of a string value line (plain or str(2)), or null for any other kind. */
-    static String stringOf(String line) {
+    public static String stringOf(String line) {
         Matcher m = STRING_LINE.matcher(line);
         return m.matches() ? unescape(m.group(1)) : null;
     }
@@ -252,6 +252,50 @@ public final class WineRegistryFile {
             n = last + 1;
         }
         return null;
+    }
+
+    /** Every value in the file: {its key as written, its name in lower case ("" for the default), its line(s)}. */
+    public List<String[]> values() {
+        List<String[]> out = new ArrayList<>();
+        for (Section s : sections) {
+            String key = parseKey(s.header);
+            if (key == null) continue;
+            int n = 0;
+            while (n < s.body.size()) {
+                int last = n;
+                while (s.body.get(last).endsWith("\\") && last + 1 < s.body.size()) last++;
+                String name = valueName(s.body.get(n));
+                if (name != null) out.add(new String[]{key, name, String.join("\n", s.body.subList(n, last + 1))});
+                n = last + 1;
+            }
+        }
+        return out;
+    }
+
+    /** Every key in the file, as written. */
+    public List<String> keys() {
+        List<String> out = new ArrayList<>();
+        for (Section s : sections) {
+            String key = parseKey(s.header);
+            if (key != null) out.add(key);
+        }
+        return out;
+    }
+
+    /** Takes [key] out when it holds no values (nor a link) and has no keys under it; true if it did. */
+    public boolean removeKeyIfEmpty(String key) {
+        String lower = resolve(key).toLowerCase(Locale.ROOT);
+        Section s = index.get(lower);
+        if (s == null) return false;
+        for (String line : s.body) {
+            if (!line.isEmpty() && !line.startsWith("#time=") && !line.startsWith("#class=")) return false;
+        }
+        String below = lower + "\\";
+        for (String k : index.keySet()) if (k.startsWith(below)) return false;
+        sections.remove(s);
+        index.remove(lower);
+        changed = true;
+        return true;
     }
 
     public String get(String key, String name) {

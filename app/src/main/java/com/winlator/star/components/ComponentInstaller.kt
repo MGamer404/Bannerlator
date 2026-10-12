@@ -57,10 +57,12 @@ object ComponentInstaller {
         val userReg = File(root, ".wine/user.reg")
         if (!File(root, ".wine").isDirectory) return "Container has no Wine prefix yet — launch it once first."
         val tmp = File(context.cacheDir, "comp_${c.name}_${System.currentTimeMillis()}").apply { mkdirs() }
+        // What the steps change is noted so the component can be taken back out (ComponentUndo).
+        val journal = ComponentUndo.open(root, c.name)
         return try {
             val total = c.steps.size.coerceAtLeast(1)
             c.steps.forEachIndexed { idx, step ->
-                runStep(step, tmp, system32, syswow64, userReg)
+                runStep(step, tmp, system32, syswow64, userReg, journal)
                 onProgress((idx + 1).toFloat() / total)
             }
             null
@@ -68,6 +70,7 @@ object ComponentInstaller {
             e.printStackTrace()
             e.message ?: e.javaClass.simpleName
         } finally {
+            journal.close()
             tmp.deleteRecursively()
         }
     }
@@ -75,8 +78,9 @@ object ComponentInstaller {
     /**
      * Apply a single file-drop step. Shared with [ComponentExecInstaller] so installer-based
      * components reuse the exact same download/extract/copy/registry logic for their non-exec steps.
+     * [journal] is told before a file in the prefix is written or deleted (the registry it compares itself).
      */
-    internal fun runStep(step: ComponentStep, tmp: File, system32: File, syswow64: File, userReg: File) {
+    internal fun runStep(step: ComponentStep, tmp: File, system32: File, syswow64: File, userReg: File, journal: ComponentUndo.Journal? = null) {
         when (step.action) {
             "download_archive", "archive_extract" -> {
                 val url = step.str("url")
@@ -99,7 +103,7 @@ object ComponentInstaller {
                 }
                 val sub = dest.substringAfter('/', "")
                 val target = if (sub.isEmpty()) base else File(base, sub)
-                copyMatching(tmp, step.str("file_name"), target, arch)
+                copyMatching(tmp, step.str("file_name"), target, arch, journal)
             }
             "override_dll" -> WineRegistryEditor(userReg).use { reg ->
                 val dll = step.str("dll")
@@ -124,8 +128,10 @@ object ComponentInstaller {
                     for (i in 0 until b.length()) {
                         val nm = b.getJSONObject(i).optString("value")
                         if (nm.isNotEmpty()) {
-                            File(system32, ensureDll(nm)).delete()
-                            File(syswow64, ensureDll(nm)).delete()
+                            for (f in listOf(File(system32, ensureDll(nm)), File(syswow64, ensureDll(nm)))) {
+                                if (f.exists()) journal?.beforeWrite(f)
+                                f.delete()
+                            }
                         }
                     }
                 }
@@ -141,9 +147,8 @@ object ComponentInstaller {
             TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, file, dest)
     }
 
-    private fun copyMatching(srcRoot: File, pattern: String, dest: File, arch: String?) {
+    private fun copyMatching(srcRoot: File, pattern: String, dest: File, arch: String?, journal: ComponentUndo.Journal? = null) {
         if (pattern.isEmpty()) return
-        dest.mkdirs()
         // Glob → regex: split on '*' and escape the literal segments (Regex.escape uses \Q…\E,
         // so escaping the whole pattern first would make a literal '*' instead of a wildcard).
         val rx = Regex("^" + pattern.split("*").joinToString(".*") { Regex.escape(it) } + "$", RegexOption.IGNORE_CASE)
@@ -156,6 +161,9 @@ object ComponentInstaller {
                 matches.filterNot { it.path.contains("${File.separator}$other${File.separator}", true) }
             }
         }
+        // Noted before the folder is made, so a folder the copy creates goes again with the component.
+        matches.forEach { f -> journal?.beforeWrite(File(dest, f.name)) }
+        dest.mkdirs()
         matches.forEach { f -> f.copyTo(File(dest, f.name), overwrite = true) }
     }
 }

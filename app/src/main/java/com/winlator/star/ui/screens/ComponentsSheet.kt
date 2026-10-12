@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,6 +23,7 @@ import com.winlator.star.components.ComponentCatalog
 import com.winlator.star.components.ComponentExecInstaller
 import com.winlator.star.components.ComponentInstallReturn
 import com.winlator.star.components.ComponentInstaller
+import com.winlator.star.components.ComponentUninstaller
 import com.winlator.star.components.DependencyDetector
 import com.winlator.star.components.GameRecommendations
 import com.winlator.star.components.PrefixInstalledDetector
@@ -65,6 +67,9 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit, exeFile: File? 
     var confirmExec by remember { mutableStateOf<Component?>(null) }
     var recs by remember { mutableStateOf<List<DependencyDetector.Recommendation>>(emptyList()) }
     var showSession by remember { mutableStateOf(false) }
+    // Removing: the component going out (its row shows the progress), and the one awaiting confirmation.
+    var removing by remember { mutableStateOf<String?>(null) }
+    var confirmRemove by remember { mutableStateOf<Pair<Component, ComponentUninstaller.Plan>?>(null) }
 
     // "Installed" must survive closing/reopening the sheet, so persist it per container
     // (the in-memory set alone reset every time the sheet recomposed).
@@ -96,6 +101,36 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit, exeFile: File? 
                     message = "Couldn't install ${c.name}: ${res.message}"
                     ComponentInstallReturn.clear(context)
                 }
+            }
+        }
+    }
+
+    // An installed row's Remove: works out how it would come out, then asks first. Nothing is removed without the confirmation.
+    fun askRemove(c: Component) {
+        if (installing != null || removing != null) return
+        scope.launch {
+            val plan = withContext(Dispatchers.IO) { ComponentUninstaller.plan(context, container, c.name, installed) }
+            confirmRemove = c to plan
+        }
+    }
+
+    fun remove(plan: ComponentUninstaller.Plan) {
+        removing = plan.name; progress = 0f; stage = ""
+        scope.launch {
+            val out = withContext(Dispatchers.IO) {
+                ComponentUninstaller.uninstall(context, container, plan,
+                    { f -> activity?.runOnUiThread { progress = f } },
+                    { t -> activity?.runOnUiThread { stage = t } })
+            }
+            removing = null
+            when (out) {
+                is ComponentUninstaller.Outcome.Removed -> {
+                    installed = installed - setOf(plan.name, "${plan.name}_dll")
+                    if (out.notes.isNotEmpty()) message = "Removed ${plan.name}. " + out.notes.joinToString(". ") + "."
+                }
+                // Its own uninstaller is running in the container; the app restarts when that closes.
+                is ComponentUninstaller.Outcome.Launched -> installed = installed - setOf(plan.name, "${plan.name}_dll")
+                is ComponentUninstaller.Outcome.Failed -> message = "Couldn't remove ${plan.name}: ${out.message}"
             }
         }
     }
@@ -227,6 +262,18 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit, exeFile: File? 
                             }
                         }
 
+                        confirmRemove?.let { (c, plan) ->
+                            ComponentRemoveDialog(
+                                plan = plan,
+                                containerName = container.name,
+                                forGame = exeFile != null || gameDir != null,
+                                containerColor = cs.surfaceContainerHigh,
+                                onRemove = { confirmRemove = null; remove(plan) },
+                                onReinstall = { confirmRemove = null; install(c) },
+                                onDismiss = { confirmRemove = null },
+                            )
+                        }
+
                         Box(Modifier.fillMaxWidth().weight(1f)) {
                             LazyColumn(Modifier.fillMaxSize()) {
                                 fun section(title: String, list: List<Component>, note: (Component) -> String? = { null }) {
@@ -237,11 +284,13 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit, exeFile: File? 
                                             c = c,
                                             isInstalled = c.name in installed,
                                             isInstalling = installing == c.name,
-                                            progress = if (installing == c.name) progress else null,
-                                            stage = if (installing == c.name) stage else "",
+                                            isRemoving = removing == c.name,
+                                            progress = if (installing == c.name || removing == c.name) progress else null,
+                                            stage = if (installing == c.name || removing == c.name) stage else "",
                                             note = note(c),
-                                            enabled = installing == null,
+                                            enabled = installing == null && removing == null,
                                             onInstall = { install(c) },
+                                            onRemove = { askRemove(c) },
                                         )
                                         Divider(color = DividerColor.copy(alpha = 0.5f))
                                     }
@@ -262,11 +311,13 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit, exeFile: File? 
                                                 c = c,
                                                 isInstalled = c.name in installed,
                                                 isInstalling = installing == c.name,
-                                                progress = if (installing == c.name) progress else null,
-                                                stage = if (installing == c.name) stage else "",
+                                                isRemoving = removing == c.name,
+                                                progress = if (installing == c.name || removing == c.name) progress else null,
+                                                stage = if (installing == c.name || removing == c.name) stage else "",
                                                 note = null,
-                                                enabled = installing == null,
+                                                enabled = installing == null && removing == null,
                                                 onInstall = { install(c) },
+                                                onRemove = { askRemove(c) },
                                             )
                                             Divider(color = DividerColor.copy(alpha = 0.5f))
                                         }
@@ -289,11 +340,13 @@ private fun ComponentRow(
     c: Component,
     isInstalled: Boolean,
     isInstalling: Boolean,
+    isRemoving: Boolean,
     progress: Float?,
     stage: String,
     note: String?,
     enabled: Boolean,
     onInstall: () -> Unit,
+    onRemove: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
     val installedBlue = Color(0xFF4FC3F7) // intentional: status color (installed indicator, distinct from action accent)
@@ -307,7 +360,8 @@ private fun ComponentRow(
             Column(Modifier.weight(1f)) {
                 Text(c.name, style = MaterialTheme.typography.bodyMedium, color = cs.onSurface)
                 val sub = when {
-                    isInstalling && stage.isNotEmpty() -> stage
+                    (isInstalling || isRemoving) && stage.isNotEmpty() -> stage
+                    isRemoving -> "Removing…"
                     isInstalled && note != null -> "Installed · $note"
                     isInstalled -> "Installed"
                     note != null -> note
@@ -321,9 +375,16 @@ private fun ComponentRow(
                 }
             }
             when {
-                isInstalling -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                isInstalled -> Icon(Icons.Filled.CheckCircle, contentDescription = "Installed",
-                    tint = installedBlue, modifier = Modifier.size(22.dp))
+                isInstalling || isRemoving -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                // Installed: the check, and Remove (which asks first).
+                isInstalled -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.CheckCircle, contentDescription = "Installed",
+                        tint = installedBlue, modifier = Modifier.size(22.dp))
+                    IconButton(onClick = onRemove, enabled = enabled) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Remove ${c.name}",
+                            tint = if (enabled) cs.onSurfaceVariant else cs.onSurfaceVariant.copy(alpha = 0.38f))
+                    }
+                }
                 installable -> IconButton(onClick = onInstall, enabled = enabled) {
                     Icon(Icons.Filled.Download, contentDescription = "Install", tint = cs.primary)
                 }
@@ -333,7 +394,7 @@ private fun ComponentRow(
                 ) { Text("N/A", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant) }
             }
         }
-        if (isInstalling) {
+        if (isInstalling || isRemoving) {
             Spacer(Modifier.height(6.dp))
             val frac = (progress ?: 0f).coerceIn(0f, 1f)
             LinearProgressIndicator(progress = frac, modifier = Modifier.fillMaxWidth().height(4.dp),

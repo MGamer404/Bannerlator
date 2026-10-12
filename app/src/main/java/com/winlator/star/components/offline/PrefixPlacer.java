@@ -28,8 +28,8 @@ public final class PrefixPlacer {
         return placed;
     }
 
-    /** Puts [src] at [rel] (forward slashes) under [prefix]; false when an identical file is already there. */
-    public static boolean placeOne(File src, File prefix, String rel) throws IOException {
+    /** Where [rel] (forward slashes) lands under [prefix]: its folders and the file as the prefix already spells them. */
+    public static File resolve(File prefix, String rel) throws IOException {
         String[] parts = rel.split("/");
         File folder = prefix;
         for (int i = 0; i < parts.length - 1; i++) {
@@ -38,9 +38,15 @@ public final class PrefixPlacer {
         }
         String name = parts[parts.length - 1];
         if (name.isEmpty() || name.equals("..")) throw new IOException("bad path " + rel);
-        if (!folder.isDirectory() && !folder.mkdirs()) throw new IOException("could not make " + folder);
         File target = existing(folder, name);
-        if (target == null) target = new File(folder, name);
+        return target != null ? target : new File(folder, name);
+    }
+
+    /** Puts [src] at [rel] (forward slashes) under [prefix]; false when an identical file is already there. */
+    public static boolean placeOne(File src, File prefix, String rel) throws IOException {
+        File target = resolve(prefix, rel);
+        File folder = target.getParentFile();
+        if (!folder.isDirectory() && !folder.mkdirs()) throw new IOException("could not make " + folder);
         if (!Files.isSymbolicLink(target.toPath()) && target.isFile() && target.length() == src.length() && sameBytes(src, target)) {
             return false;
         }

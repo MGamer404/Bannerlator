@@ -5,7 +5,6 @@ import android.util.Base64
 import android.util.Log
 import com.winlator.star.components.offline.OfflineTools
 import com.winlator.star.components.offline.PackageInstaller
-import com.winlator.star.components.offline.PrefixPlacer
 import com.winlator.star.components.offline.RegValue
 import com.winlator.star.components.offline.WineRegistryFile
 import com.winlator.star.container.Container
@@ -312,22 +311,29 @@ object OfflineComponentInstaller {
             done++
         }
 
-        // Into the prefix: the files, then the registry values, then the Windows version.
+        // Into the prefix: the files, then the registry values, then the Windows version. Each noted as
+        // it goes in (the files it adds, the originals it replaces, the registry before and after), so
+        // removing the component later puts the prefix back: ComponentUndo.
         onStage("placing files")
         part(0f)
-        if (stage.drive.isDirectory) PrefixPlacer.place(stage.drive, File(wine, "drive_c"))
-        onProgress(0.95f)
-        onStage("writing the registry")
-        stage.overrides.forEach { (dll, type) -> stage.registry += RegValue("HKCU", DLL_OVERRIDES, dll, "sz", type) }
-        if (stage.registry.isNotEmpty()) {
-            val system = WineRegistryFile(File(wine, "system.reg"))
-            val user = WineRegistryFile(File(wine, "user.reg"))
-            for (v in stage.registry) (if (v.hive == "HKCU") user else system).apply(v)
-            system.save()
-            user.save()
-            Log.i(TAG, "${c.name}: ${system.written + user.written} registry value(s) written")
+        val journal = ComponentUndo.open(wine.parentFile!!, c.name)
+        try {
+            if (stage.drive.isDirectory) journal.place(stage.drive, File(wine, "drive_c"))
+            onProgress(0.95f)
+            onStage("writing the registry")
+            stage.overrides.forEach { (dll, type) -> stage.registry += RegValue("HKCU", DLL_OVERRIDES, dll, "sz", type) }
+            if (stage.registry.isNotEmpty()) {
+                val system = WineRegistryFile(File(wine, "system.reg"))
+                val user = WineRegistryFile(File(wine, "user.reg"))
+                for (v in stage.registry) (if (v.hive == "HKCU") user else system).apply(v)
+                system.save()
+                user.save()
+                Log.i(TAG, "${c.name}: ${system.written + user.written} registry value(s) written")
+            }
+            stage.windowsVersion?.let { ComponentExecInstaller.setWindowsVersion(File(wine, "system.reg"), it) }
+        } finally {
+            journal.close()
         }
-        stage.windowsVersion?.let { ComponentExecInstaller.setWindowsVersion(File(wine, "system.reg"), it) }
         stage.notes.distinct().forEach { Log.i(TAG, "${c.name}: $it") }
         OfflineTools.deleteTree(stage.root)
         OfflineTools.deleteTree(temp)
