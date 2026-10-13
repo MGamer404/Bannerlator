@@ -1,5 +1,14 @@
 # Star-Compose — Progress Log
 
+## 2026-10-12 — 🚀 3.1.7-pre2 released (tag `3.1.7-pre2` = `22fcc6ab`, versionCode 100, pre-release) — every setting in Deck, full-screen XMB, Open with
+> `feat/deck-native-graphics` fast-forwarded into main (`9e07af81` → `b388668d`, backup `refs/backup/20261012/main-before-deck-native`), then the release commit. Release run 38327434099 green. Latest stays 3.1.6.
+> - **Small update:** 29 patches in Bannerlator-updates `3.1.7-pre2`; from 3.1.6 = 20.5 MB, from 3.1.7-pre1 = 20.2 MB (measured before the cut; bulk: dex 18.9 MB, resources.arsc 1.7 MB, libbannerwayland.so 0.6 MB, pulseaudio.tzst 0.6 MB).
+> - **No Classic hand-off left:** DX wrapper/X11 driver rows, DeckSectionKit sections (Wayland incl. Mali PanVK, drives, Wine version/wallpaper/reset, audio latency/mic, player slots, XR, overlay, ReShade, services/presets, power/root, TV, wrappers), DeckEnvVarsSettings, DeckLinuxSettings; DirectAudio fine-tune save keeps BANNER_AUDIO_DIRECT_MIC.
+> - **Games in place:** GameActionsHost / XmbGameActions (Add games, My account, details, drive C, change exe); Deck search All games removed.
+> - **XMB:** LibraryMode.XMB replaces Wall/Console; full screen (DeckActions.fullscreen); settingsAsColumns; landscape row centre at 25% height, 1.4x top line, backdrop blur 28 → 14 dp.
+> - **Open with → Bannerlator:** OpenExeActivity + ExternalExeResolver + ExeQuickRun (VIEW/SEND filters); device-proven with God of War from MT Manager.
+> - **Wayland clipboard read on paste:** the compositor offers Android's text unread (clipboard_host_pending) and asks the app on a receive (banner_on_clipboard_request); no 'pasted from your clipboard' notice at session start (device-proven).
+
 ## 2026-10-12 — 🚀 3.1.7-pre1 released (tag `3.1.7-pre1` = `7ea67dbb`, versionCode 99, pre-release) — the full Deck style
 > `feat/deck-ui-full` fast-forwarded into main (`c53c060b` → `7ea67dbb`, backup `refs/backup/20261012/main-before-3.1.7-pre1`). Release run 38253355108 green (notes, four flavours, four patch jobs, release). Latest stays 3.1.6.
 > - **Small updates, first real one:** 28 patches in The412Banner/Bannerlator-updates release `3.1.7-pre1`; from 3.1.6 = 19.6 MB (pubg and standard), measured before the cut (bulk: dex 18.5 MB, resources.arsc 1.7 MB, pulseaudio.tzst 0.6 MB, Deck fonts 0.3 MB).
