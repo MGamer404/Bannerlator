@@ -79,7 +79,7 @@ Before any **stable release** is published, all changes are **manually debugged 
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) · `Bannerlator Bionic AnTuTu` (antutu) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) · `com.antutu.ABenchMark` (antutu) |
-| **Version** | Bannerlator **V 3.1.7-pre1** — built from Star **marcescence** (`versionName 3.1.7-pre1`, `versionCode 99`) |
+| **Version** | Bannerlator **V 3.1.7-pre2** — built from Star **marcescence** (`versionName 3.1.7-pre2`, `versionCode 100`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -111,6 +111,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [🤖 AI Disclaimer](#-ai-disclaimer)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
+- [⚙️ Every setting in Deck, full-screen XMB & Open with (3.1.7-pre2)](#️-every-setting-in-deck-full-screen-xmb--open-with-317-pre2)
 - [🎮 The full Deck style, Windows components & Remove (3.1.7-pre1)](#-the-full-deck-style-windows-components--remove-317-pre1)
 - [⬇️ Small updates, Win Components offline & smarter game adding (3.1.6)](#️-small-updates-win-components-offline--smarter-game-adding-316)
 - [⚡ Force SSBS, v14 layers & Mali on Wayland (3.1.6)](#-force-ssbs-v14-layers--mali-on-wayland-316)
@@ -131,6 +132,16 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📄 License](#-license)
 
 ---
+
+## ⚙️ Every setting in Deck, full-screen XMB & Open with (3.1.7-pre2)
+
+**[3.1.7-pre2](https://github.com/The412Banner/Bannerlator/releases/tag/3.1.7-pre2) finishes the Deck style's settings and is a small update (about 21 MB from 3.1.6 or 3.1.7-pre1).**
+
+- **Every setting in Deck** — DXVK/VKD3D, the DX wrapper, the X11 driver, Wayland (incl. Mali PanVK), drives, audio, ReShade, env vars and the Linux runtime are edited inside the Deck settings editor; nothing opens a Classic screen.
+- **Games in place** — Add games, My account, game details, drive C and Change exe open over Deck.
+- **XMB, full screen** — a Shelf library view again, with a game's Settings in its own columns, the game row three quarters up and a clearer backdrop.
+- **Open with → Bannerlator** — run a Windows .exe from any file manager: play it from your library, add it, or run it once.
+- **No clipboard notice** — Wayland games read the phone's clipboard only when you paste.
 
 ## 🎮 The full Deck style, Windows components & Remove (3.1.7-pre1)
 
