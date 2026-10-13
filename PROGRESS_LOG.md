@@ -1,5 +1,10 @@
 # Star-Compose — Progress Log
 
+## 2026-10-12 — 📌 Checkpoint after 3.1.7-pre2
+> main = 3.1.7-pre2 (+ this log); `feat/deck-native-graphics` is identical to main and can be retired. Stable 3.1.6 is Latest; pre = 3.1.7-pre2 (vc100).
+> - **Open:** XMB L1/R1 jumps with a controller and Open with from a second file manager / SD card not yet tried; a real patch update (3.1.6 or pre1 → pre2) not yet tried on a release install; component Remove/revert not device-tested; Steam lookups for unowned added games (DiRT 3 vc2010).
+> - **Housekeeping:** old branches/worktrees (release/3.1.6, feat/apk-delta-updates, feat/apk-patches-repo, fix/linux-wine-crossover, feat/deck-ui-full-stage1, feat/deck-native-graphics), throwaway standard test app on the device, large scratchpad APK copies.
+
 ## 2026-10-12 — 🚀 3.1.7-pre2 released (tag `3.1.7-pre2` = `22fcc6ab`, versionCode 100, pre-release) — every setting in Deck, full-screen XMB, Open with
 > `feat/deck-native-graphics` fast-forwarded into main (`9e07af81` → `b388668d`, backup `refs/backup/20261012/main-before-deck-native`), then the release commit. Release run 38327434099 green. Latest stays 3.1.6.
 > - **Small update:** 29 patches in Bannerlator-updates `3.1.7-pre2`; from 3.1.6 = 20.5 MB, from 3.1.7-pre1 = 20.2 MB (measured before the cut; bulk: dex 18.9 MB, resources.arsc 1.7 MB, libbannerwayland.so 0.6 MB, pulseaudio.tzst 0.6 MB).
