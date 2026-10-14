@@ -104,7 +104,11 @@ object SteamHost {
         env["BL_STEAM_HOST_LIB"] = lib.absolutePath
         env["BL_STEAM_HOST_HOME"] = cfg.home.absolutePath
         env["BL_STEAM_HOST_CACERT"] = cacert
-        env["BL_STEAM_HOST_LIB_VERSION"] = SteamHostComponent.installedVersion(app)
+        val valveVersion = SteamHostComponent.installedVersion(app)
+        env["BL_STEAM_HOST_LIB_VERSION"] = valveVersion
+        // A catalog-listed (not built-in) build: hand the host the catalog's slot line so it can
+        // refuse if its own analysis of the library disagrees.
+        SteamHostComponent.catalogSlots(app, valveVersion)?.let { env["BL_STEAM_HOST_CATALOG_SLOTS"] = it }
         env["BL_STEAM_HOST_APPID"] = cfg.appId.toString()
         env["BL_STEAM_HOST_PERSONA"] = if (cfg.persona) "1" else "0"
         env["Steam3Master"] = cfg.steam3Master

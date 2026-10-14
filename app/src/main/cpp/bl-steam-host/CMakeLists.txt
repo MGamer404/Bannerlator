@@ -18,6 +18,7 @@ project(BlSteamHost CXX)
 
 add_executable(libblsteamhost.so
         main.cpp
+        slot_discovery.cpp
 )
 
 target_include_directories(libblsteamhost.so PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

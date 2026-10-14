@@ -35,11 +35,18 @@
 //     IClientUser=%p IClientFriends=%p" printf order maps x24←slot 17, x23←slot 43,
 //     x25←slot 8, x26←slot 13).
 //
-// A different Valve build may move any of these. The host refuses to drive an unpinned
-// build unless BL_STEAM_HOST_ALLOW_UNVERIFIED=1 is set, and it sanity-checks at runtime that
-// every slot it is about to call points into libsteamclient.so's text (dladdr) before the
-// first virtual call. A wrong slot crashes THIS process only — the host is a separate ELF for
-// exactly that reason.
+// 2026-10-14: every row below is now ALSO confirmed structurally by slot_discovery.cpp, which the
+// host runs on every start (RTTI → IClientUserMap/IClientAppsMap/IClientFriendsMap/CSteamClient
+// vtables; the vtable entry whose code references a method's name string is that method; code
+// fingerprints equal to 1788291500's). That analysis showed the old BLoggedOn value 3 was
+// LogOff (the name-run index, without the +1) — BLoggedOn is slot 4. The host never called it.
+//
+// A different Valve build may move any of these. For a build listed here the self-check must
+// agree with the row; for any other build the self-check result is used only when every slot
+// was found and every fingerprint matched, otherwise the host refuses. It also sanity-checks
+// at runtime that every slot it is about to call points into libsteamclient.so's text (dladdr)
+// and that each returned object's vptr is the analysed class. A wrong slot crashes THIS
+// process only — the host is a separate ELF for exactly that reason.
 #pragma once
 
 #include <cstdint>
@@ -68,13 +75,14 @@ struct SlotTable {
     int userSlotsToCheck;
 };
 
-// The only verified build so far. Add a row per verified Valve build; never edit a row in
-// place without re-running the verification described above.
+// Built-in verified builds (offline fallback; the app's catalog can list more, and the self-check
+// can admit unlisted ones). Never edit a row in place without re-running the verification
+// (`slotcheck <libsteamclient.so>` built from slotcheck_main.cpp beside this file, or the CI watcher).
 static constexpr SlotTable kSlotTables[] = {
     {
         "1788291500",
         /* engine */ 8, 13, 17,
-        /* user   */ 1, 3, 49, 50, 54, 56, 69,
+        /* user   */ 1, 4, 49, 50, 54, 56, 69,
         /* apps   */ 7,
         /* friends*/ 5,
         /* check  */ 70,
@@ -84,7 +92,19 @@ static constexpr SlotTable kSlotTables[] = {
     {
         "1788652215",
         /* engine */ 8, 13, 17,
-        /* user   */ 1, 3, 49, 50, 54, 56, 69,
+        /* user   */ 1, 4, 49, 50, 54, 56, 69,
+        /* apps   */ 7,
+        /* friends*/ 5,
+        /* check  */ 70,
+    },
+    // 2026-10-14: build 1791918634 (manifest 2026-10-13, package sha2 ebb41b39…5e05, 17,941,237 B;
+    // libsteamclient.so 37,743,996 B sha256 9cef5240…e094). Every slot re-found by the structural
+    // analysis at the same index; all fingerprints equal to 1788291500's. Name runs moved
+    // (IClientUser at file off 0x6674ba) but the layout is identical.
+    {
+        "1791918634",
+        /* engine */ 8, 13, 17,
+        /* user   */ 1, 4, 49, 50, 54, 56, 69,
         /* apps   */ 7,
         /* friends*/ 5,
         /* check  */ 70,

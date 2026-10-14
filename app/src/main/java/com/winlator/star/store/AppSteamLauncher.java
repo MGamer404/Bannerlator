@@ -109,7 +109,7 @@ public final class AppSteamLauncher {
                 return null;
             }
             String valveVersion = SteamHostComponent.INSTANCE.installedVersion(ctx);
-            if (!SteamHostComponent.INSTANCE.getVERIFIED_BUILDS().contains(valveVersion)) {
+            if (!SteamHostComponent.INSTANCE.isBuildAccepted(ctx, valveVersion)) {
                 Log.w(TAG, "prepare: Valve client build '" + valveVersion + "' not verified for the host — fallback");
                 return null;
             }

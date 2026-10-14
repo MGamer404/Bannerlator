@@ -5578,7 +5578,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                                     com.winlator.star.core.HeadlessSteamLogCollector.Launch launch =
                                             new com.winlator.star.core.HeadlessSteamLogCollector.Launch(
                                                     true, appSteamPlan.appId, valveBuild,
-                                                    com.winlator.star.store.SteamHostComponent.INSTANCE.getVERIFIED_BUILDS().contains(valveBuild),
+                                                    com.winlator.star.store.SteamHostComponent.INSTANCE.isBuildAccepted(appCtx, valveBuild),
                                                     appSteamPlan.layerHasLsteamclient,
                                                     appSteamPlan.env != null ? new ArrayList<>(appSteamPlan.env.keySet()) : null,
                                                     appSteamPlan.envRemove != null ? java.util.Arrays.asList(appSteamPlan.envRemove) : null,

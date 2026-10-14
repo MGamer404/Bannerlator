@@ -36,7 +36,15 @@
 //   BL_STEAM_HOST_CACERT                 PEM bundle → STEAM_SSL_CERT_FILE
 //   BL_STEAM_HOST_APPID                  the game (SteamAppId/SteamGameId + prepare-app), 0 = none
 //   BL_STEAM_HOST_LIB_VERSION            Valve manifest version of the downloaded lib (slot pin)
-//   BL_STEAM_HOST_ALLOW_UNVERIFIED=1     drive an unpinned build with the newest slot table
+//   BL_STEAM_HOST_ALLOW_UNVERIFIED=1     developer override: drive a build the self-check could not
+//                                       confirm with the newest pinned table (never set by the app)
+//   BL_STEAM_HOST_CATALOG_SLOTS          slot line from the app's build catalog (steam-host-builds.json,
+//                                       format_slots() syntax); must equal what the self-check finds
+//
+// Self-check mode: `libblsteamhost.so --check <libsteamclient.so> [valve-version]` analyses the
+// file (slot_discovery.cpp; nothing is loaded or executed), prints one JSON line and exits
+// 0 (every slot found, every fingerprint matched) or 1 (refused). The app runs it on a staged
+// download of a build it has no catalog entry for, before replacing anything.
 //   BL_STEAM_HOST_PERSONA=1              SetPersonaState(Online) after logon (opt-in social)
 //   BL_STEAM_HOST_PREPARE=0              skip RequestAppInfoUpdate / ownership ticket warm-up
 //   BL_STEAM_HOST_LOGON_SID=0            do not call IClientUser::LogOn(steamid) after SetLoginToken
@@ -50,7 +58,7 @@
 // Commands from the app: {"cmd":"status"}, {"cmd":"logoff"}.
 //
 // Exit codes: 0 clean, 2 login failed, 3 loopback ports busy, 4 lib missing/unloadable,
-// 5 entry points missing, 6 pipe/user setup failed, 7 unverified build refused.
+// 5 entry points missing, 6 pipe/user setup failed, 7 build refused by the slot self-check.
 
 #include <android/log.h>
 #include <arpa/inet.h>
@@ -72,6 +80,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -81,6 +90,7 @@
 #include <vector>
 
 #include "client_iface.h"
+#include "slot_discovery.h"
 
 extern char** environ;
 
@@ -719,8 +729,12 @@ std::string mask_steamid(uint64_t sid) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    (void)argc; (void)argv;
     setvbuf(stdout, nullptr, _IOLBF, 0);
+    if (argc >= 3 && strcmp(argv[1], "--check") == 0) {
+        blhost::DiscoveredSlots d = blhost::discover_slots(argv[2]);
+        printf("%s\n", blhost::discovered_json(d, argc >= 4 ? argv[3] : "").c_str());
+        return d.ok ? 0 : 1;
+    }
     // Not dumpable: /proc/<pid>/{environ,maps,mem} become root-only, so the game (same uid) can
     // never read the token out of this process.
     prctl(PR_SET_DUMPABLE, 0);
@@ -781,21 +795,90 @@ int main(int argc, char** argv) {
     if (token.empty() || account.empty() || steamId64 == 0)
         return fail(2, "login_failed", "no credentials (token/account/steamid) in the host environment");
 
-    // ── 1. slot table for this Valve build ─────────────────────────────────────────────────
-    const blhost::SlotTable* slots = nullptr;
-    for (const auto& t : blhost::kSlotTables) if (libVer == t.valveVersion) slots = &t;
-    if (!slots) {
-        if (env_flag("BL_STEAM_HOST_ALLOW_UNVERIFIED", false)) {
-            slots = &blhost::kSlotTables[sizeof(blhost::kSlotTables) / sizeof(blhost::kSlotTables[0]) - 1];
-            LOGW("Valve build %s is NOT pinned — driving it with the %s slot table (BL_STEAM_HOST_ALLOW_UNVERIFIED=1)",
-                 libVer.c_str(), slots->valveVersion);
+    // ── 1. slot table for this Valve build: runtime self-check first ─────────────────────────
+    // discover_slots() reads the library FILE and finds every slot by structure (RTTI + the
+    // method-name each IPC proxy references + code fingerprints, see slot_discovery.h).
+    //   • pinned build (kSlotTables): the discovery must agree with the pinned row; if the
+    //     analysis itself cannot run, the pinned (device-verified) row is used.
+    //   • any other build: the discovery IS the gate — every slot found and every fingerprint
+    //     equal to the verified reference, else refuse. A catalog slot line, when the app passes
+    //     one, must equal the discovery too, so a catalog entry can never point us at a slot the
+    //     binary analysis disagrees with.
+    const blhost::SlotTable* pinned = nullptr;
+    for (const auto& t : blhost::kSlotTables) if (libVer == t.valveVersion) pinned = &t;
+    const int64_t tCheck = now_ms();
+    const blhost::DiscoveredSlots disc = blhost::discover_slots(libPath);
+    for (const auto& n : disc.notes) LOGI("self-check: %s", n.c_str());
+    LOGI("self-check: %s in %lld ms%s%s", disc.ok ? "PASS" : "FAIL", (long long)(now_ms() - tCheck),
+         disc.ok ? "" : " — ", disc.ok ? "" : disc.error.c_str());
+    blhost::SlotTable effective{};
+    std::string slotSource;
+    {
+        auto pinnedLine = [](const blhost::SlotTable& t) {
+            blhost::DiscoveredSlots p;
+            p.engineGetIClientUser = t.engineGetIClientUser; p.engineGetIClientFriends = t.engineGetIClientFriends;
+            p.engineGetIClientApps = t.engineGetIClientApps; p.userLogOn = t.userLogOn; p.userBLoggedOn = t.userBLoggedOn;
+            p.userBHasCachedCredentials = t.userBHasCachedCredentials;
+            p.userSetAccountNameForCachedCredentialLogin = t.userSetAccountNameForCachedCredentialLogin;
+            p.userSetLoginInformation = t.userSetLoginInformation; p.userSetLoginToken = t.userSetLoginToken;
+            p.userBUpdateAppOwnershipTicket = t.userBUpdateAppOwnershipTicket;
+            p.appsRequestAppInfoUpdate = t.appsRequestAppInfoUpdate; p.friendsSetPersonaState = t.friendsSetPersonaState;
+            return blhost::format_slots(p);
+        };
+        const std::string found = disc.ok ? blhost::format_slots(disc) : std::string();
+        const std::string catalogSlots = env_str("BL_STEAM_HOST_CATALOG_SLOTS");
+        if (disc.ok && pinned && pinnedLine(*pinned) != found)
+            return fail(7, "host_failed", "Valve client build " + libVer + " does not match its verified layout (pinned " +
+                                          pinnedLine(*pinned) + ", found " + found + ")");
+        if (disc.ok && !catalogSlots.empty() && catalogSlots != found)
+            return fail(7, "host_failed", "Valve client build " + libVer + ": catalog slots (" + catalogSlots +
+                                          ") disagree with the self-check (" + found + ")");
+        if (pinned) {
+            effective = *pinned;
+            slotSource = disc.ok ? "pinned+self-check" : "pinned (self-check unavailable: " + disc.error + ")";
+        } else if (disc.ok) {
+            effective.valveVersion = libVer.c_str();
+            effective.engineGetIClientUser = disc.engineGetIClientUser;
+            effective.engineGetIClientFriends = disc.engineGetIClientFriends;
+            effective.engineGetIClientApps = disc.engineGetIClientApps;
+            effective.userLogOn = disc.userLogOn;
+            effective.userBLoggedOn = disc.userBLoggedOn;
+            effective.userBHasCachedCredentials = disc.userBHasCachedCredentials;
+            effective.userSetAccountNameForCachedCredentialLogin = disc.userSetAccountNameForCachedCredentialLogin;
+            effective.userSetLoginInformation = disc.userSetLoginInformation;
+            effective.userSetLoginToken = disc.userSetLoginToken;
+            effective.userBUpdateAppOwnershipTicket = disc.userBUpdateAppOwnershipTicket;
+            effective.appsRequestAppInfoUpdate = disc.appsRequestAppInfoUpdate;
+            effective.friendsSetPersonaState = disc.friendsSetPersonaState;
+            effective.userSlotsToCheck = disc.userSlotsToCheck;
+            slotSource = catalogSlots.empty() ? "self-check" : "self-check+catalog";
+        } else if (env_flag("BL_STEAM_HOST_ALLOW_UNVERIFIED", false)) {
+            effective = blhost::kSlotTables[sizeof(blhost::kSlotTables) / sizeof(blhost::kSlotTables[0]) - 1];
+            slotSource = std::string("UNVERIFIED override (") + effective.valveVersion + " table)";
+            LOGW("Valve build %s failed the self-check — driving it anyway (BL_STEAM_HOST_ALLOW_UNVERIFIED=1)", libVer.c_str());
         } else {
-            return fail(7, "host_failed", "Valve client build " + libVer + " is not verified for this host (slot table pinned to " +
-                                          std::string(blhost::kSlotTables[0].valveVersion) + ")");
+            return fail(7, "host_failed", "Valve client build " + libVer + " failed the safety self-check: " + disc.error);
         }
-    } else {
-        LOGI("Valve build %s: slot table verified", libVer.c_str());
+        LOGI("Valve build %s: slots from %s", libVer.c_str(), slotSource.c_str());
+        char b[400];
+        snprintf(b, sizeof(b), "{\"ev\":\"selfcheck\",\"ok\":%s,\"source\":\"%s\",\"slots\":\"%s\"}",
+                 disc.ok ? "true" : "false", json_esc(slotSource).c_str(), json_esc(found).c_str());
+        g_status.send_line(b);
     }
+    const blhost::SlotTable* slots = &effective;
+    // Runtime identity check: an object the engine hands back must be exactly the class the
+    // analysis found (vptr == load base + vtable). Enforced for builds the self-check alone
+    // admitted; logged only for pinned builds (their table is device-verified on its own).
+    uintptr_t libBase = 0;
+    auto identity_ok = [&](void* obj, uint64_t vtVaddr, const char* what) {
+        if (!disc.ok || !libBase || !obj) return true;
+        uintptr_t vp = *reinterpret_cast<uintptr_t*>(obj);
+        bool ok = vp == libBase + vtVaddr;
+        if (ok) LOGI("identity: %s vptr = base+0x%llx (as analysed)", what, (unsigned long long)vtVaddr);
+        else LOGW("identity: %s vptr base+0x%llx, analysis expected base+0x%llx", what,
+                  (unsigned long long)(vp - libBase), (unsigned long long)vtVaddr);
+        return ok || pinned != nullptr;
+    };
 
     // ── 2. ports must be free ──────────────────────────────────────────────────────────────
     {
@@ -884,6 +967,11 @@ int main(int argc, char** argv) {
     LOGI("entry points resolved (CreateInterface, Steam_CreateGlobalUser, Steam_BLoggedOn, callbacks%s%s)",
          c.Steam_LogOff ? ", Steam_LogOff" : "", c.Steam_ReleaseUser ? ", Steam_ReleaseUser" : "");
     if (c.Breakpad_SteamSetAppID) c.Breakpad_SteamSetAppID(0);
+    {
+        Dl_info di{};
+        if (dladdr(reinterpret_cast<void*>(c.CreateInterface), &di) && di.dli_fbase) libBase = reinterpret_cast<uintptr_t>(di.dli_fbase);
+        LOGI("libsteamclient.so load base %p", reinterpret_cast<void*>(libBase));
+    }
 
     // ── 5. pipe + global user (Steam_CreateSteamPipe returns 0 on Android — helper-child model)
     {
@@ -907,13 +995,18 @@ int main(int argc, char** argv) {
             snprintf(b, sizeof(b), "CreateInterface(%s) -> %p err=%d", blhost::kClientEngineVersion, c.engine, err);
             return fail(5, "host_failed", b);
         }
-        if (!vtable_sane(c.engine, slots->engineGetIClientApps + 1, "IClientEngine", libPath))
+        if (!vtable_sane(c.engine, std::max({slots->engineGetIClientUser, slots->engineGetIClientFriends, slots->engineGetIClientApps}) + 1,
+                         "IClientEngine", libPath))
             return fail(5, "host_failed", "IClientEngine vtable failed the sanity check");
+        if (!identity_ok(c.engine, disc.engineVtable, "IClientEngine"))
+            return fail(7, "host_failed", "IClientEngine is not the class the self-check analysed");
         using GetIfaceFn = void* (*)(void*, int, int, const char*);
         c.iuser = c.vslot<GetIfaceFn>(c.engine, slots->engineGetIClientUser)(c.engine, c.user, c.pipe, blhost::kClientUserVersion);
         LOGI("IClientEngine.GetIClientUser(user=%d, pipe=%d) -> %p", c.user, c.pipe, c.iuser);
         if (!c.iuser || !vtable_sane(c.iuser, slots->userSlotsToCheck, "IClientUser", libPath))
             return fail(5, "host_failed", "IClientUser unavailable or failed the vtable sanity check");
+        if (!identity_ok(c.iuser, disc.userMapVtable, "IClientUser"))
+            return fail(7, "host_failed", "IClientUser is not the class the self-check analysed");
     }
 
     // ── 7. logon ───────────────────────────────────────────────────────────────────────────
@@ -1015,7 +1108,8 @@ int main(int argc, char** argv) {
         void* apps = c.vslot<GetIfaceFn>(c.engine, slots->engineGetIClientApps)(c.engine, c.user, c.pipe, blhost::kClientAppsVersion);
         LOGI("IClientEngine.GetIClientApps -> %p", apps);
         std::string appinfo_state = "skipped";
-        if (apps && vtable_sane(apps, slots->appsRequestAppInfoUpdate + 1, "IClientApps", libPath)) {
+        if (apps && vtable_sane(apps, slots->appsRequestAppInfoUpdate + 1, "IClientApps", libPath) &&
+            identity_ok(apps, disc.appsMapVtable, "IClientApps")) {
             unsigned ids[1] = {appId};
             bool req = c.vslot<ReqAppInfoFn>(apps, slots->appsRequestAppInfoUpdate)(apps, ids, 1);
             LOGI("IClientApps.RequestAppInfoUpdate(%u) -> %d", appId, req ? 1 : 0);
@@ -1054,7 +1148,8 @@ int main(int argc, char** argv) {
         using GetIfaceFn = void* (*)(void*, int, int, const char*);
         using SetPersonaFn = void (*)(void*, int);
         void* friends = c.vslot<GetIfaceFn>(c.engine, slots->engineGetIClientFriends)(c.engine, c.user, c.pipe, blhost::kClientFriendsVersion);
-        if (friends && vtable_sane(friends, slots->friendsSetPersonaState + 1, "IClientFriends", libPath)) {
+        if (friends && vtable_sane(friends, slots->friendsSetPersonaState + 1, "IClientFriends", libPath) &&
+            identity_ok(friends, disc.friendsMapVtable, "IClientFriends")) {
             c.vslot<SetPersonaFn>(friends, slots->friendsSetPersonaState)(friends, 1);
             LOGI("IClientFriends.SetPersonaState(Online)");
         }
