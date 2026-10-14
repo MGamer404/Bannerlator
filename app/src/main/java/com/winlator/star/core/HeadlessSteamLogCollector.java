@@ -40,7 +40,7 @@ public final class HeadlessSteamLogCollector {
         public final boolean planArmed;
         public final int appId;
         public final String valveBuild;          // SteamHostComponent.installedVersion()
-        public final boolean valveBuildVerified; // in VERIFIED_BUILDS
+        public final boolean valveBuildVerified; // accepted: built in, build catalog, or on-device self-check
         public final Boolean layerHasLsteamclient;
         public final List<String> envKeys;       // guest env keys the plan added (names only)
         public final List<String> envRemoved;    // keys the plan strips (PROTON_DISABLE_LSTEAMCLIENT …)
@@ -153,8 +153,11 @@ public final class HeadlessSteamLogCollector {
     private static final Pattern EV_REASON = Pattern.compile("\"reason\"\\s*:\\s*\"([^\"]*)\"");
     private static final Pattern EV_OK = Pattern.compile("\"ok\"\\s*:\\s*(true|false)");
     private static final Pattern HOST_PID = Pattern.compile("bl-steam-host starting \\(pid (\\d+)\\)");
-    private static final Pattern SLOT_OK = Pattern.compile("Valve build (\\d+): slot table verified");
-    private static final Pattern SLOT_FALLBACK = Pattern.compile("(?i)slot table.*(fallback|not verified|unknown build)");
+    private static final Pattern SLOT_OK = Pattern.compile("Valve build (\\d+): (?:slot table verified|slots from ([^\\r\\n]+))");
+    private static final Pattern SLOT_FALLBACK = Pattern.compile("(?i)slot table.*(fallback|not verified|unknown build)|UNVERIFIED override");
+    private static final Pattern SELF_CHECK = Pattern.compile("self-check: (PASS|FAIL) in (\\d+) ms(?: — ([^\\r\\n]+))?");
+    private static final Pattern SELF_CHECK_REFUSED = Pattern.compile("failed the safety self-check: ([^\"\\r\\n]+)|does not match its verified layout[^\"\\r\\n]*|disagree with the self-check[^\"\\r\\n]*");
+    private static final Pattern IDENTITY_MISMATCH = Pattern.compile("identity: (\\S+) vptr base\\+0x[0-9a-f]+, analysis expected");
     private static final Pattern PRELOAD_FAIL = Pattern.compile("preload FAIL: (\\S+) — (.*)");
     private static final Pattern PRELOAD_OK = Pattern.compile("preload OK: (\\S+)");
     private static final Pattern PORTS_FREE = Pattern.compile("loopback ports free: (\\d+) (\\d+)");
@@ -204,8 +207,8 @@ public final class HeadlessSteamLogCollector {
         if (launch.valveBuild == null || launch.valveBuild.isEmpty())
             rows.add(fail("VALVE CLIENT", "no Valve Android client set installed (steam-host dir empty)"));
         else
-            rows.add((launch.valveBuildVerified ? pass("VALVE CLIENT", "build " + launch.valveBuild + " installed and on the verified list")
-                    : warn("VALVE CLIENT", "build " + launch.valveBuild + " installed but NOT on the verified list — the host runs it on the last known slot table")));
+            rows.add((launch.valveBuildVerified ? pass("VALVE CLIENT", "build " + launch.valveBuild + " installed and accepted (built in, build catalog, or on-device self-check)")
+                    : warn("VALVE CLIENT", "build " + launch.valveBuild + " installed but not accepted (not built in, not in the build catalog, no on-device self-check record)")));
 
         // 3. Layer bridge
         if (launch.layerHasLsteamclient == null) rows.add(warn("LAYER BRIDGE", "lsteamclient presence in the Proton layer was not checked"));
@@ -219,9 +222,17 @@ public final class HeadlessSteamLogCollector {
         else rows.add(fail("HOST START", "the host never started (no host log, no 'started' event)"));
 
         // 5. Slot table
+        Matcher sc = SELF_CHECK.matcher(host);
+        Matcher refused = SELF_CHECK_REFUSED.matcher(host);
+        if (refused.find()) rows.add(fail("SELF-CHECK", "the host refused this Valve build: " + clip(refused.group())));
+        else if (sc.find()) rows.add("PASS".equals(sc.group(1))
+                ? pass("SELF-CHECK", "every private slot found by structure and every code fingerprint matched (" + sc.group(2) + " ms)")
+                : warn("SELF-CHECK", "the structural check could not confirm this build (" + clip(sc.group(3)) + ") — pinned table used"));
+        Matcher idm = IDENTITY_MISMATCH.matcher(host);
+        if (idm.find()) rows.add(warn("SELF-CHECK", idm.group(1) + " is not the class the analysis found (see HOST LOG 'identity:')"));
         Matcher slot = SLOT_OK.matcher(host);
-        if (slot.find()) rows.add(pass("SLOT TABLE", "verified for Valve build " + slot.group(1)));
-        else if (SLOT_FALLBACK.matcher(host).find()) rows.add(warn("SLOT TABLE", "host fell back to its newest known slot table for an unverified build"));
+        if (SLOT_FALLBACK.matcher(host).find()) rows.add(warn("SLOT TABLE", "host drove a build the self-check could not confirm (developer override)"));
+        else if (slot.find()) rows.add(pass("SLOT TABLE", "Valve build " + slot.group(1) + (slot.group(2) != null ? ": slots from " + slot.group(2) : " verified")));
         else if (pid.find(0)) rows.add(warn("SLOT TABLE", "no slot-table line in the host log"));
 
         // 6. Ports
