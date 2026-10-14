@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-10-14T13-54-58-aefd9d",
+    "created": "2026-10-14T13:54:58.550Z",
+    "reporter": "Anonymous",
+    "device": "25079RPDCC (Xiaomi Pad)",
+    "gpu": "Mali via PanVK (kbase g615-v11-csf pack)",
+    "game": "Sovereign Tower (君王之塔) v1.1.1",
+    "symptom": "Graphical glitches (corruption, flicker, missing textures)",
+    "logs": 4
+  },
+  {
     "id": "2026-10-11T14-21-44-be59d9",
     "created": "2026-10-11T14:21:44.456Z",
     "reporter": "anonymous",
