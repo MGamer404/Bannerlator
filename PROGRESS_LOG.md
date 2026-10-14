@@ -12,7 +12,8 @@
 > - **Device test t3 (2026-10-14 15:19–15:25, AYANEO Pocket FIT, Proton-11.0-2-arm64ec-14, Wayland):** fresh install of Valve 1791918634 OK; host self-check PASS (~165 ms) on every start; logon 1.3–1.6 s.
 >   - First attempt blocked: DroidDeck's x86 Steam (uid 10255) held loopback port 57343 (loopback is shared across apps) → host stopped with "loopback port busy". Closed DroidDeck → fine. Idea: clearer "another Steam app is running" message.
 >   - **CS:S (240):** checklist 18/18; secure-only server list (2303 servers); joined a VAC server and played ~2.5 min with no kick (≈180–390 fps).
->   - **L4D2 (550):** checklist 18/18, but the game reports `-insecure` in its launch options (no VAC servers). The app has no `-insecure` string; source still under investigation.
+>   - **L4D2 (550):** checklist 18/18, but the game reports `-insecure` in its launch options. Nothing passes it (shortcut, account LaunchOptions, addons/cfg all clean): the engine marks itself insecure because Valve's Android libsteamclient has no VAC runtime (same finding as 2026-10-04). **Headless Steam is never VAC-scanned; CS:S joining a VAC server is "server secure", not "client scanned". VAC play = SteamLite.**
+> - **✅ MERGED to main** (--no-ff, backup `refs/backup/20261014/main-before-headless-steam-auto-verify` = `94870170`; code CI run 38605311674 green).
 >   - The checklist's "[INFO] VAC: not yet proven" line is static text, to be changed only once VAC is proven.
 > - **GE-Proton 11-9 bionic layer (v14, proton-wine `proton_11.9-GE` r2 `2c1a325c`):** arm64ec device-proven (Insane 2, Wayland, pad OK); arm64ec + x86_64 in proton-wine + winlator-contents `bionic-layers-20261007-v14` and in the catalog (198 entries). x86_64 not yet device-tested.
 
