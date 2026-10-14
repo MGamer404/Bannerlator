@@ -603,13 +603,14 @@ static std::string jesc(const std::string& s) {
 std::string discovered_json(const DiscoveredSlots& d, const std::string& valveVersion) {
     char b[1024];
     snprintf(b, sizeof(b),
-             "{\"version\":\"%s\",\"ok\":%s,\"error\":\"%s\",\"slots\":{"
+             "{\"version\":\"%s\",\"ok\":%s,\"error\":\"%s\",\"line\":\"%s\",\"slots\":{"
              "\"engineGetIClientUser\":%d,\"engineGetIClientFriends\":%d,\"engineGetIClientApps\":%d,"
              "\"userLogOn\":%d,\"userBLoggedOn\":%d,\"userBHasCachedCredentials\":%d,"
              "\"userSetAccountNameForCachedCredentialLogin\":%d,\"userSetLoginInformation\":%d,"
              "\"userSetLoginToken\":%d,\"userBUpdateAppOwnershipTicket\":%d,"
              "\"appsRequestAppInfoUpdate\":%d,\"friendsSetPersonaState\":%d},\"notes\":[",
              jesc(valveVersion).c_str(), d.ok ? "true" : "false", jesc(d.error).c_str(),
+             d.ok ? format_slots(d).c_str() : "",
              d.engineGetIClientUser, d.engineGetIClientFriends, d.engineGetIClientApps,
              d.userLogOn, d.userBLoggedOn, d.userBHasCachedCredentials, d.userSetAccountNameForCachedCredentialLogin,
              d.userSetLoginInformation, d.userSetLoginToken, d.userBUpdateAppOwnershipTicket,
