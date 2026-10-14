@@ -431,10 +431,28 @@ object SteamHostComponent {
         }
     }
 
+    /**
+     * Byte offset of the first local file header. Valve's packages from build 1791918634 on carry
+     * a 20-byte prefix before it, and ZipInputStream reads nothing unless it starts on a header.
+     */
+    private fun firstLocalHeaderOffset(zip: File): Long {
+        val head = ByteArray(64 * 1024)
+        val n = FileInputStream(zip).use { it.read(head) }
+        for (i in 0..n - 4) {
+            if (head[i] == 0x50.toByte() && head[i + 1] == 0x4b.toByte() &&
+                head[i + 2] == 0x03.toByte() && head[i + 3] == 0x04.toByte()) return i.toLong()
+        }
+        return 0L
+    }
+
     /** Extract only `androidarm64/<name>.so` entries, flattened, basename-only (zip-slip safe). */
     private fun extractAndroidLibs(zip: File, dest: File): List<String> {
         val out = ArrayList<String>()
-        ZipInputStream(FileInputStream(zip).buffered()).use { zin ->
+        val skip = firstLocalHeaderOffset(zip)
+        if (skip > 0) Log.i(TAG, "package has a $skip-byte prefix before the zip data; skipping it")
+        val input = FileInputStream(zip)
+        input.channel.position(skip)
+        ZipInputStream(input.buffered()).use { zin ->
             while (true) {
                 val e = zin.nextEntry ?: break
                 val name = e.name
