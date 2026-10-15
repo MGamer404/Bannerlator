@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-10-15T11-55-54-628360",
+    "created": "2026-10-15T11:55:54.703Z",
+    "reporter": "",
+    "device": "Infinix note 12",
+    "gpu": "Mali-G57 MC2",
+    "game": "Gta 5",
+    "symptom": "Other",
+    "logs": 0
+  },
+  {
     "id": "2026-10-14T13-54-58-aefd9d",
     "created": "2026-10-14T13:54:58.550Z",
     "reporter": "Anonymous",
