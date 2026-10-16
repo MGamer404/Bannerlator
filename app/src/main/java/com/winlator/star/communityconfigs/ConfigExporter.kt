@@ -46,6 +46,8 @@ object ConfigExporter {
         "reshadeMode", "reshadeParams", "reshadeEffect", "emulator", "box64Version", "box64Preset",
         "fexcorePreset", "cpuList", "startupSelection", "inputType", "exclusiveXInput", "disableXinput",
         // Controller identity (generic / xbox360 / ... ; core.ControllerIdentity) with the other controller keys.
+        // inputType + exclusiveXInput above carry "DirectInput games can see the controller"
+        // (core.DInputVisibility); configs from before that switch import through the same mapping.
         "controllerIdentity",
         "simTouchScreen", "numControllers", "controlsProfile", "wincomponents", "midiSoundFont",
         "lc_all", "autoCloseOnExit",

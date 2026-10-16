@@ -243,6 +243,7 @@ import com.winlator.star.ui.screens.adrenodownload.AdrenoDriverDownloadSheet
 import com.winlator.star.ui.screens.adrenodownload.RemoteDriverEntry
 import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
 import com.winlator.star.core.ControllerIdentity
+import com.winlator.star.core.DInputVisibility
 import com.winlator.star.core.CopyGameToDriveC
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.MediaDecoder
@@ -303,7 +304,6 @@ import com.winlator.star.ui.components.RailLink
 import com.winlator.star.ui.components.RailSection
 import com.winlator.star.ui.components.RailTopTabs
 import com.winlator.star.ui.components.rememberRailState
-import com.winlator.star.winhandler.WinHandler
 import android.net.Uri
 import android.os.Build
 import androidx.documentfile.provider.DocumentFile
@@ -3666,7 +3666,10 @@ internal fun configSummaryLines(config: ShortcutConfig): List<Pair<String, Strin
         out.add("x86 translator" to if (emu == "fexcore" && !fex.isNullOrBlank()) "FEXCore $fex" else emu)
     }
     config.scalars["audioDriver"]?.takeIf { it.isNotBlank() }?.let { out.add("Audio driver" to it) }
-    config.scalars["inputType"]?.let { out.add("XInput" to if (((it.toIntOrNull() ?: 0) and WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()) != 0) "on" else "off") }
+    if (config.scalars["inputType"] != null || config.scalars["exclusiveXInput"] != null) {
+        val visible = DInputVisibility.fromExtras(config.scalars["exclusiveXInput"], config.scalars["inputType"], null)
+        out.add("DirectInput sees the controller" to if (visible) "on" else "off")
+    }
     config.scalars["screenSize"]?.takeIf { it.isNotBlank() }?.let { out.add("Resolution" to it) }
     config.scalars["renderer"]?.takeIf { it.isNotBlank() }?.let { out.add("Renderer" to it) }
     config.scalars["execArgs"]?.takeIf { it.isNotBlank() }?.let { out.add("Launch args" to it) }
@@ -5725,16 +5728,12 @@ internal fun ShortcutSettingsDialogScreen(
     var autoCloseOnExit by remember {
         mutableStateOf(shortcut.getExtra("autoCloseOnExit", shortcut.container.getExtra("autoCloseOnExit", "1")) == "1")
     }
-    var exclusiveXInput by remember {
-        val v = shortcut.getExtra("exclusiveXInput")
-        mutableStateOf(if (v.isEmpty()) shortcut.container.isExclusiveXInput else v == "1")
-    }
-    val initialInputType = remember {
-        shortcut.getExtra("inputType", shortcut.container.getInputType().toString()).toIntOrNull()
-            ?: shortcut.container.getInputType()
-    }
-    var enableXInput by remember { mutableStateOf((initialInputType and WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()) != 0) }
-    var enableDInput by remember { mutableStateOf((initialInputType and WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()) != 0) }
+    // "DirectInput games can see the controller" (core.DInputVisibility): this game's own value (its
+    // inputType / exclusiveXInput extras, old values included), else the container's. Saved only when
+    // the game owns it or differs from the container, like the identity below.
+    val containerDInputVisible = remember { DInputVisibility.forContainer(shortcut.container) }
+    val dinputWasOwn = remember { DInputVisibility.gameOwns(shortcut) }
+    var dinputVisible by remember { mutableStateOf(DInputVisibility.forGame(shortcut.container, shortcut)) }
     var disabledXInput by remember { mutableStateOf(shortcut.getExtra("disableXinput", "0") == "1") }
     // Controller identity (core.ControllerIdentity): this game's own value, else the container's. Saved
     // only when the game owns it or picks something other than the container's, so an untouched game
@@ -6032,10 +6031,6 @@ internal fun ShortcutSettingsDialogScreen(
             StringUtils.parseIdentifier(selectedScreenSize)
         }
 
-        var finalInputType = 0
-        if (enableXInput) finalInputType = finalInputType or WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()
-        if (enableDInput) finalInputType = finalInputType or WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()
-
         val wincomps = winComponents.joinToString(",") { "${it.key}=${it.selectedIndex}" }
         val envVars = if (isLinuxEntry) envVarsStr else com.winlator.star.core.SyncSupport.stripSyncVars(envVarsStr)
         val cpuList = cpuListViewRef.value?.getCheckedCPUListAsString() ?: shortcut.getExtra("cpuList", shortcut.container.getCPUList(true))
@@ -6133,8 +6128,11 @@ internal fun ShortcutSettingsDialogScreen(
             putExtra("fullscreenMode", if (fullscreenModeOverride < 0) null else fullscreenModeOverride.toString())
             putExtra("fullscreenStretched", null)
             putExtra("autoCloseOnExit", if (autoCloseOnExit) "1" else "0")
-            putExtra("inputType", finalInputType.toString())
-            putExtra("exclusiveXInput", if (exclusiveXInput) "1" else "0")
+            // DirectInput visibility, in the inputType / exclusiveXInput extras older builds read
+            // (DInputVisibility); cleared when the game simply follows its container.
+            val ownDInput: Boolean? = if (dinputWasOwn || dinputVisible != containerDInputVisible) dinputVisible else null
+            putExtra(DInputVisibility.EXTRA_EXCLUSIVE, ownDInput?.let { "1" })
+            putExtra(DInputVisibility.EXTRA_INPUT_TYPE, ownDInput?.let { DInputVisibility.inputTypeFor(it).toString() })
             putExtra("disableXinput", if (disabledXInput) "1" else null)
             putExtra(ControllerIdentity.EXTRA,
                 if (identityWasOwn || controllerIdentity != containerIdentity) controllerIdentity else null)
@@ -6316,7 +6314,7 @@ internal fun ShortcutSettingsDialogScreen(
                 if (!isLinuxEntry) add("autoClose")
             }
             4 -> { // Controller
-                if (!isLinuxEntry) { add("enableXInput"); add("enableDInput"); add("exclusiveXInput"); add("disableXInput"); add("controllerIdentity") }
+                if (!isLinuxEntry) { add("dinputVisible"); add("disableXInput"); add("controllerIdentity") }
                 add("simTouch")
                 if (!isLinuxEntry) add("numControllers")
                 add("gyroEnabled")
@@ -7921,51 +7919,21 @@ internal fun ShortcutSettingsDialogScreen(
                                 4 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         // Input section
                         SectionBox(title = "Input") {
-                            // XInput/DInput, exclusive input and the controller count are how WinHandler
-                            // presents pads to a Wine game and what it writes into the prefix's joystick
+                            // DirectInput visibility, the identity and the controller count are how pads are
+                            // presented to a Wine game and what is written into the prefix's joystick
                             // registry keys. A Linux session's pads arrive as fake-evdev devices instead,
                             // so those rows are conditioned off and the ones that still act on the host
                             // side (touchscreen mode, on-screen-control auto-hide, player slots, gyro) stay.
                             if (!isLinuxEntry) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 DpSwitch(
-                                    dp, "enableXInput",
-                                    checked = enableXInput,
-                                    onCheckedChange = { enableXInput = it },
-                                    enabled = exclusiveXInput
+                                    dp, "dinputVisible",
+                                    checked = dinputVisible,
+                                    onCheckedChange = { dinputVisible = it }
                                 )
                                 Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.enable_xinput_for_wine_game), modifier = Modifier.weight(1f))
-                                IconButton(onClick = { helpRes = R.string.help_xinput_game }) {
-                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                                }
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                DpSwitch(
-                                    dp, "enableDInput",
-                                    checked = enableDInput,
-                                    onCheckedChange = { enableDInput = it },
-                                    enabled = exclusiveXInput
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.enable_dinput_for_wine_game), modifier = Modifier.weight(1f))
-                                IconButton(onClick = { helpRes = R.string.help_dinput_game }) {
-                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                                }
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                DpSwitch(
-                                    dp, "exclusiveXInput",
-                                    checked = exclusiveXInput,
-                                    onCheckedChange = { checked ->
-                                        exclusiveXInput = checked
-                                        if (!checked) { enableXInput = true; enableDInput = true }
-                                        else if (enableXInput && enableDInput) enableDInput = false
-                                    }
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text("Exclusive Input", modifier = Modifier.weight(1f))
-                                IconButton(onClick = { helpRes = R.string.help_exclusive_xinput_game }) {
+                                Text(stringResource(R.string.dinput_visible), modifier = Modifier.weight(1f))
+                                IconButton(onClick = { helpRes = R.string.help_dinput_visible_game }) {
                                     Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                                 }
                             }

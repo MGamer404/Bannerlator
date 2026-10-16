@@ -54,6 +54,7 @@ import com.winlator.star.container.Shortcut
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.WrapperManager
 import com.winlator.star.core.ControllerIdentity
+import com.winlator.star.core.DInputVisibility
 import com.winlator.star.core.DirectAudioSupport
 import com.winlator.star.core.SyncMode
 import com.winlator.star.core.SyncSupport
@@ -69,7 +70,6 @@ import com.winlator.star.ui.components.audioConfigFromEnv
 import com.winlator.star.ui.components.audioConfigToEnv
 import com.winlator.star.ui.components.latencyIsDirectBuffer
 import com.winlator.star.ui.components.latencyUsedBy
-import com.winlator.star.winhandler.WinHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -740,31 +740,17 @@ private fun controllerRows(xmb: XmbScope, p: XmbPrefs): List<XmbRow> {
     val s = p.shortcut
     val c = p.c
     val rows = mutableListOf<XmbRow>()
-    val xBit = WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()
-    val dBit = WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()
-    val exclRaw = s.getExtra("exclusiveXInput") ?: ""
-    val excl = if (exclRaw.isEmpty()) c.isExclusiveXInput else exclRaw == "1"
-    val inputType = p.ex("inputType", c.getInputType().toString()).toIntOrNull() ?: c.getInputType()
-    val xi = (inputType and xBit) != 0
-    val di = (inputType and dBit) != 0
-    fun writeInput(nx: Boolean, nd: Boolean) {
-        var t = 0
-        if (nx) t = t or xBit
-        if (nd) t = t or dBit
-        s.putExtra("inputType", t.toString())
-    }
     rows += XmbRow.Header("hInput", "Input")
-    rows += XmbRow.Toggle("excl", "Exclusive input", Icons.Filled.Gamepad, excl) { on ->
-        if (!on) writeInput(true, true) else if (xi && di) writeInput(true, false)
-        xmb.set(p, "exclusiveXInput", if (on) "1" else "0")
+    // DirectInput visibility (core.DInputVisibility): written to this game's inputType / exclusiveXInput
+    // extras, the values older builds read.
+    rows += XmbRow.Toggle("dinputVisible", "DirectInput games can see the controller", Icons.Filled.Gamepad,
+        DInputVisibility.forGame(c, s)) { on ->
+        DInputVisibility.writeTo(s, on); xmb.saved(); s.saveData(); xmb.refresh()
     }
-    val needExcl = if (excl) null else "Needs exclusive input"
-    rows += XmbRow.Toggle("xinput", "Enable XInput for games", Icons.Filled.Gamepad, xi, disabledReason = needExcl) { writeInput(it, di); xmb.saved(); p.shortcut.saveData(); xmb.refresh() }
-    rows += XmbRow.Toggle("dinput", "Enable DInput for games", Icons.Filled.Gamepad, di, disabledReason = needExcl) { writeInput(xi, it); xmb.saved(); p.shortcut.saveData(); xmb.refresh() }
     rows += XmbRow.Toggle("disableX", "Disable XInput", Icons.Filled.Gamepad, p.ex("disableXinput", "0") == "1") { xmb.set(p, "disableXinput", if (it) "1" else null) }
-    // The pop-up editors' "?" for the XInput / DInput / Exclusive switches, as its own column.
-    rows += XmbRow.Link("inputHelp", "What do these switches do?", Icons.Filled.HelpOutline, subtitle = "XInput, DInput and exclusive input") {
-        xmbHelpMenu(p.context, xmb.scope, "Input", R.string.help_input_switches_game)
+    // The pop-up editors' "?" for the DirectInput switch, as its own column.
+    rows += XmbRow.Link("inputHelp", "What does the DirectInput switch do?", Icons.Filled.HelpOutline, subtitle = "DirectInput games and the controller") {
+        xmbHelpMenu(p.context, xmb.scope, "DirectInput", R.string.help_dinput_visible_game)
     }
     if (!com.winlator.star.linux.LinuxShortcuts.isLinuxEntry(s)) {
         // Controller identity: this game's own value, else the container's. Picking the container's

@@ -36,7 +36,7 @@ object ShortcutExporter {
 
         // Effective settings = shortcut override, else the container default (the value the game runs
         // with). Composite k=v lists (dxwrapperConfig / graphicsDriverConfig) and the scalars with a
-        // clean container getter fall back; execArgs / inputType are read as-is (shortcut-scoped).
+        // clean container getter fall back; execArgs is read as-is (shortcut-scoped).
         val effective = LinkedHashMap<String, String>()
         put(effective, "dxwrapper", orDefault(shortcut, "dxwrapper", container?.getDXWrapper()))
         put(effective, "dxwrapperConfig", orDefault(shortcut, "dxwrapperConfig", container?.getDXWrapperConfig()))
@@ -47,7 +47,12 @@ object ShortcutExporter {
         put(effective, "audioDriver", orDefault(shortcut, "audioDriver", container?.getAudioDriver()))
         put(effective, "wineVersion", orDefault(shortcut, "wineVersion", container?.getWineVersion()))
         put(effective, "envVars", orDefault(shortcut, "envVars", container?.getEnvVars()))
-        put(effective, "inputType", shortcut.getExtra("inputType"))
+        // "DirectInput games can see the controller" travels as the inputType / exclusiveXInput pair older
+        // builds (and BannerHub's pc_ls_update_enable_xinput) read: the effective value (this game's,
+        // else its container's, old combinations mapped by DInputVisibility), written the way the switch
+        // stores it. An importer reads it back through the same mapping.
+        val dinputVisible = com.winlator.star.core.DInputVisibility.forGame(container, shortcut)
+        put(effective, "inputType", com.winlator.star.core.DInputVisibility.inputTypeFor(dinputVisible).toString())
         put(effective, "execArgs", shortcut.getExtra("execArgs"))
 
         // The additive bl_ext overlay — the ~28 extra shortcut settings the pc_* format can't carry.
@@ -85,7 +90,7 @@ object ShortcutExporter {
         put(effective, "sharpnessLevel", shortcut.getExtra("sharpnessLevel"))
         put(effective, "sharpnessDenoise", shortcut.getExtra("sharpnessDenoise"))
         put(effective, "startupSelection", shortcut.getExtra("startupSelection"))
-        put(effective, "exclusiveXInput", shortcut.getExtra("exclusiveXInput"))
+        put(effective, "exclusiveXInput", "1")
         put(effective, "disableXinput", shortcut.getExtra("disableXinput"))
         // Controller identity: the game's own, else the container's (Generic is stored as absent).
         put(effective, "controllerIdentity", orDefault(shortcut, "controllerIdentity",

@@ -22,6 +22,7 @@ import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.WrapperManager
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.ControllerIdentity
+import com.winlator.star.core.DInputVisibility
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.EnvVars
 import com.winlator.star.core.GPUInformation
@@ -44,7 +45,6 @@ import com.winlator.star.fexcore.FEXCoreManager
 import com.winlator.star.fexcore.FEXCorePreset
 import com.winlator.star.fexcore.FEXCorePresetManager
 import com.winlator.star.midi.MidiManager
-import com.winlator.star.winhandler.WinHandler
 import com.winlator.star.xserver.XKeycode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -373,9 +373,10 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var lcAll by mutableStateOf("")
     var lcAllEntries by mutableStateOf(emptyList<String>()); private set
 
-    var enableXInput by mutableStateOf(true)
-    var enableDInput by mutableStateOf(false)
-    var exclusiveXInput by mutableStateOf(true)
+    // "DirectInput games can see the controller" (core.DInputVisibility): the one switch that replaced
+    // Enable XInput / Enable DInput / Exclusive Input. Saved into the same inputType/exclusiveXInput
+    // fields older builds read; a new container starts off, as the old default did.
+    var dinputVisible by mutableStateOf(false)
     // Direct XInput (BANNERIN): XInput games read the BANNERIN slot files directly (core/BannerinXInput).
     var bannerinXInput by mutableStateOf(false)
 
@@ -738,15 +739,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         val locale = java.util.Locale.getDefault()
         lcAll = seed?.getLC_ALL() ?: "${locale.language}_${locale.country}.UTF-8"
 
-        // Input type
-        val inputType: Int = seed?.inputType ?: WinHandler.DEFAULT_INPUT_TYPE.toInt()
-        enableXInput   = (inputType and WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()) != 0
-        enableDInput   = (inputType and WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()) != 0
-        exclusiveXInput = seed?.isExclusiveXInput ?: true
+        // DirectInput visibility, read from the stored inputType / exclusiveXInput (old values included)
+        dinputVisible  = DInputVisibility.forContainer(seed)
         bannerinXInput = seed?.isBannerinXInput ?: false
-        if (!exclusiveXInput) {
-            enableXInput = true; enableDInput = true
-        }
         vibrationMode      = seed?.getVibrationMode() ?: Container.VIBRATION_MODE_DEFAULT
         vibrationIntensity = seed?.getVibrationIntensity() ?: Container.VIBRATION_INTENSITY_DEFAULT
         rumbleMotors       = seed?.getRumbleMotors() ?: RumbleMotors.deviceDefault()
@@ -1174,15 +1169,6 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             selectedBox64ECVersion = box64ECVersionEntries.firstOrNull() ?: ""
     }
 
-    fun onExclusiveXInputChanged(checked: Boolean) {
-        exclusiveXInput = checked
-        if (!checked) {
-            enableXInput = true; enableDInput = true
-        } else {
-            if (enableXInput && enableDInput) enableDInput = false
-        }
-    }
-
     // ── Confirm ───────────────────────────────────────────────────────────────
     fun confirm(
         resolvedGraphicsDriverConfig: String,
@@ -1339,10 +1325,6 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
             }
         } catch (_: Exception) {}
 
-        var inputType = 0
-        if (enableXInput) inputType = inputType or WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()
-        if (enableDInput) inputType = inputType or WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()
-
         c.name               = containerName
         c.screenSize         = buildScreenSize()
         // Sync: the selector's pick is stored and the env string no longer carries sync variables
@@ -1383,7 +1365,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         c.setReshadeMode(reshadeLoadout.mode)
         c.setReshadeParams(reshadeLoadout.paramsJsonOrNull())
         c.setReshadeEffect(reshadeLoadout.firstEffectName())
-        c.setExclusiveXInput(exclusiveXInput)
+        DInputVisibility.writeTo(c, dinputVisible)   // inputType + exclusiveXInput, as older builds read them
         c.setBannerinXInput(bannerinXInput)
         c.setVibrationMode(vibrationMode)
         c.setVibrationIntensity(vibrationIntensity)
@@ -1437,7 +1419,6 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         c.setGlVsyncOff(glVsyncOff)
         c.putExtra("renderScale", if (renderScale == "1.0") null else renderScale)
         c.putExtra("autoCloseOnExit", if (autoCloseOnExit) null else "0")  // default ON
-        c.setInputType(inputType)
         c.setStartupSelection(selectedStartupSelection.toByte())
         // Persist the Custom enabled set regardless of the active selection, so toggling to another
         // preset and back restores the picks. Launch only reads it when the selection is Custom.

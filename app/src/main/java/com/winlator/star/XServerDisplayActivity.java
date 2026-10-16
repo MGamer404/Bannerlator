@@ -8119,32 +8119,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
         stageBundledFileManager();
         stageBundledWinHandler();
 
-        // Configure Wine joystick registry keys based on DInput setting
-        int inputType = container.getInputType();
-        if (shortcut != null) {
-            String shortcutInputType = shortcut.getExtra("inputType");
-            if (!shortcutInputType.isEmpty()) {
-                inputType = Byte.parseByte(shortcutInputType);
-            }
-        }
-        if (isControllerPassthroughLaunch()) {
-            // Controller passthrough (lever 3): force DInput-only so setJoystickRegistryKeys enables the
-            // DInput joystick path for this RealSteam launch, regardless of the container/shortcut value.
-            inputType = WinHandler.FLAG_INPUT_TYPE_DINPUT;
-        }
-        boolean dinputEnabled = (inputType & WinHandler.FLAG_INPUT_TYPE_DINPUT) == WinHandler.FLAG_INPUT_TYPE_DINPUT;
-        
-        boolean exclusiveXInput = container.isExclusiveXInput();
-        if (shortcut != null) {
-            String extra = shortcut.getExtra("exclusiveXInput");
-            if (!extra.isEmpty()) exclusiveXInput = extra.equals("1");
-        }
-        
-        // The DInput hide/show entries are matched by the pad's name, which follows the Controller
-        // identity (core.ControllerIdentity.dinputNames); the Classic DirectInput pad also needs
-        // winebus to present the pads unmapped, i.e. not as XInput gamepads.
+        // DirectInput visibility ("DirectInput games can see the controller", core.DInputVisibility,
+        // which also reads the old Enable DInput / Exclusive Input values). The entries it writes are
+        // matched by the pad's name, which follows the Controller identity
+        // (core.ControllerIdentity.dinputNames); the Classic DirectInput pad also needs winebus to
+        // present the pads unmapped, i.e. not as XInput gamepads.
         String padIdentity = com.winlator.star.core.ControllerIdentity.effective(container, shortcut);
-        WineUtils.setJoystickRegistryKeys(container, dinputEnabled, exclusiveXInput, padIdentity);
+        boolean dinputVisible = com.winlator.star.core.DInputVisibility.forGame(container, shortcut);
+        String dinputWhy = "settings";
+        if (isControllerPassthroughLaunch()) {
+            // Controller passthrough (lever 3): the classic game reads the pad through DirectInput, so it
+            // must see it for this RealSteam launch, whatever the container/shortcut value.
+            dinputVisible = true;
+            dinputWhy = "controller passthrough";
+        } else if (com.winlator.star.core.ControllerIdentity.DINPUT_PAD.equals(padIdentity)) {
+            // The Classic DirectInput pad exists for DirectInput games; hidden from them it is no pad at all.
+            if (!dinputVisible) dinputWhy = "forced on by the Classic DirectInput pad identity";
+            dinputVisible = true;
+        }
+        Log.i("XServerDisplayActivity", "DirectInput games can see the controller: "
+                + (dinputVisible ? "on" : "off") + " (" + dinputWhy + ")");
+        WineUtils.setJoystickRegistryKeys(container, dinputVisible, padIdentity);
         WineUtils.setWinebusMapControllers(container, com.winlator.star.core.ControllerIdentity.mapControllers(padIdentity));
 
         String startupServices;

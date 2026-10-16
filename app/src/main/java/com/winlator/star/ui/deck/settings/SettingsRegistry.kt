@@ -18,6 +18,7 @@ import com.winlator.star.FeatureFlags
 import com.winlator.star.container.Container
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
 import com.winlator.star.core.ControllerIdentity
+import com.winlator.star.core.DInputVisibility
 import com.winlator.star.core.DirectAudioSupport
 import com.winlator.star.core.FastOpenGL
 import com.winlator.star.core.KeyValueSet
@@ -1059,23 +1060,25 @@ internal object SettingsRegistry {
             worlds = WINE_LINUX,
         ),
         SettingDef(
-            id = "input.exclusiveInput", category = "input", group = "Controllers", level = ADVANCED,
-            label = "Only the game receives the controller", hint = "Lets you choose the controller type below. Off gives games both types.", tech = "Exclusive Input",
-            help = "On: the DInput setting above is enforced. Off: Wine decides on its own (DirectInput usually sees the pad too).",
+            id = "input.dinputVisible", category = "input", group = "Controllers", level = ADVANCED,
+            label = "DirectInput games can see the controller", hint = "Off by default, so games that read both XInput and DirectInput see one pad.",
+            help = "Lets DirectInput games (many older titles, racing games, wheels) see the controller. Off hides it from DirectInput so games that support both XInput and DirectInput don't see it twice. The Classic DirectInput pad identity always turns this on.",
+            tech = "Exclusive Input / Enable DInput",
             control = { _, _ -> Control.Toggle },
-            vm = vmBool({ it.exclusiveXInput }, { vm, v -> vm.onExclusiveXInputChanged(v) }),
-            // Off gives games both controller types; on with both picked keeps Xbox only, the same as the classic editors.
+            vm = vmBool({ it.dinputVisible }, { vm, v -> vm.dinputVisible = v }),
+            // Stored in the game's inputType / exclusiveXInput extras, which older builds read too
+            // (DInputVisibility maps their old combinations); Reset removes both.
             game = GameBinding(
-                listOf("exclusiveXInput"),
-                read = { e -> e.get("exclusiveXInput")?.takeIf { it.isNotEmpty() }?.let { if (it == "1") "1" else "0" } },
+                listOf(DInputVisibility.EXTRA_EXCLUSIVE, DInputVisibility.EXTRA_INPUT_TYPE),
+                read = { e ->
+                    val exclusive = e.get(DInputVisibility.EXTRA_EXCLUSIVE)
+                    val inputType = e.get(DInputVisibility.EXTRA_INPUT_TYPE)
+                    if (exclusive.isNullOrEmpty() && inputType.isNullOrBlank()) null
+                    else onOff(DInputVisibility.fromExtras(exclusive, inputType, e.container))
+                },
                 write = { e, v ->
-                    e.put("exclusiveXInput", v)
-                    if (v == "0") {
-                        e.put("inputType", "$INPUT_BOTH")
-                    } else {
-                        val type = e.get("inputType")?.trim()?.toIntOrNull() ?: e.container.getInputType()
-                        if (type and INPUT_BOTH == INPUT_BOTH) e.put("inputType", "$INPUT_XINPUT")
-                    }
+                    e.put(DInputVisibility.EXTRA_EXCLUSIVE, "1")
+                    e.put(DInputVisibility.EXTRA_INPUT_TYPE, "${DInputVisibility.inputTypeFor(v == "1")}")
                 },
             ),
         ),
@@ -1090,29 +1093,12 @@ internal object SettingsRegistry {
         SettingDef(
             id = "input.controllerIdentity", category = "input", group = "Controllers", level = ADVANCED,
             label = "Controller identity", hint = "Which controller the game sees. Applies the next time the game starts.",
-            help = "Generic (default): works with everything, same as before. Xbox 360 / One / Series: games treat the pad as an Xbox controller; best paired with Direct XInput for live input and rumble. Classic DirectInput pad: for old games that don't accept Xbox pads. PlayStation / Nintendo / Joy-Con / Steam Deck (experimental): games may show those button icons; no gyro, touchpad, light bar or trackpads, and a few games may not detect the pad. Switch back to Generic or Xbox if so.\n\nIf the controller disappears in a game, switch back to Generic.",
+            help = "Generic (default): works with everything, same as before. Xbox 360 / One / Series: games treat the pad as an Xbox controller; best paired with Direct XInput for live input and rumble. Classic DirectInput pad: for old games that don't accept Xbox pads; it always lets DirectInput games see the controller. PlayStation / Nintendo / Joy-Con / Steam Deck (experimental): games may show those button icons; no gyro, touchpad, light bar or trackpads, and a few games may not detect the pad. Switch back to Generic or Xbox if so.\n\nIf the controller disappears in a game, switch back to Generic.",
             tech = ControllerIdentity.ENV,
             control = { _, _ -> Control.Select(ControllerIdentity.wineChoices().map { Opt(it.value, it.label) }) },
             vm = vmString({ ControllerIdentity.forWine(it.controllerIdentity) }, { vm, v -> vm.controllerIdentity = ControllerIdentity.forWine(v) }),
             // Only values a Wine game can use: a Linux-only one (e.g. from an imported config) reads as unset.
             game = key(ControllerIdentity.EXTRA) { v -> ControllerIdentity.normalize(v)?.takeIf { it == ControllerIdentity.forWine(it) } },
-        ),
-        SettingDef(
-            id = "input.controllerApi", category = "input", group = "Controllers", level = ADVANCED,
-            label = "Controller type games see", hint = "Most modern games want Xbox. Pick Generic for older games, Both if unsure.", tech = "Enable XInput / Enable DInput",
-            help = "XInput: Legacy option kept for compatibility: XInput games see the controller either way. For the faster live path, use Direct XInput.\n\nDirectInput: Lets DirectInput games (many older titles, racing games, wheels) see the controller. Off hides the pad from DirectInput so games that support both APIs don't see it twice.",
-            control = { _, _ -> seg("$INPUT_XINPUT" to "Xbox (XInput)", "$INPUT_DINPUT" to "Generic (DirectInput)", "$INPUT_BOTH" to "Both") },
-            vm = VmBinding(
-                get = { _, vm -> ((if (vm.enableXInput) INPUT_XINPUT else 0) or (if (vm.enableDInput) INPUT_DINPUT else 0)).toString() },
-                set = { _, vm, v ->
-                    v.toIntOrNull()?.let { t ->
-                        vm.enableXInput = t and INPUT_XINPUT != 0
-                        vm.enableDInput = t and INPUT_DINPUT != 0
-                    }
-                },
-            ),
-            game = intKey("inputType"),
-            visible = { _, values -> values("input.exclusiveInput") == "1" },
         ),
         SettingDef(
             id = "input.disableXInput", category = "input", group = "Controllers", level = EXPERT,
@@ -1547,9 +1533,6 @@ internal object SettingsRegistry {
 
     private val LAUNCH_MODES = setOf("RealSteam", "AppSteam", "Goldberg", "Raw")
     private val RENDERERS = listOf("OpenGL", "Vulkan", "SurfaceFlinger")
-    private val INPUT_XINPUT = com.winlator.star.winhandler.WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()
-    private val INPUT_DINPUT = com.winlator.star.winhandler.WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()
-    private val INPUT_BOTH = INPUT_XINPUT or INPUT_DINPUT
 
     /** A power toggle: per game it overrides the app-wide default (Settings › Performance); there is no container level. */
     private fun perfToggle(id: String, key: String, label: String, hint: String?) = SettingDef(

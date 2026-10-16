@@ -283,36 +283,31 @@ public abstract class WineUtils {
     }
 
     /**
-     * Configure Wine DirectInput joystick registry keys for all gamepads.
-     * By default, disables all joysticks in Wine's DirectInput.
-     * When DInput is enabled, sets joysticks to "override" mode to make them visible.
+     * Configure Wine DirectInput joystick registry keys for all gamepads: "override" when DirectInput
+     * games may see the controller (core.DInputVisibility), "disabled" when they may not.
      *
      * Wine matches these entries by the pad's DirectInput name, which follows the container's
      * Controller identity, so the names come from {@link ControllerIdentity#dinputNames} (for the
-     * Generic identity exactly the eight "Generic HID Gamepad N" / "ric HID Gamepad N" values this
-     * always wrote). Names belonging to the other identities are removed, so switching identity
-     * between launches leaves no stale hide/show rule behind.
-     * 
+     * Generic identity the eight "Generic HID Gamepad N" / "ric HID Gamepad N" values this always
+     * wrote). Names belonging to the other identities are removed, so switching identity between
+     * launches leaves no stale hide/show rule behind. The entries are always written: the old
+     * "Exclusive Input off" state, which wrote none, now reads as visible (see DInputVisibility).
+     *
      * @param container The container to configure
-     * @param dinputEnabled Whether DInput is enabled for this container
-     * @param exclusiveXInput Whether Exclusive XInput is enabled (if false, keys are removed)
+     * @param dinputVisible Whether DirectInput games may see the controller
      * @param identity The launch's effective Controller identity (ControllerIdentity value)
      */
-    public static void setJoystickRegistryKeys(Container container, boolean dinputEnabled, boolean exclusiveXInput, String identity) {
+    public static void setJoystickRegistryKeys(Container container, boolean dinputVisible, String identity) {
         File userRegFile = new File(container.getRootDir(), ".wine/user.reg");
         final String joysticksKey = "Software\\Wine\\DirectInput\\Joysticks";
-        
-        // The value to set: "disabled" hides from DInput, "override" makes visible
-        final String value = dinputEnabled ? "override" : "disabled";
+        final String value = dinputVisible ? "override" : "disabled";
         final List<String> names = ControllerIdentity.dinputNames(identity);
-        
+
         try (WineRegistryEditor registryEditor = new WineRegistryEditor(userRegFile)) {
             for (String stale : ControllerIdentity.allDinputNames()) {
-                if (!exclusiveXInput || !names.contains(stale)) registryEditor.removeValue(joysticksKey, stale);
+                if (!names.contains(stale)) registryEditor.removeValue(joysticksKey, stale);
             }
-            if (exclusiveXInput) {
-                for (String name : names) registryEditor.setStringValue(joysticksKey, name, value);
-            }
+            for (String name : names) registryEditor.setStringValue(joysticksKey, name, value);
         }
     }
 
