@@ -26,19 +26,35 @@ ar_tool() {
   else die "no archiver (llvm-ar or aarch64-linux-gnu-ar) found"; fi
 }
 
-# The staticlib carries its own copy of Rust's compiler builtins. Drop them, so the interposer's
-# link resolves those helpers from its own toolchain runtime exactly as before, and the archive
-# contributes nothing but the transport itself.
+# The staticlib carries its own copy of Rust's compiler builtins (Rust objects named after the
+# crate, plus compiler-rt C objects named "<16 hex>-<name>.o"). Drop them, so the interposer's link
+# resolves those helpers from its own toolchain runtime exactly as before, and the archive
+# contributes nothing but the transport itself. (Here-strings, not "| grep -q": under pipefail an
+# early grep exit kills the writer of a long listing with SIGPIPE.)
+BUILTINS_RE='compiler_builtins|^[0-9a-f]{16}-'
 strip_builtins() {
-  local a="$1" ar; ar="$(ar_tool)"
-  local i=0
-  while "$ar" t "$a" | grep -q 'compiler_builtins'; do
-    "$ar" t "$a" | grep 'compiler_builtins' | head -n 400 | xargs "$ar" d "$a"
-    i=$((i + 1)); [ "$i" -lt 50 ] || die "could not strip compiler_builtins from $a"
+  local a="$1" ar members victims i=0
+  ar="$(ar_tool)"
+  while :; do
+    members="$("$ar" t "$a")"
+    victims="$(grep -E "$BUILTINS_RE" <<<"$members" || true)"
+    [ -n "$victims" ] || break
+    xargs -n 200 "$ar" d "$a" <<<"$victims"
+    i=$((i + 1)); [ "$i" -lt 20 ] || die "could not strip the builtins from $a"
   done
-  "$ar" s "$a" 2>/dev/null || true
-  say "archive members of $(basename "$(dirname "$(dirname "$a")")")/$(basename "$a"):"
-  "$ar" t "$a" | sed 's/^/     /'
+  "$ar" s "$a" 2>/dev/null || true  # deleting already refreshes the index; this is belt and braces
+  members="$("$ar" t "$a")"
+  say "archive members of $(basename "$(dirname "$(dirname "$a")")")/$(basename "$a") after stripping:"
+  sed 's/^/     /' <<<"$members"
+  if grep -qvE '^bannerin_(guest|core)-' <<<"$members"; then
+    die "unexpected archive members left in $a"
+  fi
+}
+
+# list_undefined <nm> <archive>: what the archive needs from the final link.
+list_undefined() {
+  say "undefined symbols the archive needs from the link:"
+  "$1" -u "$2" | awk '$1 == "U" {print $2}' | sort -u | tr '\n' ' '; echo
 }
 
 # check_probe <readelf> <nm> <so> <allowed NEEDED...>
@@ -54,12 +70,12 @@ check_probe() {
   done
   local exports; exports="$("$nm" -D --defined-only "$so" | awk '{print $NF}')"
   say "$(basename "$so") exports: $(echo $exports)"
-  local bad; bad="$(printf '%s\n' "$exports" | grep -E '^(bannerin_|rust_|__rust|_ZN|_R[A-Z0-9])' | grep -vx 'bannerin_linkprobe_entry' || true)"
+  local bad; bad="$(grep -E '^(bannerin_|rust_|__rust|_ZN|_R[A-Z0-9])' <<<"$exports" | grep -vx 'bannerin_linkprobe_entry' || true)"
   [ -z "$bad" ] || die "$(basename "$so") exports library symbols: $bad"
-  printf '%s\n' "$exports" | grep -qx 'bannerin_linkprobe_entry' || die "probe entry not exported"
+  grep -qx 'bannerin_linkprobe_entry' <<<"$exports" || die "probe entry not exported"
   local imports; imports="$("$nm" -D --undefined-only "$so" | awk '{print $NF}')"
   say "$(basename "$so") imports: $(echo $imports)"
-  if printf '%s\n' "$imports" | grep -qE '^(_Unwind_|__gcc_personality|rust_eh_personality)'; then
+  if grep -qE '^(_Unwind_|__gcc_personality|rust_eh_personality)' <<<"$imports"; then
     die "$(basename "$so") imports unwinder symbols"
   fi
 }
@@ -86,8 +102,7 @@ android)
   SO=target/aarch64-linux-android/release/libbannerin.so
   test -s "$A" && test -s "$SO"
   strip_builtins "$A"
-  say "undefined symbols the archive needs from the link:"
-  "$NDK_BIN/llvm-nm" -u "$A" | awk 'NF {print $NF}' | sort -u | tr '\n' ' '; echo
+  list_undefined "$NDK_BIN/llvm-nm" "$A"
   say "link probe (bionic, as libfakeinput.so links it)"
   "$CC" -shared -fPIC -O2 -Wall -Wextra -Werror -fvisibility=hidden -Iinclude \
     -Wl,--no-undefined -Wl,--exclude-libs,libbannerin_guest.a \
@@ -98,10 +113,10 @@ android)
   say "JNI writer exports"
   JNI="$("$NDK_BIN/llvm-nm" -D --defined-only "$SO" | awk '{print $NF}')"
   for f in Prepare Release Open Publish SetOverlay Reset Unplug Stat; do
-    printf '%s\n' "$JNI" | grep -qx "Java_com_winlator_star_inputcontrols_BannerinWriter_native$f" \
+    grep -qx "Java_com_winlator_star_inputcontrols_BannerinWriter_native$f" <<<"$JNI" \
       || die "libbannerin.so does not export native$f"
   done
-  if printf '%s\n' "$JNI" | grep -q '^bannerin_'; then die "libbannerin.so exports guest symbols"; fi
+  if grep -q '^bannerin_' <<<"$JNI"; then die "libbannerin.so exports guest symbols"; fi
   "$NDK_BIN/llvm-readelf" -d "$SO" | grep -E 'NEEDED|SONAME' | sed 's/^/     /'
   ls -l "$A" "$SO"
   ;;
@@ -113,10 +128,7 @@ glibc)
   strip_builtins "$A"
   NM=aarch64-linux-gnu-nm
   if [ -n "${NDK_BIN:-}" ] && [ -x "$NDK_BIN/llvm-nm" ]; then NM="$NDK_BIN/llvm-nm"; fi
-  if command -v "$NM" >/dev/null; then
-    say "undefined symbols the archive needs from the link:"
-    "$NM" -u "$A" | awk 'NF {print $NF}' | sort -u | tr '\n' ' '; echo
-  fi
+  if command -v "$NM" >/dev/null; then list_undefined "$NM" "$A"; fi
   probed=0
   if command -v aarch64-linux-gnu-gcc >/dev/null; then
     say "link probe (glibc, C)"
