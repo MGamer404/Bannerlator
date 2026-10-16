@@ -57,15 +57,47 @@ static constexpr const char *GAMEPAD_NAME_TEMPLATE = "Generic HID Gamepad %d";
 // SDL and Steam key their controller mapping database on a GUID built from bus+vendor+product.
 // The generic identity above is in no such database.
 // So a client has to guess the layout, or ask the user to configure the pad by hand.
-// 045E:028E is the Xbox 360 pad, the most widely mapped GUID there is.
-// Clients apply its standard layout with no configuration.
-// Titles that hardcode Xbox glyphs also stop mislabelling buttons.
-// This is opt-in rather than a new default, because the generic identity is what every already-working Windows title under Wine currently sees.
-// The Linux runtime session sets it, and the Wine path keeps the generic identity until it is proven on device.
-static constexpr uint16_t X360_VENDOR_ID = 0x045E;
-static constexpr uint16_t X360_PRODUCT_ID = 0x028E;
-static constexpr const char *X360_NAME_TEMPLATE = "Xbox 360 Controller (%d)";
-static bool xbox360_identity = false;
+// FAKE_EVDEV_IDENTITY picks another identity from the table below; unset, empty or unknown keeps
+// the generic one, which is what every already-working Windows title under Wine currently sees.
+// An identity changes only what the pad says it is (EVIOCGID vendor/product, EVIOCGNAME and
+// JSIOCGNAME); buttons, axes and force feedback are the same for every entry.
+// Vendor/product are not offset per slot: a real pad reports the same ids on every port, and an
+// offset id would be a GUID no mapping database knows.
+// The app sets the variable from the container's "Controller identity" and mirrors this table in
+// core/ControllerIdentity.java (DirectInput registry names, SDL mappings, launch log), so the two
+// change together.
+struct PadIdentity {
+  const char *value;
+  uint16_t vendor;
+  uint16_t product;
+  const char *name_template;
+};
+static constexpr PadIdentity PAD_IDENTITIES[] = {
+    {"xbox360", 0x045E, 0x028E, "Xbox 360 Controller (%d)"},
+    {"xboxone", 0x045E, 0x02EA, "Xbox One S Controller (%d)"},
+    {"xboxseries", 0x045E, 0x0B12, "Xbox Series X Controller (%d)"},
+    // The Steam Input virtual gamepad, as the Linux runtime presents it (fakeinput_steam.cpp).
+    {"steamvirtual", 0x28DE, 0x11FF, "Microsoft X-Box 360 pad %d"},
+    // pid.codes' shared test id: claimed by no vendor, SDL mapping or winebus list, so the pad
+    // stays a plain DirectInput joystick.
+    {"dinputpad", 0x1209, 0x0001, "USB Gamepad (%d)"},
+    {"ds4", 0x054C, 0x09CC, "Wireless Controller (%d)"},
+    {"dualsense", 0x054C, 0x0CE6, "DualSense Wireless Controller (%d)"},
+    {"switchpro", 0x057E, 0x2009, "Pro Controller (%d)"},
+    // 057E:2008 is the combined pair joycond creates; SDL types it as a Joy-Con pair.
+    {"joyconpair", 0x057E, 0x2008, "Nintendo Switch Combined Joy-Cons (%d)"},
+    {"steamdeck", 0x28DE, 0x1205, "Steam Deck Controller (%d)"},
+};
+static const PadIdentity *pad_identity = nullptr; // null = the generic identity
+
+static const PadIdentity *find_pad_identity(const char *value) {
+  if (!value || !*value)
+    return nullptr;
+  for (const PadIdentity &entry : PAD_IDENTITIES)
+    if (!strcmp(entry.value, value))
+      return &entry;
+  return nullptr;
+}
 static constexpr const char *GAMEPAD_PHYS_TEMPLATE = "usb-fakeinput/input%d";
 static constexpr const char *GAMEPAD_UNIQ_TEMPLATE = "0000000000%02d";
 static constexpr uint8_t GAMEPAD_AXIS_COUNT = 8;
@@ -158,8 +190,7 @@ __attribute__((constructor)) static void library_init() {
   vibration_enabled =
       getenv("FAKE_EVDEV_VIBRATION") && atoi(getenv("FAKE_EVDEV_VIBRATION"));
 
-  const char *identity = getenv("FAKE_EVDEV_IDENTITY");
-  xbox360_identity = identity && !strcmp(identity, "xbox360");
+  pad_identity = find_pad_identity(getenv("FAKE_EVDEV_IDENTITY"));
 
   Logger::init();
   if (Logger::log_enabled)
@@ -661,20 +692,19 @@ EXPORT int ioctl(int fd, fakeinput_ioctl_request_t op, ...) {
     struct input_id id;
     memset(&id, 0, sizeof(id));
     id.bustype = 0x03;
-    // A real 360 pad reports the same vendor/product on every port.
-    // Offsetting per slot would yield a GUID no mapping database knows, which is the whole problem being fixed here.
-    id.vendor = xbox360_identity ? X360_VENDOR_ID
-                                 : static_cast<uint16_t>(GAMEPAD_VENDOR_ID_BASE + event_number);
-    id.product = xbox360_identity ? X360_PRODUCT_ID
-                                  : static_cast<uint16_t>(GAMEPAD_PRODUCT_ID_BASE + event_number);
+    // A real pad reports the same vendor/product on every port (see PAD_IDENTITIES).
+    id.vendor = pad_identity ? pad_identity->vendor
+                             : static_cast<uint16_t>(GAMEPAD_VENDOR_ID_BASE + event_number);
+    id.product = pad_identity ? pad_identity->product
+                              : static_cast<uint16_t>(GAMEPAD_PRODUCT_ID_BASE + event_number);
     id.version = GAMEPAD_VERSION;
     memcpy(argp, (void *)&id, sizeof(id));
     return 0;
   } else if (type == 0x45 && number == 0x6) {
     Logger::log("Hooking ioctl EVIOCGNAME for event %s\n", event);
     copy_slot_ioctl_string(op, argp,
-                                  xbox360_identity ? X360_NAME_TEMPLATE
-                                                   : GAMEPAD_NAME_TEMPLATE,
+                                  pad_identity ? pad_identity->name_template
+                                               : GAMEPAD_NAME_TEMPLATE,
                                   event_number);
     return 0;
   } else if (type == 0x45 && number == 0x7) {
@@ -816,8 +846,8 @@ EXPORT int ioctl(int fd, fakeinput_ioctl_request_t op, ...) {
   } else if (type == 0x6A && number == 0x13) {
     Logger::log("Hooking ioctl JSIOCGNAME(len) for event %s\n", event);
     copy_slot_ioctl_string(op, argp,
-                                  xbox360_identity ? X360_NAME_TEMPLATE
-                                                   : GAMEPAD_NAME_TEMPLATE,
+                                  pad_identity ? pad_identity->name_template
+                                               : GAMEPAD_NAME_TEMPLATE,
                                   event_number);
     return 0;
   } else {

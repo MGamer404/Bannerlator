@@ -353,6 +353,15 @@ object XServerDialogState {
     fun interface VibrationIntensityCallback { fun invoke(intensity: Int) }
     @JvmField var onVibrationIntensityChanged: VibrationIntensityCallback? = null
 
+    // Rumble motors (core.RumbleMotors: 0=Both 1=Single). Same seed-in-setupUI / live push / persist
+    // round-trip as the mode and intensity above.
+    private val _rumbleMotors = MutableStateFlow(0) // RumbleMotors.BOTH
+    val rumbleMotors: StateFlow<Int> = _rumbleMotors
+    fun setRumbleMotors(v: Int) { _rumbleMotors.value = v }
+
+    fun interface RumbleMotorsCallback { fun invoke(motors: Int) }
+    @JvmField var onRumbleMotorsChanged: RumbleMotorsCallback? = null
+
     // -------------------------------------------------------------------------
     // Player Slots (manual per-device slot assignment) — Controls > Players sub-tab. One row per
     // detected input device (plus the on-screen pad). `override` is the user's choice: SLOT_AUTO
@@ -955,6 +964,7 @@ object XServerDialogState {
         _vibrationSlots.value  = emptyList()
         _vibrationMode.value   = 1
         _vibrationIntensity.value = 100
+        _rumbleMotors.value    = 0
         _playerSlots.value     = emptyList()
         _gyroSupported.value   = false
         _gyroOrientationSupported.value = false
@@ -1002,7 +1012,7 @@ object XServerDialogState {
         onReshadeLivePreviewChange = null
         onRequestResume = null
         onVibrationSlotChanged = null
-        onVibrationModeChanged = null; onVibrationIntensityChanged = null
+        onVibrationModeChanged = null; onVibrationIntensityChanged = null; onRumbleMotorsChanged = null
         onPlayerSlotChanged = null; onPlayerSlotsRefresh = null; onResetInput = null
         onGyroEnabledChanged = null; onGyroTargetChanged = null
         onGyroSensitivityChanged = null; onGyroDeadzoneChanged = null; onGyroSmoothingChanged = null

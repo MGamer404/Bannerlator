@@ -8138,7 +8138,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (!extra.isEmpty()) exclusiveXInput = extra.equals("1");
         }
         
-        WineUtils.setJoystickRegistryKeys(container, dinputEnabled, exclusiveXInput);
+        // The DInput hide/show entries are matched by the pad's name, which follows the Controller
+        // identity (core.ControllerIdentity.dinputNames); the Classic DirectInput pad also needs
+        // winebus to present the pads unmapped, i.e. not as XInput gamepads.
+        String padIdentity = com.winlator.star.core.ControllerIdentity.effective(container, shortcut);
+        WineUtils.setJoystickRegistryKeys(container, dinputEnabled, exclusiveXInput, padIdentity);
+        WineUtils.setWinebusMapControllers(container, com.winlator.star.core.ControllerIdentity.mapControllers(padIdentity));
 
         String startupServices;
         if (shortcut != null) {
@@ -12649,6 +12654,28 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
             };
 
+            // Rumble motors (Both / Single): same resolve -> push -> live edit -> write-back-to-owner
+            // round-trip as the mode/intensity above. A container that never chose follows the device
+            // default (Single on the AYANEO Pocket FIT), so the launch line records where it came from.
+            int rumbleMotors = resolvedRumbleMotors();
+            winHandler.setRumbleMotors(rumbleMotors);
+            Log.i("XServerDisplayActivity", "Rumble motors: "
+                    + com.winlator.star.core.RumbleMotors.label(rumbleMotors) + " (" + rumbleMotorsSource() + "; "
+                    + com.winlator.star.core.RumbleMotors.deviceNote() + ")");
+            ds.setRumbleMotors(rumbleMotors);
+            ds.onRumbleMotorsChanged = (motors) -> {
+                winHandler.setRumbleMotors(motors);
+                if (shortcut != null && shortcut.hasExtra(com.winlator.star.core.RumbleMotors.EXTRA)) {
+                    shortcut.putExtra(com.winlator.star.core.RumbleMotors.EXTRA, String.valueOf(winHandler.getRumbleMotors()));
+                    shortcut.saveData();
+                } else if (container != null) {
+                    container.setRumbleMotors(motors);
+                    container.saveData();
+                }
+                Log.i("XServerDisplayActivity", "Rumble motors: "
+                        + com.winlator.star.core.RumbleMotors.label(winHandler.getRumbleMotors()) + " (changed in-game)");
+            };
+
             // Player Slots (manual per-device slot assignment) — Controls > Players sub-tab. Seeds the
             // drawer list from WinHandler's live device/slot state, then wires the refresh + change
             // callbacks. A change is applied LIVE (WinHandler.setDeviceSlotAssignment: physical devices
@@ -15395,6 +15422,23 @@ return true;
         } catch (NumberFormatException e) {
             return fallback;
         }
+    }
+
+    // Rumble motors: per-game override (shortcut extra) else the container's value, which itself falls
+    // back to the device default (core.RumbleMotors.deviceDefault) when the container never chose.
+    private int resolvedRumbleMotors() {
+        if (shortcut != null) {
+            Integer own = com.winlator.star.core.RumbleMotors.parse(shortcut.getExtra(com.winlator.star.core.RumbleMotors.EXTRA));
+            if (own != null) return own;
+        }
+        return container != null ? container.getRumbleMotors() : com.winlator.star.core.RumbleMotors.deviceDefault();
+    }
+
+    private String rumbleMotorsSource() {
+        if (shortcut != null && com.winlator.star.core.RumbleMotors.parse(shortcut.getExtra(com.winlator.star.core.RumbleMotors.EXTRA)) != null) {
+            return "this game's settings";
+        }
+        return container != null && container.hasRumbleMotors() ? "container" : "device default";
     }
 
     // Manual controller-slot overrides (Players sub-tab): the same per-game-override-else-container

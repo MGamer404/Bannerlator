@@ -17,11 +17,13 @@ import androidx.compose.material.icons.filled.Widgets
 import com.winlator.star.FeatureFlags
 import com.winlator.star.container.Container
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
+import com.winlator.star.core.ControllerIdentity
 import com.winlator.star.core.DirectAudioSupport
 import com.winlator.star.core.FastOpenGL
 import com.winlator.star.core.KeyValueSet
 import com.winlator.star.core.LinuxVulkanDriver
 import com.winlator.star.core.MediaDecoder
+import com.winlator.star.core.RumbleMotors
 import com.winlator.star.core.StringUtils
 import com.winlator.star.core.SyncMode
 import com.winlator.star.core.SyncSupport
@@ -1059,6 +1061,7 @@ internal object SettingsRegistry {
         SettingDef(
             id = "input.exclusiveInput", category = "input", group = "Controllers", level = ADVANCED,
             label = "Only the game receives the controller", hint = "Lets you choose the controller type below. Off gives games both types.", tech = "Exclusive Input",
+            help = "On: the DInput setting above is enforced. Off: Wine decides on its own (DirectInput usually sees the pad too).",
             control = { _, _ -> Control.Toggle },
             vm = vmBool({ it.exclusiveXInput }, { vm, v -> vm.onExclusiveXInputChanged(v) }),
             // Off gives games both controller types; on with both picked keeps Xbox only, the same as the classic editors.
@@ -1079,13 +1082,25 @@ internal object SettingsRegistry {
         SettingDef(
             id = "input.bannerinXInput", category = "input", group = "Controllers", level = ADVANCED,
             label = "Direct XInput (BANNERIN)", hint = "XInput games read the controller directly, with no input queue (no stale stick after release). Off by default.", tech = "bannerinXInput",
+            help = "XInput games read the controller straight from Bannerlator instead of through Wine's controller queue: always the live stick position, no added delay, rumble included. Off: XInput goes through Wine as before. If a game misbehaves, turn it off for that game.",
             control = { _, _ -> Control.Toggle },
             vm = vmBool({ it.bannerinXInput }, { vm, v -> vm.bannerinXInput = v }),
             game = key10("bannerinXInput"),
         ),
         SettingDef(
+            id = "input.controllerIdentity", category = "input", group = "Controllers", level = ADVANCED,
+            label = "Controller identity", hint = "Which controller the game sees. Applies the next time the game starts.",
+            help = "Generic (default): works with everything, same as before. Xbox 360 / One / Series: games treat the pad as an Xbox controller; best paired with Direct XInput for live input and rumble. Classic DirectInput pad: for old games that don't accept Xbox pads. PlayStation / Nintendo / Joy-Con / Steam Deck (experimental): games may show those button icons; no gyro, touchpad, light bar or trackpads, and a few games may not detect the pad. Switch back to Generic or Xbox if so.\n\nIf the controller disappears in a game, switch back to Generic.",
+            tech = ControllerIdentity.ENV,
+            control = { _, _ -> Control.Select(ControllerIdentity.wineChoices().map { Opt(it.value, it.label) }) },
+            vm = vmString({ ControllerIdentity.forWine(it.controllerIdentity) }, { vm, v -> vm.controllerIdentity = ControllerIdentity.forWine(v) }),
+            // Only values a Wine game can use: a Linux-only one (e.g. from an imported config) reads as unset.
+            game = key(ControllerIdentity.EXTRA) { v -> ControllerIdentity.normalize(v)?.takeIf { it == ControllerIdentity.forWine(it) } },
+        ),
+        SettingDef(
             id = "input.controllerApi", category = "input", group = "Controllers", level = ADVANCED,
             label = "Controller type games see", hint = "Most modern games want Xbox. Pick Generic for older games, Both if unsure.", tech = "Enable XInput / Enable DInput",
+            help = "XInput: Legacy option kept for compatibility: XInput games see the controller either way. For the faster live path, use Direct XInput.\n\nDirectInput: Lets DirectInput games (many older titles, racing games, wheels) see the controller. Off hides the pad from DirectInput so games that support both APIs don't see it twice.",
             control = { _, _ -> seg("$INPUT_XINPUT" to "Xbox (XInput)", "$INPUT_DINPUT" to "Generic (DirectInput)", "$INPUT_BOTH" to "Both") },
             vm = VmBinding(
                 get = { _, vm -> ((if (vm.enableXInput) INPUT_XINPUT else 0) or (if (vm.enableDInput) INPUT_DINPUT else 0)).toString() },
@@ -1171,6 +1186,7 @@ internal object SettingsRegistry {
         SettingDef(
             id = "input.vibrationTarget", category = "input", group = "Rumble", level = SIMPLE,
             label = "Rumble on", tech = "Vibration mode",
+            help = "Controller: vibrates the gamepad. Device: vibrates the handheld/phone (on some devices, e.g. AYANEO, the system routes this to the gamepad anyway). Both / Off: as named.",
             control = { _, _ ->
                 seg("${Container.VIBRATION_MODE_OFF}" to "Off", "${Container.VIBRATION_MODE_CONTROLLER}" to "Controller",
                     "${Container.VIBRATION_MODE_DEVICE}" to "This device", "${Container.VIBRATION_MODE_BOTH}" to "Both")
@@ -1181,10 +1197,25 @@ internal object SettingsRegistry {
         SettingDef(
             id = "input.vibrationIntensity", category = "input", group = "Rumble", level = ADVANCED,
             label = "Rumble strength", tech = "Vibration intensity",
+            help = "Scales vibration strength. Note: on some handhelds a lower strength does not reduce stick slowdown. Use Rumble motors: Single for that.",
             control = { _, _ -> Control.Slider(0f, 100f, 5f, { "${it.toInt()}%" }, { "${it.toInt()}" }) },
             vm = vmInt({ it.vibrationIntensity }, { vm, v -> vm.vibrationIntensity = v }),
             game = intKey("vibrationIntensity"),
             visible = { _, values -> values("input.vibrationTarget") != "${Container.VIBRATION_MODE_OFF}" },
+        ),
+        SettingDef(
+            id = "input.rumbleMotors", category = "input", group = "Rumble", level = ADVANCED,
+            label = "Rumble motors", hint = "Single keeps sticks smooth on handhelds that slow down while both motors run.",
+            help = "Both (PC-accurate): drives the big and small motors separately, like a PC controller. Single (smoother sticks): uses one motor. Some handheld controllers (e.g. AYANEO Pocket FIT) slow their stick updates while both motors run; Single halves that slowdown so aiming stays smooth. Default: Single on the Pocket FIT, Both elsewhere.",
+            tech = RumbleMotors.EXTRA,
+            control = { _, _ -> seg("${RumbleMotors.BOTH}" to "Both (PC-accurate)", "${RumbleMotors.SINGLE}" to "Single (smoother sticks)") },
+            vm = vmInt({ it.rumbleMotors }, { vm, v -> vm.rumbleMotors = RumbleMotors.sanitize(v) }),
+            game = key(RumbleMotors.EXTRA) { v -> RumbleMotors.parse(v)?.toString() },
+            // Only a controller has two motors (the phone's vibrator is one).
+            visible = { _, values ->
+                values("input.vibrationTarget") == "${Container.VIBRATION_MODE_CONTROLLER}" ||
+                    values("input.vibrationTarget") == "${Container.VIBRATION_MODE_BOTH}"
+            },
         ),
         SettingDef(
             id = "input.gyro.enabled", category = "input", group = "Motion aim (gyro)", level = SIMPLE,

@@ -119,6 +119,7 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import com.winlator.star.R
+import com.winlator.star.core.RumbleMotors
 import com.winlator.star.container.Container
 import com.winlator.star.perf.PerfGpuTurbo
 import com.winlator.star.perf.PerfRevertRegistry
@@ -3061,6 +3062,25 @@ private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int)
     }
 }
 
+// "Rumble Motors" caption for the Vibration section, with the same small "?" ScalingModeHeader uses
+// (help_rumble_motors: why Single exists and the Pocket FIT default).
+@Composable
+private fun RumbleMotorsHeader() {
+    var showHelp by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            stringResource(R.string.rumble_motors_label),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        IconButton(onClick = { showHelp = true }, modifier = Modifier.size(28.dp)) {
+            Icon(Icons.Default.Help, contentDescription = "What is this?",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+        }
+    }
+    if (showHelp) HelpDialog(R.string.help_rumble_motors) { showHelp = false }
+}
+
 // Per-container rumble target picker (Off/Controller/Device/Both) — same segmented-chip style as
 // UpscalerModeButtons above, just a fixed 4-wide row instead of chunked(3). "Device" = the phone's
 // own vibrator (Container.VIBRATION_MODE_DEVICE); "Both" drives the physical controller AND the
@@ -4190,6 +4210,29 @@ internal fun ControlsContent(
                             XServerDialogState.setVibrationIntensity(vibrationIntensity)
                             XServerDialogState.onVibrationIntensityChanged?.invoke(vibrationIntensity)
                         }
+                    )
+                }
+
+                // Rumble motors (Both / Single), live: WinHandler.setRumbleMotors + saved to the same
+                // owner as the mode above. Only a controller has two motors, so it shows for the
+                // Controller and Both targets. Keyed on the incoming value like the rows above.
+                if (vibrationMode == 1 || vibrationMode == 3) {
+                    val initRumbleMotors by XServerDialogState.rumbleMotors.collectAsState()
+                    var rumbleMotors by remember(initRumbleMotors) { mutableIntStateOf(initRumbleMotors) }
+                    val pickMotors: (Int) -> Unit = { motors ->
+                        rumbleMotors = motors
+                        XServerDialogState.setRumbleMotors(motors)
+                        XServerDialogState.onRumbleMotorsChanged?.invoke(motors)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    RumbleMotorsHeader()
+                    Spacer(Modifier.height(4.dp))
+                    ModeChipGrid(
+                        listOf(
+                            Triple(stringResource(R.string.rumble_motors_both_short), rumbleMotors == RumbleMotors.BOTH) { pickMotors(RumbleMotors.BOTH) },
+                            Triple(stringResource(R.string.rumble_motors_single_short), rumbleMotors == RumbleMotors.SINGLE) { pickMotors(RumbleMotors.SINGLE) },
+                        ),
+                        perRow = 2
                     )
                 }
             }

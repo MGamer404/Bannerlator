@@ -242,6 +242,7 @@ import com.winlator.star.ui.findActivity
 import com.winlator.star.ui.screens.adrenodownload.AdrenoDriverDownloadSheet
 import com.winlator.star.ui.screens.adrenodownload.RemoteDriverEntry
 import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
+import com.winlator.star.core.ControllerIdentity
 import com.winlator.star.core.CopyGameToDriveC
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.MediaDecoder
@@ -5735,6 +5736,15 @@ internal fun ShortcutSettingsDialogScreen(
     var enableXInput by remember { mutableStateOf((initialInputType and WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()) != 0) }
     var enableDInput by remember { mutableStateOf((initialInputType and WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()) != 0) }
     var disabledXInput by remember { mutableStateOf(shortcut.getExtra("disableXinput", "0") == "1") }
+    // Controller identity (core.ControllerIdentity): this game's own value, else the container's. Saved
+    // only when the game owns it or picks something other than the container's, so an untouched game
+    // keeps following its container.
+    val containerIdentity = remember { ControllerIdentity.forWine(shortcut.container.getControllerIdentity()) }
+    val identityWasOwn = remember { ControllerIdentity.normalize(shortcut.getExtra(ControllerIdentity.EXTRA)) != null }
+    var controllerIdentity by remember {
+        mutableStateOf(ControllerIdentity.normalize(shortcut.getExtra(ControllerIdentity.EXTRA))
+            ?.let { ControllerIdentity.forWine(it) } ?: containerIdentity)
+    }
     var simTouchScreen by remember { mutableStateOf(shortcut.getExtra("simTouchScreen", "0") == "1") }
 
     // Per-game controller->player-slot pins. EMPTY string = no shortcut override (inherit the container's
@@ -6126,6 +6136,8 @@ internal fun ShortcutSettingsDialogScreen(
             putExtra("inputType", finalInputType.toString())
             putExtra("exclusiveXInput", if (exclusiveXInput) "1" else "0")
             putExtra("disableXinput", if (disabledXInput) "1" else null)
+            putExtra(ControllerIdentity.EXTRA,
+                if (identityWasOwn || controllerIdentity != containerIdentity) controllerIdentity else null)
             putExtra("simTouchScreen", if (simTouchScreen) "1" else "0")
             // Empty = clear the extra so the game re-inherits the container's Player Slots.
             putExtra("controllerSlotOverrides", controllerSlotOverridesJson.ifEmpty { null })
@@ -6304,7 +6316,7 @@ internal fun ShortcutSettingsDialogScreen(
                 if (!isLinuxEntry) add("autoClose")
             }
             4 -> { // Controller
-                if (!isLinuxEntry) { add("enableXInput"); add("enableDInput"); add("exclusiveXInput"); add("disableXInput") }
+                if (!isLinuxEntry) { add("enableXInput"); add("enableDInput"); add("exclusiveXInput"); add("disableXInput"); add("controllerIdentity") }
                 add("simTouch")
                 if (!isLinuxEntry) add("numControllers")
                 add("gyroEnabled")
@@ -7924,7 +7936,7 @@ internal fun ShortcutSettingsDialogScreen(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(stringResource(R.string.enable_xinput_for_wine_game), modifier = Modifier.weight(1f))
-                                IconButton(onClick = { helpRes = R.string.help_xinput }) {
+                                IconButton(onClick = { helpRes = R.string.help_xinput_game }) {
                                     Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                                 }
                             }
@@ -7937,7 +7949,7 @@ internal fun ShortcutSettingsDialogScreen(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(stringResource(R.string.enable_dinput_for_wine_game), modifier = Modifier.weight(1f))
-                                IconButton(onClick = { helpRes = R.string.help_dinput }) {
+                                IconButton(onClick = { helpRes = R.string.help_dinput_game }) {
                                     Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                                 }
                             }
@@ -7953,13 +7965,31 @@ internal fun ShortcutSettingsDialogScreen(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text("Exclusive Input", modifier = Modifier.weight(1f))
-                                IconButton(onClick = { helpRes = R.string.help_exclusive_xinput }) {
+                                IconButton(onClick = { helpRes = R.string.help_exclusive_xinput_game }) {
                                     Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                                 }
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 DpCheck(dp, "disableXInput", checked = disabledXInput, onCheckedChange = { disabledXInput = it })
                                 Text("Disable XInput")
+                            }
+                            // Controller identity: what the virtual pads say they are to this game.
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val identityChoices = remember { ControllerIdentity.wineChoices() }
+                                val identityLabels = remember(identityChoices) { identityChoices.map { it.label } }
+                                DpDrop(
+                                    dp, "controllerIdentity",
+                                    label = stringResource(R.string.controller_identity_label),
+                                    options = identityLabels,
+                                    selected = ControllerIdentity.label(controllerIdentity),
+                                    onSelect = { opt ->
+                                        identityChoices.getOrNull(identityLabels.indexOf(opt))?.let { controllerIdentity = it.value }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = { helpRes = R.string.help_controller_identity_game }) {
+                                    Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
+                                }
                             }
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {

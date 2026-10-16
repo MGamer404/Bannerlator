@@ -286,29 +286,49 @@ public abstract class WineUtils {
      * Configure Wine DirectInput joystick registry keys for all gamepads.
      * By default, disables all joysticks in Wine's DirectInput.
      * When DInput is enabled, sets joysticks to "override" mode to make them visible.
+     *
+     * Wine matches these entries by the pad's DirectInput name, which follows the container's
+     * Controller identity, so the names come from {@link ControllerIdentity#dinputNames} (for the
+     * Generic identity exactly the eight "Generic HID Gamepad N" / "ric HID Gamepad N" values this
+     * always wrote). Names belonging to the other identities are removed, so switching identity
+     * between launches leaves no stale hide/show rule behind.
      * 
      * @param container The container to configure
      * @param dinputEnabled Whether DInput is enabled for this container
      * @param exclusiveXInput Whether Exclusive XInput is enabled (if false, keys are removed)
+     * @param identity The launch's effective Controller identity (ControllerIdentity value)
      */
-    public static void setJoystickRegistryKeys(Container container, boolean dinputEnabled, boolean exclusiveXInput) {
+    public static void setJoystickRegistryKeys(Container container, boolean dinputEnabled, boolean exclusiveXInput, String identity) {
         File userRegFile = new File(container.getRootDir(), ".wine/user.reg");
         final String joysticksKey = "Software\\Wine\\DirectInput\\Joysticks";
         
         // The value to set: "disabled" hides from DInput, "override" makes visible
         final String value = dinputEnabled ? "override" : "disabled";
+        final List<String> names = ControllerIdentity.dinputNames(identity);
         
         try (WineRegistryEditor registryEditor = new WineRegistryEditor(userRegFile)) {
-            // Configure all 4 possible gamepad slots
-            for (int i = 0; i < 4; i++) {
-                if (exclusiveXInput) {
-                    registryEditor.setStringValue(joysticksKey, "Generic HID Gamepad " + i, value);
-                    registryEditor.setStringValue(joysticksKey, "ric HID Gamepad " + i, value);
-                }
-                else {
-                    registryEditor.removeValue(joysticksKey, "Generic HID Gamepad " + i);
-                    registryEditor.removeValue(joysticksKey, "ric HID Gamepad " + i);
-                }
+            for (String stale : ControllerIdentity.allDinputNames()) {
+                if (!exclusiveXInput || !names.contains(stale)) registryEditor.removeValue(joysticksKey, stale);
+            }
+            if (exclusiveXInput) {
+                for (String name : names) registryEditor.setStringValue(joysticksKey, name, value);
+            }
+        }
+    }
+
+    /**
+     * winebus "Map Controllers" (HKLM\System\CurrentControlSet\Services\winebus, read by
+     * dlls/winebus.sys/main.c): absent = Wine's default, mapped. Written as 0 only while the Controller
+     * identity wants the pads presented unmapped (the Classic DirectInput pad), and removed again
+     * otherwise so a container goes back to Wine's default as soon as the identity changes back.
+     */
+    public static void setWinebusMapControllers(Container container, boolean mapControllers) {
+        File systemRegFile = new File(container.getRootDir(), ".wine/system.reg");
+        try (WineRegistryEditor registryEditor = new WineRegistryEditor(systemRegFile)) {
+            registryEditor.setCreateKeyIfNotExist(false);
+            for (String key : new String[]{"System\\CurrentControlSet\\Services\\winebus", "System\\ControlSet001\\Services\\winebus"}) {
+                if (mapControllers) registryEditor.removeValue(key, "Map Controllers");
+                else registryEditor.setDwordValue(key, "Map Controllers", 0);
             }
         }
     }

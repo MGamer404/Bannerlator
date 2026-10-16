@@ -69,6 +69,8 @@ import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.WrapperManager
 import com.winlator.star.contents.WrapperSettingsDictionary
 import com.winlator.star.core.AppUtils
+import com.winlator.star.core.ControllerIdentity
+import com.winlator.star.core.RumbleMotors
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.MediaDecoder
 import com.winlator.star.core.FileUtils
@@ -2611,6 +2613,24 @@ private fun AdvancedTab(
                     Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
                 }
             }
+            // Controller identity (core.ControllerIdentity): what the virtual pads say they are to the
+            // game (FAKE_EVDEV_IDENTITY at launch). Applies the next time the game starts.
+            val identityChoices = remember { ControllerIdentity.wineChoices() }
+            val identityLabels = remember(identityChoices) { identityChoices.map { it.label } }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LabeledDropdown(
+                    label = stringResource(R.string.controller_identity_label),
+                    options = identityLabels,
+                    selectedOption = ControllerIdentity.label(viewModel.controllerIdentity),
+                    onSelect = { opt ->
+                        identityChoices.getOrNull(identityLabels.indexOf(opt))?.let { viewModel.controllerIdentity = it.value }
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = { helpRes = R.string.help_controller_identity }) {
+                    Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
+                }
+            }
         }
 
         // Vibration section — per-container rumble target + intensity default. Also live-tunable
@@ -2622,25 +2642,59 @@ private fun AdvancedTab(
                 stringResource(R.string.vibration_mode_device),
                 stringResource(R.string.vibration_mode_both),
             )
-            LabeledDropdown(
-                label = stringResource(R.string.vibration_mode_label),
-                options = vibrationModeLabels,
-                selectedOption = vibrationModeLabels.getOrElse(viewModel.vibrationMode) {
-                    vibrationModeLabels[Container.VIBRATION_MODE_DEFAULT]
-                },
-                onSelect = { opt -> viewModel.vibrationMode = vibrationModeLabels.indexOf(opt).coerceAtLeast(0) }
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LabeledDropdown(
+                    label = stringResource(R.string.vibration_mode_label),
+                    options = vibrationModeLabels,
+                    selectedOption = vibrationModeLabels.getOrElse(viewModel.vibrationMode) {
+                        vibrationModeLabels[Container.VIBRATION_MODE_DEFAULT]
+                    },
+                    onSelect = { opt -> viewModel.vibrationMode = vibrationModeLabels.indexOf(opt).coerceAtLeast(0) },
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = { helpRes = R.string.help_vibration_mode }) {
+                    Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
+                }
+            }
             if (viewModel.vibrationMode != Container.VIBRATION_MODE_OFF) {
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    "${stringResource(R.string.vibration_intensity_label)}: ${viewModel.vibrationIntensity}%",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "${stringResource(R.string.vibration_intensity_label)}: ${viewModel.vibrationIntensity}%",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { helpRes = R.string.help_vibration_intensity }) {
+                        Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                }
                 Slider(
                     value = viewModel.vibrationIntensity.toFloat(),
                     onValueChange = { viewModel.vibrationIntensity = it.toInt() },
                     valueRange = 0f..100f, steps = 99
                 )
+            }
+            // Rumble motors: only a controller has two motors (the phone's vibrator is one), so the
+            // row shows while the rumble goes to a controller.
+            if (viewModel.vibrationMode == Container.VIBRATION_MODE_CONTROLLER ||
+                viewModel.vibrationMode == Container.VIBRATION_MODE_BOTH) {
+                Spacer(Modifier.height(8.dp))
+                val rumbleMotorsLabels = listOf(
+                    stringResource(R.string.rumble_motors_both),
+                    stringResource(R.string.rumble_motors_single),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LabeledDropdown(
+                        label = stringResource(R.string.rumble_motors_label),
+                        options = rumbleMotorsLabels,
+                        selectedOption = rumbleMotorsLabels.getOrElse(viewModel.rumbleMotors) { rumbleMotorsLabels[RumbleMotors.BOTH] },
+                        onSelect = { opt -> viewModel.rumbleMotors = rumbleMotorsLabels.indexOf(opt).coerceAtLeast(0) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { helpRes = R.string.help_rumble_motors }) {
+                        Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                }
             }
         }
 

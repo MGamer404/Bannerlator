@@ -21,11 +21,13 @@ import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.WrapperManager
 import com.winlator.star.core.AppUtils
+import com.winlator.star.core.ControllerIdentity
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.EnvVars
 import com.winlator.star.core.GPUInformation
 import com.winlator.star.core.NewContainerDefaults
 import com.winlator.star.core.PreloaderState
+import com.winlator.star.core.RumbleMotors
 import com.winlator.star.core.StorageRoots
 import com.winlator.star.core.StringUtils
 import com.winlator.star.ui.screens.contents.SetAsDefault
@@ -382,6 +384,15 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // are also live-tunable from the in-game drawer — this is just the launch-time default.
     var vibrationMode by mutableStateOf(Container.VIBRATION_MODE_DEFAULT)
     var vibrationIntensity by mutableStateOf(Container.VIBRATION_INTENSITY_DEFAULT)
+    // Rumble motors (core.RumbleMotors): 0=Both 1=Single. A container that never chose shows the device
+    // default (Single on the AYANEO Pocket FIT) and is only written when it chooses (rumbleMotorsWasExplicit
+    // or a value other than that default), so it keeps following the device otherwise.
+    var rumbleMotors by mutableStateOf(RumbleMotors.BOTH)
+    private var rumbleMotorsWasExplicit = false
+
+    // Controller identity (core.ControllerIdentity value): what the virtual pads say they are to a Wine
+    // game. "generic" (the default) is stored as absent.
+    var controllerIdentity by mutableStateOf(ControllerIdentity.GENERIC)
 
     // Manual controller->player-slot pins for this container (Player Slots section). Opaque JSON string
     // (descriptor -> slot), the exact schema the in-game Players tab + launch pre-assignment use — the
@@ -738,6 +749,9 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         }
         vibrationMode      = seed?.getVibrationMode() ?: Container.VIBRATION_MODE_DEFAULT
         vibrationIntensity = seed?.getVibrationIntensity() ?: Container.VIBRATION_INTENSITY_DEFAULT
+        rumbleMotors       = seed?.getRumbleMotors() ?: RumbleMotors.deviceDefault()
+        rumbleMotorsWasExplicit = seed?.hasRumbleMotors() == true
+        controllerIdentity = ControllerIdentity.forWine(seed?.getControllerIdentity())
         controllerSlotOverridesJson = seed?.getControllerSlotOverrides() ?: "{}"
         onScreenControllerMode = seed?.getOnScreenControllerMode() ?: Container.ON_SCREEN_MODE_DEFAULT
         autoHideControlsOnPad = seed?.isAutoHideControlsOnPad() ?: Container.AUTO_HIDE_CONTROLS_ON_PAD_DEFAULT
@@ -1373,6 +1387,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         c.setBannerinXInput(bannerinXInput)
         c.setVibrationMode(vibrationMode)
         c.setVibrationIntensity(vibrationIntensity)
+        if (rumbleMotorsWasExplicit || rumbleMotors != RumbleMotors.deviceDefault()) c.setRumbleMotors(rumbleMotors)
+        c.setControllerIdentity(controllerIdentity)
         // Player Slots + On-screen mode + auto-hide: seeded from the app-drawer global ONLY for a
         // brand-new container, and only where the field is still the default the user didn't touch.
         c.setControllerSlotOverrides(

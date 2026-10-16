@@ -5,10 +5,12 @@ import android.os.Environment;
 import com.winlator.star.box64.Box64Preset;
 import com.winlator.star.contentdialog.DXVKConfigDialog;
 import com.winlator.star.contentdialog.WineD3DConfigDialog;
+import com.winlator.star.core.ControllerIdentity;
 import com.winlator.star.core.DefaultVersion;
 import com.winlator.star.core.EnvVars;
 import com.winlator.star.core.FileUtils;
 import com.winlator.star.core.KeyValueSet;
+import com.winlator.star.core.RumbleMotors;
 import com.winlator.star.core.WineInfo;
 import com.winlator.star.core.WineThemeManager;
 import com.winlator.star.fexcore.FEXCorePreset;
@@ -920,6 +922,38 @@ public class Container {
 
     public void setVibrationIntensity(int intensity) {
         putExtra("vibrationIntensity", String.valueOf(intensity));
+    }
+
+    // Rumble motors (core.RumbleMotors): Both (0, PC-accurate) or Single (1, the game's strong and weak
+    // requests on one motor). A container with no value of its own follows the device default
+    // (Single on an AYANEO Pocket FIT with its built-in pad, Both elsewhere), so the default is never
+    // baked into a container that didn't choose. Live-tunable from the in-game drawer like the mode above.
+    public int getRumbleMotors() {
+        Integer motors = RumbleMotors.parse(getExtra(RumbleMotors.EXTRA, ""));
+        return motors != null ? motors : RumbleMotors.deviceDefault();
+    }
+
+    /** True when this container chose Both/Single itself (false = it follows the device default). */
+    public boolean hasRumbleMotors() {
+        return RumbleMotors.parse(getExtra(RumbleMotors.EXTRA, "")) != null;
+    }
+
+    public void setRumbleMotors(int motors) {
+        putExtra(RumbleMotors.EXTRA, String.valueOf(RumbleMotors.sanitize(motors)));
+    }
+
+    // Controller identity (core.ControllerIdentity): what the virtual pads say they are to a Wine game
+    // (FAKE_EVDEV_IDENTITY at launch). Absent = Generic, the identity every container had before;
+    // Generic is stored as absent so an untouched container's extraData doesn't change.
+    public String getControllerIdentity() {
+        String v = ControllerIdentity.normalize(getExtra(ControllerIdentity.EXTRA, ""));
+        return v != null ? v : ControllerIdentity.GENERIC;
+    }
+
+    public void setControllerIdentity(String identity) {
+        String v = ControllerIdentity.normalize(identity);
+        putExtra(ControllerIdentity.EXTRA,
+                v == null || v.equals(ControllerIdentity.GENERIC) ? null : v);
     }
 
     // Manual controller slot overrides (in-game "Players" sub-tab), per-container. Stored as a raw

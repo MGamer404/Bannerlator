@@ -2,7 +2,7 @@
  * The fake evdev layer. Taken from WinNative (maxjivi05, main 0cfc070b + feature/wayland-gamescope
  * through f1f34cd7, 2026-09-14..19), GPL-3.0: the locking, the fork handlers, the shared device
  * table, the Steam virtual-gamepad identity and the Z/RZ trigger placement are that author's.
- * Added here: an opt-in Xbox 360 identity (FAKE_EVDEV_IDENTITY=xbox360), which is what gets SDL's
+ * Added here: opt-in identities (FAKE_EVDEV_IDENTITY, e.g. xbox360), which is what gets SDL's
  * built-in mapping applied with no configuration when the pad is read by the Steam client itself.
  */
 #include <algorithm>
@@ -63,11 +63,38 @@ static constexpr uint16_t STEAM_VIRTUAL_VENDOR_ID = 0x28de;
 static constexpr uint16_t STEAM_VIRTUAL_PRODUCT_ID = 0x11ff;
 static constexpr const char *STEAM_VIRTUAL_NAME_TEMPLATE = "Microsoft X-Box 360 pad %d";
 // Opt-in identity for the process that reads the pad directly (the Steam client): SDL keys its
-// mapping database on bus+vendor+product, and 045E:028E is the most widely mapped id there is.
-// Not offset per slot: a real pad reports the same ids on every port.
-static constexpr uint16_t X360_VENDOR_ID = 0x045E;
-static constexpr uint16_t X360_PRODUCT_ID = 0x028E;
-static constexpr const char *X360_NAME_TEMPLATE = "Xbox 360 Controller (%d)";
+// mapping database on bus+vendor+product. FAKE_EVDEV_IDENTITY picks an entry of this table; unset,
+// empty or unknown keeps the generic identity. An identity changes only what the pad says it is
+// (EVIOCGID vendor/product, EVIOCGNAME, JSIOCGNAME); buttons, axes and force feedback are the same.
+// Not offset per slot: a real pad reports the same ids on every port. The same table, with the
+// same values, is in fakeinput.cpp (the Wine copy) and core/ControllerIdentity.java (the app).
+struct PadIdentity {
+  const char *value;
+  uint16_t vendor;
+  uint16_t product;
+  const char *name_template;
+};
+static constexpr PadIdentity PAD_IDENTITIES[] = {
+    {"xbox360", 0x045E, 0x028E, "Xbox 360 Controller (%d)"},
+    {"xboxone", 0x045E, 0x02EA, "Xbox One S Controller (%d)"},
+    {"xboxseries", 0x045E, 0x0B12, "Xbox Series X Controller (%d)"},
+    {"steamvirtual", STEAM_VIRTUAL_VENDOR_ID, STEAM_VIRTUAL_PRODUCT_ID, STEAM_VIRTUAL_NAME_TEMPLATE},
+    {"dinputpad", 0x1209, 0x0001, "USB Gamepad (%d)"},
+    {"ds4", 0x054C, 0x09CC, "Wireless Controller (%d)"},
+    {"dualsense", 0x054C, 0x0CE6, "DualSense Wireless Controller (%d)"},
+    {"switchpro", 0x057E, 0x2009, "Pro Controller (%d)"},
+    {"joyconpair", 0x057E, 0x2008, "Nintendo Switch Combined Joy-Cons (%d)"},
+    {"steamdeck", 0x28DE, 0x1205, "Steam Deck Controller (%d)"},
+};
+
+static const PadIdentity *find_pad_identity(const char *value) {
+  if (!value || !*value)
+    return nullptr;
+  for (const PadIdentity &entry : PAD_IDENTITIES)
+    if (!strcmp(entry.value, value))
+      return &entry;
+  return nullptr;
+}
 static constexpr const char *GAMEPAD_PHYS_TEMPLATE = "usb-fakeinput/input%d";
 static constexpr const char *GAMEPAD_UNIQ_TEMPLATE = "0000000000%02d";
 static constexpr uint8_t GAMEPAD_AXIS_COUNT = 8;
@@ -131,7 +158,7 @@ struct FakeConfig {
   const char *hook_dir;
   const char *udev_data_dir;
   bool vibration_enabled;
-  bool xbox360_identity;
+  const PadIdentity *identity; // null = the generic identity
 };
 
 static FakeConfig &config() {
@@ -142,8 +169,7 @@ static FakeConfig &config() {
     c->udev_data_dir = getenv("FAKE_UDEV_DATA_DIR");
     c->vibration_enabled =
         getenv("FAKE_EVDEV_VIBRATION") && atoi(getenv("FAKE_EVDEV_VIBRATION"));
-    const char *identity = getenv("FAKE_EVDEV_IDENTITY");
-    c->xbox360_identity = identity && !strcmp(identity, "xbox360");
+    c->identity = find_pad_identity(getenv("FAKE_EVDEV_IDENTITY"));
     pthread_atfork(controller_fork_prepare, controller_fork_parent,
                    controller_fork_child);
     Logger::init();
@@ -173,7 +199,7 @@ static std::unordered_map<int, struct ff_effect> &ff_effects() {
 static const char *fake_hook_dir() { return config().hook_dir; }
 static const char *fake_udev_data_dir() { return config().udev_data_dir; }
 static bool fake_vibration_enabled() { return config().vibration_enabled; }
-static bool fake_xbox360_identity() { return config().xbox360_identity; }
+static const PadIdentity *fake_identity() { return config().identity; }
 
 static int next_ff_id = 0;
 
@@ -763,9 +789,9 @@ EXPORT int ioctl(int fd, ioctl_request_t op, ...) {
     if (presents_steam_virtual()) {
       id.vendor = STEAM_VIRTUAL_VENDOR_ID;
       id.product = STEAM_VIRTUAL_PRODUCT_ID;
-    } else if (fake_xbox360_identity()) {
-      id.vendor = X360_VENDOR_ID;
-      id.product = X360_PRODUCT_ID;
+    } else if (const PadIdentity *identity = fake_identity()) {
+      id.vendor = identity->vendor;
+      id.product = identity->product;
     } else {
       id.vendor = static_cast<uint16_t>(GAMEPAD_VENDOR_ID_BASE + event_number);
       id.product = static_cast<uint16_t>(GAMEPAD_PRODUCT_ID_BASE + event_number);
@@ -777,7 +803,7 @@ EXPORT int ioctl(int fd, ioctl_request_t op, ...) {
     Logger::log("Hooking ioctl EVIOCGNAME for event %s\n", event);
     copy_slot_ioctl_string(op, argp,
                            presents_steam_virtual() ? STEAM_VIRTUAL_NAME_TEMPLATE
-                           : (fake_xbox360_identity() ? X360_NAME_TEMPLATE : GAMEPAD_NAME_TEMPLATE),
+                           : (fake_identity() ? fake_identity()->name_template : GAMEPAD_NAME_TEMPLATE),
                            event_number);
     return 0;
   } else if (type == 0x45 && number == 0x7) {
@@ -925,7 +951,7 @@ EXPORT int ioctl(int fd, ioctl_request_t op, ...) {
     Logger::log("Hooking ioctl JSIOCGNAME(len) for event %s\n", event);
     copy_slot_ioctl_string(op, argp,
                            presents_steam_virtual() ? STEAM_VIRTUAL_NAME_TEMPLATE
-                           : (fake_xbox360_identity() ? X360_NAME_TEMPLATE : GAMEPAD_NAME_TEMPLATE),
+                           : (fake_identity() ? fake_identity()->name_template : GAMEPAD_NAME_TEMPLATE),
                            event_number);
     return 0;
   } else {

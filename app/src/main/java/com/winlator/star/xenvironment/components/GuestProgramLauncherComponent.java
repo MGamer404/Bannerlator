@@ -21,6 +21,7 @@ import com.winlator.star.container.Shortcut;
 import com.winlator.star.contents.ContentProfile;
 import com.winlator.star.contents.ContentsManager;
 import com.winlator.star.core.Callback;
+import com.winlator.star.core.ControllerIdentity;
 import com.winlator.star.core.EnvVars;
 import com.winlator.star.core.FileUtils;
 import com.winlator.star.core.GPUInformation;
@@ -51,6 +52,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.Map;
 
 public class GuestProgramLauncherComponent extends EnvironmentComponent {
     private String guestExecutable;
@@ -640,6 +642,22 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         envVars.put("FAKE_EVDEV_DIR", devInputDir.getAbsolutePath());
         envVars.put("FAKE_EVDEV_VIBRATION", "1");
 
+        // Controller identity (core.ControllerIdentity): FAKE_EVDEV_IDENTITY for the evdev layer, plus
+        // the SDL hints, hidraw opt-out and SDL mapping that identity needs. Generic adds nothing, as
+        // before. Put here, ahead of the container's and the game's own env vars merged below, so an
+        // explicit value there still wins; the hidraw list and the SDL mapping list are combined with
+        // an explicit value instead of being replaced by it.
+        String padIdentity = ControllerIdentity.effective(container, shortcut);
+        Map<String, String> identityEnv = ControllerIdentity.launchEnv(padIdentity);
+        for (Map.Entry<String, String> entry : identityEnv.entrySet()) {
+            String name = entry.getKey();
+            if (this.envVars != null && this.envVars.has(name) && ControllerIdentity.isMergedEnv(name)) {
+                this.envVars.put(name, ControllerIdentity.mergeEnv(name, entry.getValue(), this.envVars.get(name)));
+            } else {
+                envVars.put(name, entry.getValue());
+            }
+        }
+
         // Controller input reaches the guest through BANNERIN: one fixed-size state file per slot
         // (see BannerinWriter). Prepare all 4 and hand the native reader their paths, so an open()
         // of /dev/input/eventN attaches to the matching slot. The slot state is process-wide and
@@ -677,6 +695,21 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         // Merge any additional environment variables from external sources
         if (this.envVars != null) {
             envVars.putAll(this.envVars);
+        }
+
+        // One line per launch with the identity the pads actually present (after the merge, so an
+        // explicit FAKE_EVDEV_IDENTITY shows up as what it is) and the identity env that went with it.
+        {
+            String presented = envVars.has(ControllerIdentity.ENV) ? envVars.get(ControllerIdentity.ENV) : "";
+            StringBuilder extra = new StringBuilder();
+            for (String name : identityEnv.keySet()) {
+                if (name.equals(ControllerIdentity.ENV) || !envVars.has(name)) continue;
+                extra.append(extra.length() == 0 ? "; env " : ", ").append(name);
+                if (!name.equals("SDL_GAMECONTROLLERCONFIG")) extra.append('=').append(envVars.get(name));
+            }
+            Log.i("GuestLauncher", "Controller identity: " + ControllerIdentity.describe(presented)
+                    + " (FAKE_EVDEV_IDENTITY=" + (presented.isEmpty() ? "unset" : presented)
+                    + ", from " + ControllerIdentity.source(container, shortcut) + ")" + extra);
         }
 
 

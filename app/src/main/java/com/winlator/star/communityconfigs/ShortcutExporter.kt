@@ -87,6 +87,9 @@ object ShortcutExporter {
         put(effective, "startupSelection", shortcut.getExtra("startupSelection"))
         put(effective, "exclusiveXInput", shortcut.getExtra("exclusiveXInput"))
         put(effective, "disableXinput", shortcut.getExtra("disableXinput"))
+        // Controller identity: the game's own, else the container's (Generic is stored as absent).
+        put(effective, "controllerIdentity", orDefault(shortcut, "controllerIdentity",
+            container?.getControllerIdentity()?.takeIf { it != com.winlator.star.core.ControllerIdentity.GENERIC }))
         put(effective, "simTouchScreen", shortcut.getExtra("simTouchScreen"))
         put(effective, "numControllers", shortcut.getExtra("numControllers"))
         put(effective, "controlsProfile", shortcut.getExtra("controlsProfile"))
@@ -117,6 +120,11 @@ object ShortcutExporter {
         put(effective, "frameGenModel", orDefault(shortcut, "frameGenModel", container?.getFrameGenModel()?.toString()))
         put(effective, "vibrationMode", orDefault(shortcut, "vibrationMode", container?.getVibrationMode()?.toString()))
         put(effective, "vibrationIntensity", orDefault(shortcut, "vibrationIntensity", container?.getVibrationIntensity()?.toString()))
+        // Rumble motors: the game's override, else the container's OWN choice. A container that never
+        // chose follows its device's default (Single only on the AYANEO Pocket FIT), which describes
+        // this handheld rather than the game, so it is not exported.
+        put(effective, "rumbleMotors", orDefault(shortcut, "rumbleMotors",
+            container?.takeIf { it.hasRumbleMotors() }?.getRumbleMotors()?.toString()))
         // Motion aim (gyro) per-game keys — effective = shortcut override, else the container getter,
         // mirroring XServerDisplayActivity's launch resolution. Deadzone/smoothing are deliberately
         // container/device-scoped (the hand, not the game) and are NOT carried.

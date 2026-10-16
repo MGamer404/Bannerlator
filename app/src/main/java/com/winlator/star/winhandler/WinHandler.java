@@ -9,6 +9,7 @@ import androidx.preference.PreferenceManager;
 
 import com.winlator.star.XServerDisplayActivity;
 import com.winlator.star.core.GyroCalibrator;
+import com.winlator.star.core.RumbleMotors;
 import com.winlator.star.core.StringUtils;
 import com.winlator.star.inputcontrols.ControlsProfile;
 import com.winlator.star.inputcontrols.ExternalController;
@@ -181,6 +182,10 @@ public class WinHandler {
     public static final int VIBRATION_MODE_BOTH = 3;
     private volatile int vibrationMode = VIBRATION_MODE_CONTROLLER;
     private volatile int vibrationIntensity = 100;
+    // Rumble motors (core.RumbleMotors): BOTH = strong and weak drive their own motors; SINGLE = both
+    // requests folded onto the strong motor so only one motor ever runs. Same push discipline as the
+    // mode/intensity above (setupUI after the container is resolved, then live from the drawer).
+    private volatile int rumbleMotors = RumbleMotors.BOTH;
 
     // Gyro (motion aim) — "hold the activator + tilt the device" -> right stick / left stick / mouse.
     // Rate-mode math (deadzone -> invert -> sensitivity -> low-pass -> clamp) follows the reference
@@ -836,6 +841,20 @@ public class WinHandler {
      * otherwise. Below API 31 this always blends — identical to the pre-dual-motor behavior.
      */
     private void dispatchControllerVibration(int strong, int weak, int duration, int slot, boolean stopping) {
+        // Rumble motors = Single: fold the weak (high-frequency) request onto the strong (low-frequency)
+        // motor at max(strong, weak) and keep the weak motor at 0, so a two-motor target only ever runs
+        // its first motor (dispatchDualMotor never adds a vibrator id for a zero amplitude, and an evdev
+        // FF_RUMBLE upload carries weak = 0). max() rather than a scaled blend: a weak-only cue
+        // (footsteps, engine idle) on the big motor must not drop under its spin-up threshold and
+        // vanish, and the request never exceeds what the game asked of either motor. Single-motor
+        // targets (phone, one vibrator id, the blended fallback) already rumble at max(strong, weak),
+        // so nothing changes for them. Every source lands here: Wine's force feedback, BANNERIN's
+        // XInput rumble, and the Players-tab Identify buzz. Stopping is untouched (both are 0).
+        if (rumbleMotors == RumbleMotors.SINGLE && !stopping) {
+            strong = Math.max(strong, weak);
+            weak = 0;
+        }
+
         // Which deviceId owns this slot. With descriptor keying one slot can now hold
         // several sub-device ids for a single physical pad, so resolve to the one that
         // actually has a vibrator (falling back to OSC / first physical) — for a plain
@@ -1059,6 +1078,37 @@ public class WinHandler {
 
     public int getOnScreenControllerMode() {
         return onScreenControllerMode;
+    }
+
+    /** Per-container Rumble motors (RumbleMotors.BOTH / SINGLE), pushed at launch (setupUI) and live
+     *  from the in-game drawer. Not persisted here (Container/shortcut own it). Switching to Single
+     *  stops any rumble in flight on the physical pads, so a long effect started on both motors
+     *  doesn't keep the second one running until the game's next update. */
+    public void setRumbleMotors(int motors) {
+        int next = RumbleMotors.sanitize(motors);
+        int previous = rumbleMotors;
+        rumbleMotors = next;
+        if (next == RumbleMotors.SINGLE && previous != RumbleMotors.SINGLE) stopPhysicalRumble();
+    }
+
+    public int getRumbleMotors() {
+        return rumbleMotors;
+    }
+
+    /** Cancels whatever rumble the physical pads are playing (all motors). The phone vibrator has one
+     *  motor and is left alone. Safe from the main thread: deviceToSlot is concurrent, and the
+     *  VibratorManager/SDL calls are the same ones testRumble makes from here. */
+    private void stopPhysicalRumble() {
+        SteamControllerBackend backend = sdlBackend;
+        for (Integer devId : deviceToSlot.keySet()) {
+            if (devId == null || devId == OSC_DEVICE_ID) continue;
+            if (backend != null && sdlPads.containsKey(devId)) {
+                backend.rumble(devId, 0, 0, 0);
+                continue;
+            }
+            android.view.InputDevice device = android.view.InputDevice.getDevice(devId);
+            if (device != null) stopVibrationTarget(device);
+        }
     }
 
     public int getVibrationMode() {

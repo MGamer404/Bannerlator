@@ -53,6 +53,7 @@ import com.winlator.star.container.GameDetails
 import com.winlator.star.container.Shortcut
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.WrapperManager
+import com.winlator.star.core.ControllerIdentity
 import com.winlator.star.core.DirectAudioSupport
 import com.winlator.star.core.SyncMode
 import com.winlator.star.core.SyncSupport
@@ -761,6 +762,27 @@ private fun controllerRows(xmb: XmbScope, p: XmbPrefs): List<XmbRow> {
     rows += XmbRow.Toggle("xinput", "Enable XInput for games", Icons.Filled.Gamepad, xi, disabledReason = needExcl) { writeInput(it, di); xmb.saved(); p.shortcut.saveData(); xmb.refresh() }
     rows += XmbRow.Toggle("dinput", "Enable DInput for games", Icons.Filled.Gamepad, di, disabledReason = needExcl) { writeInput(xi, it); xmb.saved(); p.shortcut.saveData(); xmb.refresh() }
     rows += XmbRow.Toggle("disableX", "Disable XInput", Icons.Filled.Gamepad, p.ex("disableXinput", "0") == "1") { xmb.set(p, "disableXinput", if (it) "1" else null) }
+    // The pop-up editors' "?" for the XInput / DInput / Exclusive switches, as its own column.
+    rows += XmbRow.Link("inputHelp", "What do these switches do?", Icons.Filled.HelpOutline, subtitle = "XInput, DInput and exclusive input") {
+        xmbHelpMenu(p.context, xmb.scope, "Input", R.string.help_input_switches_game)
+    }
+    if (!com.winlator.star.linux.LinuxShortcuts.isLinuxEntry(s)) {
+        // Controller identity: this game's own value, else the container's. Picking the container's
+        // value clears the game's own, so it keeps following its container.
+        val containerIdentity = ControllerIdentity.forWine(c.getControllerIdentity())
+        val identity = ControllerIdentity.normalize(p.ex(ControllerIdentity.EXTRA, ""))?.let { ControllerIdentity.forWine(it) } ?: containerIdentity
+        val identityChoices = ControllerIdentity.wineChoices()
+        val identityLabels = identityChoices.map { it.label }
+        rows += XmbRow.Choice("controllerIdentity", "Controller identity", Icons.Filled.Gamepad, identityLabels,
+            ControllerIdentity.label(identity), subtitle = "Which controller the game sees") { v ->
+            identityChoices.getOrNull(identityLabels.indexOf(v))?.let { picked ->
+                xmb.set(p, ControllerIdentity.EXTRA, picked.value.takeIf { it != containerIdentity })
+            }
+        }
+        rows += XmbRow.Link("controllerIdentityHelp", "What is Controller identity?", Icons.Filled.HelpOutline, subtitle = "Generic, Xbox, DirectInput and the experimental ones") {
+            xmbHelpMenu(p.context, xmb.scope, "Controller identity", R.string.help_controller_identity_game)
+        }
+    }
     rows += XmbRow.Toggle("simTouch", "Touchscreen mode", Icons.Filled.TouchApp, p.ex("simTouchScreen", "0") == "1") { xmb.set(p, "simTouchScreen", if (it) "1" else "0") }
     val nc = p.arr(R.array.num_controllers_entries)
     val ncIdx = ((p.ex("numControllers", "1").toIntOrNull() ?: 1).coerceIn(1, nc.size)) - 1

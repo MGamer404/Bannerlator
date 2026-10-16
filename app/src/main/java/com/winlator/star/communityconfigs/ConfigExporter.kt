@@ -45,6 +45,8 @@ object ConfigExporter {
         "fpsLimiterEnabled", "sharpnessEffect", "sharpnessLevel", "sharpnessDenoise", "reshadeLoadout",
         "reshadeMode", "reshadeParams", "reshadeEffect", "emulator", "box64Version", "box64Preset",
         "fexcorePreset", "cpuList", "startupSelection", "inputType", "exclusiveXInput", "disableXinput",
+        // Controller identity (generic / xbox360 / ... ; core.ControllerIdentity) with the other controller keys.
+        "controllerIdentity",
         "simTouchScreen", "numControllers", "controlsProfile", "wincomponents", "midiSoundFont",
         "lc_all", "autoCloseOnExit",
         // Sync selector (esync | ntsync | wineserver); an importing layer that can't run it falls back
@@ -71,6 +73,8 @@ object ConfigExporter {
         // #168 custom startup service set (only consumed when startupSelection = Custom); frame-gen
         // interpolation model; dual-motor vibration; sticky per-game upscaler override.
         "startupServices", "frameGenModel", "vibrationMode", "vibrationIntensity", "scalingMode",
+        // Rumble motors ("0" Both / "1" Single), next to the other vibration keys.
+        "rumbleMotors",
         // Drawer graphics quick-settings (#382): the sharpness/CAS/HDR sliders + SGSR/deband toggles
         // that are remembered per game alongside scalingMode. Vulkan path: upscaleSharpness, casEnabled,
         // casSharpness, hdrEnabled. GL path: sgsrEnabled, sgsrSharpness, glUpscaleSharpness. Deband

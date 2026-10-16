@@ -1211,7 +1211,7 @@ private fun ControlsPage(state: XServerDrawerState, kind: InGameSessionKind) {
             )
             2 -> SaveNotes(
                 "Rumble on / off and per-slot switches" to listOf(SaveScope.ALL),
-                "Rumble target and intensity (this game when its settings carry them)" to listOf(SaveScope.CONTAINER),
+                "Rumble target, intensity and motors (this game when its settings carry them)" to listOf(SaveScope.CONTAINER),
             )
             3 -> SaveNotes(
                 "Motion aim settings" to listOf(game),
