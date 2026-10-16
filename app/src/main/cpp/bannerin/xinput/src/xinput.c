@@ -46,7 +46,7 @@
 #include "bxi_core.h"
 
 #ifndef BXI_VERSION
-#define BXI_VERSION "dev"
+#define BXI_VERSION "1.0"
 #endif
 
 #if defined(__arm64ec__) || defined(_M_ARM64EC)
