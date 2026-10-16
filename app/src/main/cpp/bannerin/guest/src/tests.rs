@@ -1638,12 +1638,20 @@ fn credits_follow_a_dip_to_30_fps_immediately() {
 
 #[test]
 fn credits_still_deliver_to_a_frozen_game_within_55_ms() {
-    // The game stops presenting at 1 s (frozen, not yet stale) while the stick is let go.
-    let s = Script { phases: &[(60, 1000), (0, 700)], moving: (0, 1000), taps: false, rest_ms: Some(1000) };
+    // The game presents its last frame at ~983 ms and then freezes (not yet stale). The stick keeps
+    // moving until 990 ms, so the change after that last frame has no credit and is held; it is let
+    // go (the rest position) at 1000 ms. The held change must still arrive within the 50 ms bound.
+    let s = Script { phases: &[(60, 990), (0, 700)], moving: (0, 990), taps: false, rest_ms: Some(1000) };
     auto_run("credfrozen", s, |r| {
+        let last_frame = r.frames.last().copied().unwrap_or(0);
+        let held_from = last_frame; // the first change after it waits for a credit
         let rest = (r.rest_seen - r.rest_sent) as f64 / 1e6;
-        say(&format!("[credfrozen] game frozen: rest position delivered {:.1} ms after the last publish, mode {}\n", rest, r.stats.axis_mode));
-        ensure!(rest <= 55.0, "a held change waited {:.1} ms for a frozen game", rest);
+        let since_frame = r.rest_seen.saturating_sub(held_from) as f64 / 1e6;
+        say(&format!("[credfrozen] game frozen after its frame at +{:.1} ms: the held change (rest position) arrived {:.1} ms after the last publish, {:.1} ms after the last frame, mode {}\n",
+            (last_frame - r.start) as f64 / 1e6, rest, since_frame, r.stats.axis_mode));
+        ensure!(rest >= 20.0, "the rest position went out after {:.1} ms: it was not held, the stall path did not run", rest);
+        ensure!(since_frame <= 55.0, "a held change waited {:.1} ms for a frozen game", since_frame);
+        ensure!(r.stats.paced_frames >= 1, "no held frame counted");
         Ok(())
     });
 }
