@@ -270,6 +270,8 @@ static void bxi_log(const char *fmt, ...) {
 
 /* The line every process that loads the DLL writes once (DllMain, PROCESS_ATTACH). */
 static void log_attach(HMODULE self) {
+    InitOnceExecuteOnce(&g_log_init, log_once, NULL, NULL); /* the channel name below needs it */
+    if (g_logvia == LOG_OFF) return;
     WCHAR w[MAX_PATH];
     char image[MAX_PATH * 3] = "?", dll[MAX_PATH] = "?";
     DWORD n = GetModuleFileNameW(NULL, w, MAX_PATH);

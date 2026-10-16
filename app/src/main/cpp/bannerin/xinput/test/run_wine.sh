@@ -16,7 +16,7 @@ TESTS="$(cd "${2:?tests dir}" && pwd)"
 FEEDER="$(cd "$(dirname "${3:?feeder}")" && pwd)/$(basename "$3")"
 : "${WINEPREFIX:=$HOME/.wine-bxi}"
 # +debugstr only so the OutputDebugStringA log channel can be seen at all
-export WINEPREFIX WINEDEBUG="${WINEDEBUG:--all,+debugstr}"
+export WINEPREFIX WINEDEBUG="${WINEDEBUG:--all,err+all,+debugstr}"
 CASES="${CASES:-x86_64:x86_64:auto x86_64:x86_64:unix x86_64:x86_64:z i386:i386:auto}"
 OVR="xinput1_1,xinput1_2,xinput1_3,xinput1_4,xinput9_1_0,xinputuap=n;mscoree,mshtml="
 WINE="${WINE:-wine}"

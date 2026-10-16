@@ -142,6 +142,17 @@ jobs:
     - name: Build the feeder
       run: app/src/main/cpp/bannerin/xinput/build.sh host out/host
 
+    - name: Probe (does this Wine run aarch64 PE programs?)
+      continue-on-error: true
+      run: |
+        file out/tests/aarch64/xinput_test.exe out/dlls/arm64x/xinput1_4.dll || true
+        export WINEPREFIX="$HOME/.wine-bxi"
+        WINEDLLOVERRIDES="mscoree,mshtml=" timeout 300 wine wineboot -i >/tmp/wineboot.log 2>&1; echo "wineboot exit $?"; tail -20 /tmp/wineboot.log
+        timeout 60 wineserver -w || true
+        timeout 60 wine cmd /c echo hello-from-cmd; echo "cmd exit $?"
+        WINEDEBUG=err+all,warn+module,+loaddll timeout 90 wine out/tests/aarch64/xinput_test.exe 2>&1 | tail -60; echo "usage run exit ${PIPESTATUS[0]}"
+        timeout 60 wineserver -w || true
+
     - name: End to end under native ARM64 Wine (ARM64X image, native view)
       env:
         CASES: arm64x:aarch64:auto
