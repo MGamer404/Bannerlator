@@ -1435,6 +1435,7 @@ struct Script {
     moving: (u64, u64),
     taps: bool,
     rest_ms: Option<u64>,
+    env: &'static [(&'static str, &'static str)],
 }
 
 /// Writer process plays `script`; reader process (auto mode) records arrivals, then runs `check`.
@@ -1521,6 +1522,9 @@ fn auto_run<C: FnOnce(&AutoRun) -> Result<(), String>>(tag: &'static str, script
     let rpid = spawn("auto-reader", || {
         shm.wait(0, 1, 30)?;
         sc.enter(); // BANNERIN_AXIS_HZ unset: frame credits
+        for (k, v) in script.env {
+            std::env::set_var(k, v);
+        }
         ensure!(bannerin_axis_auto() == 1, "frame credits are the default");
         let mut r = Rd::attach(0, sys::O_NONBLOCK)?;
         ensure!(is_full(&r.frame(1000)?), "full first");
@@ -1580,7 +1584,7 @@ fn auto_run<C: FnOnce(&AutoRun) -> Result<(), String>>(tag: &'static str, script
 
 #[test]
 fn credits_send_one_stick_frame_per_game_frame_at_60_fps() {
-    let s = Script { phases: &[(60, 2200)], moving: (0, 2200), taps: false, rest_ms: None };
+    let s = Script { phases: &[(60, 2200)], moving: (0, 2200), taps: false, rest_ms: None, env: &[] };
     auto_run("cred60", s, |r| {
         let rate = r.rate(400, 2200);
         let (sticks, frames) = (r.sticks_in(400, 2200), r.frames_in(400, 2200));
@@ -1592,7 +1596,8 @@ fn credits_send_one_stick_frame_per_game_frame_at_60_fps() {
         ));
         ensure!(sticks <= frames + 1, "{} stick frames for {} game frames", sticks, frames);
         ensure!((52.0..=62.0).contains(&rate), "{:.1}/s at 60 fps, want about 60", rate);
-        ensure!(r.stats.axis_mode == 1 && r.slot.reader_axis_mode == 1, "mode {} / {}", r.stats.axis_mode, r.slot.reader_axis_mode);
+        // at exactly 60 fps either the frames or the 60/s ceiling may be the tighter limit
+        ensure!(matches!(r.stats.axis_mode, 1 | 5) && matches!(r.slot.reader_axis_mode, 1 | 5), "mode {} / {}", r.stats.axis_mode, r.slot.reader_axis_mode);
         ensure!(r.slot.frame_count >= 100, "frame count {}", r.slot.frame_count);
         ensure!(rest <= 25.0, "rest position {:.1} ms after the last publish", rest);
         Ok(())
@@ -1601,8 +1606,9 @@ fn credits_send_one_stick_frame_per_game_frame_at_60_fps() {
 
 #[test]
 fn credits_have_no_ramp_after_an_idle_app_speeds_up() {
-    // The app idles at 5 fps (it redraws on change), then the stick moves and it speeds to 100 fps.
-    let s = Script { phases: &[(5, 1000), (100, 1200)], moving: (1000, 2200), taps: false, rest_ms: None };
+    // The app idles at 5 fps (it redraws on change), then the stick moves and it speeds to 100 fps:
+    // the first stick frame goes at once, then the 60/s ceiling governs.
+    let s = Script { phases: &[(5, 1000), (100, 1200)], moving: (1000, 2200), taps: false, rest_ms: None, env: &[] };
     auto_run("credramp", s, |r| {
         let first = r.sticks.iter().copied().find(|t| *t >= r.first_publish).unwrap_or(0);
         let lat = first.saturating_sub(r.first_publish) as f64 / 1e6;
@@ -1610,28 +1616,75 @@ fn credits_have_no_ramp_after_an_idle_app_speeds_up() {
         let gap2 = second.saturating_sub(first) as f64 / 1e6;
         let early = r.rate(1050, 1250);
         let later = r.rate(1050, 2200);
-        say(&format!("[credramp] first stick frame {:.3} ms after the first publish, next {:.1} ms later; first 200 ms {:.1}/s, then {:.1}/s (game 100 fps)\n", lat, gap2, early, later));
+        let gap = r.min_gap_ms(1050, 2200);
+        say(&format!("[credramp] first stick frame {:.3} ms after the first publish, next {:.1} ms later; first 200 ms {:.1}/s, then {:.1}/s, min gap {:.1} ms (game 100 fps, ceiling 60)\n", lat, gap2, early, later, gap));
         ensure!(first != 0 && lat <= 1.0, "first stick frame {:.3} ms after the first publish", lat);
-        ensure!(gap2 <= 12.0, "the second stick frame came {:.1} ms later (a game frame is 10 ms)", gap2);
-        ensure!(early >= 85.0, "a ramp: {:.1}/s in the first 200 ms", early);
-        ensure!((85.0..=102.0).contains(&later), "{:.1}/s at 100 fps", later);
+        ensure!(gap2 <= 18.0, "the second stick frame came {:.1} ms later (the ceiling is 16.7 ms)", gap2);
+        ensure!(early >= 50.0, "a ramp: {:.1}/s in the first 200 ms", early);
+        ensure!((55.0..=62.0).contains(&later), "{:.1}/s at 100 fps under a 60/s ceiling", later);
+        ensure!(gap >= 15.5, "stick frames {:.1} ms apart under a 16.7 ms ceiling", gap);
+        ensure!(r.stats.axis_mode == 5, "mode {} (want 5, the ceiling)", r.stats.axis_mode);
         Ok(())
     });
 }
 
 #[test]
 fn credits_follow_a_dip_to_30_fps_immediately() {
-    let s = Script { phases: &[(100, 1000), (30, 1200)], moving: (0, 2200), taps: false, rest_ms: None };
+    let s = Script { phases: &[(160, 1000), (30, 1200)], moving: (0, 2200), taps: false, rest_ms: None, env: &[] };
     auto_run("creddip", s, |r| {
         let before = r.rate(300, 1000);
         let after = r.rate(1005, 2200);
         let gap = r.min_gap_ms(1005, 2200);
         let (sticks, frames) = (r.sticks_in(1005, 2200), r.frames_in(1005, 2200));
-        say(&format!("[creddip] 100 fps: {:.1}/s; after the dip to 30 fps: {:.1}/s, min gap {:.1} ms, {} stick frames for {} game frames\n", before, after, gap, sticks, frames));
-        ensure!(before >= 85.0, "before the dip {:.1}/s", before);
+        say(&format!("[creddip] 160 fps: {:.1}/s (ceiling 60); after the dip to 30 fps: {:.1}/s, min gap {:.1} ms, {} stick frames for {} game frames\n", before, after, gap, sticks, frames));
+        ensure!((55.0..=62.0).contains(&before), "before the dip {:.1}/s", before);
         ensure!(sticks <= frames + 1, "{} stick frames for {} game frames", sticks, frames);
         ensure!((26.0..=32.0).contains(&after), "after the dip {:.1}/s, want about 30", after);
         ensure!(gap >= 28.0, "stick frames {:.1} ms apart after the dip (a game frame is 33 ms)", gap);
+        Ok(())
+    });
+}
+
+#[test]
+fn credits_are_capped_at_60_per_second_for_a_160_fps_game() {
+    let s = Script { phases: &[(160, 2200)], moving: (0, 2200), taps: false, rest_ms: None, env: &[] };
+    auto_run("cred160", s, |r| {
+        let rate = r.rate(400, 2200);
+        let gap = r.min_gap_ms(400, 2200);
+        let rest = (r.rest_seen - r.rest_sent) as f64 / 1e6;
+        say(&format!("[cred160] 160 fps game: {:.1} stick frames/s, min gap {:.1} ms; mode {} at {} Hz, ceiling {} Hz; rest after {:.1} ms\n",
+            rate, gap, r.slot.reader_axis_mode, r.slot.reader_axis_hz, r.slot.reader_auto_max, rest));
+        ensure!((55.0..=62.0).contains(&rate), "{:.1}/s for a 160 fps game, want the 60/s ceiling", rate);
+        ensure!(gap >= 15.5, "stick frames {:.1} ms apart under a 16.7 ms ceiling", gap);
+        ensure!(r.slot.reader_axis_mode == 5 && r.slot.reader_axis_hz == 60 && r.slot.reader_auto_max == 60,
+            "mode {} hz {} max {}", r.slot.reader_axis_mode, r.slot.reader_axis_hz, r.slot.reader_auto_max);
+        ensure!(rest <= 20.0, "rest position {:.1} ms after the last publish (one ceiling interval is 16.7 ms)", rest);
+        Ok(())
+    });
+}
+
+#[test]
+fn credits_govern_below_the_ceiling_at_40_fps() {
+    let s = Script { phases: &[(40, 2200)], moving: (0, 2200), taps: false, rest_ms: None, env: &[] };
+    auto_run("cred40", s, |r| {
+        let rate = r.rate(400, 2200);
+        let (sticks, frames) = (r.sticks_in(400, 2200), r.frames_in(400, 2200));
+        say(&format!("[cred40] 40 fps game: {:.1} stick frames/s, {} stick frames for {} game frames, mode {}\n", rate, sticks, frames, r.slot.reader_axis_mode));
+        ensure!((37.0..=41.0).contains(&rate), "{:.1}/s at 40 fps, want 40", rate);
+        ensure!(sticks <= frames + 1, "{} stick frames for {} game frames", sticks, frames);
+        ensure!(r.slot.reader_axis_mode == 1, "mode {} (want 1, credits)", r.slot.reader_axis_mode);
+        Ok(())
+    });
+}
+
+#[test]
+fn the_auto_ceiling_is_tunable() {
+    let s = Script { phases: &[(160, 2200)], moving: (0, 2200), taps: false, rest_ms: None, env: &[("BANNERIN_AXIS_AUTO_MAX", "120")] };
+    auto_run("credmax120", s, |r| {
+        let rate = r.rate(400, 2200);
+        say(&format!("[credmax120] BANNERIN_AXIS_AUTO_MAX=120, 160 fps game: {:.1} stick frames/s, mode {} at {} Hz\n", rate, r.slot.reader_axis_mode, r.slot.reader_axis_hz));
+        ensure!((108.0..=122.0).contains(&rate), "{:.1}/s, want about 120", rate);
+        ensure!(r.slot.reader_auto_max == 120 && r.slot.reader_axis_mode == 5, "max {} mode {}", r.slot.reader_auto_max, r.slot.reader_axis_mode);
         Ok(())
     });
 }
@@ -1641,7 +1694,7 @@ fn credits_still_deliver_to_a_frozen_game_within_55_ms() {
     // The game presents its last frame at ~983 ms and then freezes (not yet stale). The stick keeps
     // moving until 990 ms, so the change after that last frame has no credit and is held; it is let
     // go (the rest position) at 1000 ms. The held change must still arrive within the 50 ms bound.
-    let s = Script { phases: &[(60, 990), (0, 700)], moving: (0, 990), taps: false, rest_ms: Some(1000) };
+    let s = Script { phases: &[(60, 990), (0, 700)], moving: (0, 990), taps: false, rest_ms: Some(1000), env: &[] };
     auto_run("credfrozen", s, |r| {
         let last_frame = r.frames.last().copied().unwrap_or(0);
         let held_from = last_frame; // the first change after it waits for a credit
@@ -1658,12 +1711,12 @@ fn credits_still_deliver_to_a_frozen_game_within_55_ms() {
 
 #[test]
 fn credits_fall_back_to_60_hz_without_a_fresh_feed() {
-    let s = Script { phases: &[(120, 800), (0, 1600)], moving: (0, 2400), taps: false, rest_ms: None };
+    let s = Script { phases: &[(120, 800), (0, 1600)], moving: (0, 2400), taps: false, rest_ms: None, env: &[] };
     auto_run("credstale", s, |r| {
         let fed = r.rate(300, 800);
         let stale = r.rate(1150, 2400);
-        say(&format!("[credstale] fed 120 fps: {:.1}/s; feed stopped: {:.1}/s (want 60); fallbacks {}, mode {}\n", fed, stale, r.stats.auto_fallbacks, r.stats.axis_mode));
-        ensure!(fed >= 100.0, "with the feed {:.1}/s", fed);
+        say(&format!("[credstale] fed 120 fps (ceiling 60): {:.1}/s; feed stopped: {:.1}/s (want 60); fallbacks {}, mode {}\n", fed, stale, r.stats.auto_fallbacks, r.stats.axis_mode));
+        ensure!((55.0..=62.0).contains(&fed), "with the feed (120 fps, ceiling 60) {:.1}/s", fed);
         ensure!((54.0..=66.0).contains(&stale), "without a fresh feed {:.1}/s, want 60", stale);
         ensure!(r.stats.auto_fallbacks >= 1 && r.slot.reader_auto_fallbacks >= 1, "fallbacks {} / {}", r.stats.auto_fallbacks, r.slot.reader_auto_fallbacks);
         ensure!(r.stats.axis_mode == 2 && r.slot.reader_axis_mode == 2, "mode {} / {}", r.stats.axis_mode, r.slot.reader_axis_mode);
@@ -1673,7 +1726,7 @@ fn credits_fall_back_to_60_hz_without_a_fresh_feed() {
 
 #[test]
 fn credits_keep_button_edges_immediate_and_in_order() {
-    let s = Script { phases: &[(30, 1000), (0, 600), (120, 600)], moving: (0, 2200), taps: true, rest_ms: None };
+    let s = Script { phases: &[(30, 1000), (0, 600), (120, 600)], moving: (0, 2200), taps: true, rest_ms: None, env: &[] };
     auto_run("credtaps", s, |r| {
         ensure!(!r.sent_edges.is_empty(), "no taps sent");
         ensure!(r.edges.len() == r.sent_edges.len(), "{} edges sent, {} received", r.sent_edges.len(), r.edges.len());
@@ -1701,8 +1754,8 @@ fn the_frame_feed_rings_only_while_a_reader_waits_for_a_frame() {
         shm.wait(1, 1, 30)?;
         let start = Instant::now();
         let feeder = std::thread::spawn(move || {
-            for k in 0..200u64 {
-                sleep_until(start + Duration::from_millis(10 * k)); // 100 fps for 2 s
+            for k in 0..80u64 {
+                sleep_until(start + Duration::from_millis(25 * k)); // 40 fps for 2 s (below the ceiling)
                 bannerin_core::writer::game_frame(sys::mono_ns());
             }
         });
@@ -1738,7 +1791,7 @@ fn the_frame_feed_rings_only_while_a_reader_waits_for_a_frame() {
         say(&format!("[credwake] {} game frames; frame wakes: {} while the pad was idle, {} more while the stick moved\n", frames, idle, moving - idle));
         ensure!(idle == 0, "{} futex wakes for frames while no reader waited", idle);
         ensure!(moving > idle, "no frame ever woke a waiting reader");
-        ensure!(moving - idle <= 100, "{} wakes for 100 frames", moving - idle);
+        ensure!(moving - idle <= 40, "{} wakes for 40 frames", moving - idle);
         Ok(())
     });
     assert_eq!((wait_pid(wpid), wait_pid(rpid)), (0, 0));

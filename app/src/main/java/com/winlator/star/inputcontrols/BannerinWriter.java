@@ -65,13 +65,19 @@ public final class BannerinWriter {
     public static final int STAT_FRAME_INTERVAL_NS = 20;
     /** Game frames counted by the feed so far (this app process): the frame credits. */
     public static final int STAT_GAME_FRAMES = 21;
-    /** How a reader last paced stick-only frames: 1 frame credits, 2 60 Hz fallback, 3 fixed, 4 unpaced. */
+    /**
+     * How a reader last paced stick-only frames: 1 frame credits (the game's frame rate governs),
+     * 2 60 Hz fallback, 3 fixed, 4 unpaced, 5 frame credits capped by the auto ceiling
+     * (BANNERIN_AXIS_AUTO_MAX, the game presents faster than that).
+     */
     public static final int STAT_READER_AXIS_MODE = 22;
     /** Futex wakes the frame feed issued (only while a reader waited for a frame). */
     public static final int STAT_FRAME_WAKES = 23;
     /** Wake-ups of the readers' per-slot wake threads, summed over every reader process. */
     public static final int STAT_READER_HELPER_WAKES = 24;
-    private static final int STAT_COUNT = 25;
+    /** The auto-mode ceiling (Hz, BANNERIN_AXIS_AUTO_MAX) the readers pace under. */
+    public static final int STAT_READER_AUTO_MAX = 25;
+    private static final int STAT_COUNT = 26;
 
     // Each slot's counters as they stood when releaseAllRingSlots() retired its file, for the
     // session-end diagnostics that may run after the release.

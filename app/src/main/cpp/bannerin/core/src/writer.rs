@@ -55,6 +55,7 @@ pub const STAT_GAME_FRAMES: u32 = 21;
 pub const STAT_READER_AXIS_MODE: u32 = 22;
 pub const STAT_FRAME_WAKES: u32 = 23;
 pub const STAT_READER_HELPER_WAKES: u32 = 24;
+pub const STAT_READER_AUTO_MAX: u32 = 25;
 
 // ---------------------------------------------------------------------------------------------
 // Game frame feed: the app's present threads report every frame the game presents. Each one is
@@ -607,6 +608,7 @@ impl SlotWriter {
             STAT_READER_HELPER_WAKES => &h.r_helper_wakes,
             STAT_READER_AXIS_HZ => return h.r_axis_hz.load(Relaxed) as u64,
             STAT_READER_AXIS_MODE => return h.r_axis_mode.load(Relaxed) as u64,
+            STAT_READER_AUTO_MAX => return h.r_auto_max.load(Relaxed) as u64,
             _ => return 0,
         };
         v.load(Relaxed)
