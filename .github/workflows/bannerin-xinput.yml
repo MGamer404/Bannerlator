@@ -141,8 +141,19 @@ jobs:
         debs="$(ls /tmp/hangover/*.deb | grep -E 'hangover-(wine|libarm64ecfex|libwow64fex)_' || true)"
         [ -n "$debs" ] || debs="$(ls /tmp/hangover/*.deb)"
         echo "installing: $debs"
+        # Its Depends are written for a desktop noble; show what apt objects to, then install the
+        # packages with whatever of their dependencies the runner can satisfy.
+        dpkg-deb -f /tmp/hangover/hangover-wine_*.deb Depends | tr ',' '\n' | sed 's/^ */    /'
         # shellcheck disable=SC2086
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $debs >/dev/null
+        if ! sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $debs >/tmp/apt.log 2>&1; then
+          grep -E 'Depends|Conflicts|Breaks|but|E:' /tmp/apt.log | head -40
+          echo "== apt refused; installing with --force-depends and the dependencies apt can resolve"
+          # shellcheck disable=SC2086
+          deps="$(for d in $debs; do dpkg-deb -f "$d" Depends; done | tr ',' '\n' | sed 's/([^)]*)//g; s/|.*//; s/ //g' | grep -v '^hangover' | sort -u)"
+          for p in $deps; do sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "$p" >/dev/null 2>&1 || echo "    could not install $p"; done
+          # shellcheck disable=SC2086
+          sudo dpkg -i --force-depends $debs >/dev/null
+        fi
         wine --version
 
     - name: Rust
