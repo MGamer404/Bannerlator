@@ -23,7 +23,7 @@ WINE="${WINE:-wine}"
 
 if [ ! -f "$WINEPREFIX/system.reg" ]; then
   echo "== creating the Wine prefix"
-  WINEDLLOVERRIDES="mscoree,mshtml=" timeout 300 "$WINE" wineboot -i >/dev/null 2>&1
+  WINEDLLOVERRIDES="mscoree,mshtml=" timeout 600 "$WINE" wineboot -i >/dev/null 2>&1
   timeout 60 wineserver -w || true
 fi
 "$WINE" --version

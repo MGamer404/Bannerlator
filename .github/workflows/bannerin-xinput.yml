@@ -13,9 +13,10 @@ name: BANNERIN-XInput
 #         Wine's read-only views are live MAP_SHARED mappings), file retire/replace/loss, unplug,
 #         rumble datagrams, capabilities, keystrokes, the Guide wait, and GUI children without std
 #         handles whose DllMain line must reach Wine's stderr
-#   wine-arm64  the same test on an aarch64 runner with native ARM64 Wine: the ARM64X image's native
-#         view in native ARM64 processes (what Wine's own programs are in an arm64ec Wine). The EC
-#         view needs an arm64ec Wine, which no runner has: it is checked structurally in dlls
+#   wine-arm64ec  the same test on an aarch64 runner under Hangover (Wine arm64ec + FEX, the app's
+#         layer layout): the ARM64X image's native view in a native ARM64 process (what Wine's own
+#         programs are there, e.g. control.exe with joy.cpl), its EC view in an x64 process under
+#         FEX (a game), and the i386 DLLs in a 32-bit process under WoW64 FEX
 # The APK build (_build.yml) runs the same build.sh dlls before Gradle.
 on:
   push:
@@ -112,10 +113,10 @@ jobs:
     - name: End to end under Wine
       run: bash app/src/main/cpp/bannerin/xinput/test/run_wine.sh out/dlls out/tests out/host/bannerin-xinput-feeder
 
-  wine-arm64:
+  wine-arm64ec:
     needs: dlls
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
     - uses: actions/checkout@v4
 
@@ -124,12 +125,24 @@ jobs:
         name: bannerin-xinput
         path: out
 
-    - name: Install Wine (native ARM64)
+    # Hangover: Wine built for ARM64 + ARM64EC with FEX as the x86 emulator, the same layout as the
+    # app's arm64ec Proton layers (Wine's own programs native ARM64, x64 programs through FEX).
+    - name: Install Hangover 11.16 (Wine arm64ec + FEX)
       run: |
         set -euo pipefail
+        V=11.16
+        curl -fsSL --retry 5 --retry-delay 5 -o /tmp/hangover.tar \
+          "https://github.com/AndreRH/hangover/releases/download/hangover-$V/hangover_${V}_ubuntu2404_noble_arm64.tar"
+        echo "94611dad2b23978d35825a018c81b3947caaec174aa04c052849d37bc6a39e72  /tmp/hangover.tar" | sha256sum -c -
+        mkdir -p /tmp/hangover
+        tar -xf /tmp/hangover.tar -C /tmp/hangover
+        ls -l /tmp/hangover
         sudo apt-get update -qq
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends wine >/dev/null
-        command -v wine || ls /usr/lib/wine /usr/lib/aarch64-linux-gnu/wine 2>/dev/null | head
+        debs="$(ls /tmp/hangover/*.deb | grep -E 'hangover-(wine|libarm64ecfex|libwow64fex)_' || true)"
+        [ -n "$debs" ] || debs="$(ls /tmp/hangover/*.deb)"
+        echo "installing: $debs"
+        # shellcheck disable=SC2086
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $debs >/dev/null
         wine --version
 
     - name: Rust
@@ -142,18 +155,24 @@ jobs:
     - name: Build the feeder
       run: app/src/main/cpp/bannerin/xinput/build.sh host out/host
 
-    - name: Probe (does this Wine run aarch64 PE programs?)
+    - name: Probe (prefix, an ARM64 and an x64 program)
       continue-on-error: true
+      env:
+        HODLL64: libarm64ecfex.dll
+        HODLL: libwow64fex.dll
       run: |
-        file out/tests/aarch64/xinput_test.exe out/dlls/arm64x/xinput1_4.dll || true
         export WINEPREFIX="$HOME/.wine-bxi"
-        WINEDLLOVERRIDES="mscoree,mshtml=" timeout 300 wine wineboot -i >/tmp/wineboot.log 2>&1; echo "wineboot exit $?"; tail -20 /tmp/wineboot.log
+        WINEDLLOVERRIDES="mscoree,mshtml=" timeout 600 wine wineboot -i >/tmp/wineboot.log 2>&1; echo "wineboot exit $?"; tail -15 /tmp/wineboot.log
         timeout 60 wineserver -w || true
         timeout 60 wine cmd /c echo hello-from-cmd; echo "cmd exit $?"
-        WINEDEBUG=err+all,warn+module,+loaddll timeout 90 wine out/tests/aarch64/xinput_test.exe 2>&1 | tail -60; echo "usage run exit ${PIPESTATUS[0]}"
+        for a in aarch64 x86_64; do
+          timeout 120 wine out/tests/$a/xinput_test.exe 2>&1 | tail -5; echo "$a usage run exit ${PIPESTATUS[0]} (2 = ran and printed its usage)"
+        done
         timeout 60 wineserver -w || true
 
-    - name: End to end under native ARM64 Wine (ARM64X image, native view)
+    - name: End to end under Wine arm64ec (ARM64X native view, ARM64X EC view under FEX, i386 under WoW64 FEX)
       env:
-        CASES: arm64x:aarch64:auto
+        CASES: arm64x:aarch64:auto arm64x:x86_64:auto i386:i386:auto
+        HODLL64: libarm64ecfex.dll
+        HODLL: libwow64fex.dll
       run: bash app/src/main/cpp/bannerin/xinput/test/run_wine.sh out/dlls out/tests out/host/bannerin-xinput-feeder
