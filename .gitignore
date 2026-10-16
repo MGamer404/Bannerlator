@@ -23,6 +23,12 @@
 # .github/workflows/_build.yml every run and copied into jniLibs — never commit it.
 /app/src/main/cpp/bl-steam-client/rust/target/
 /app/src/main/jniLibs/arm64-v8a/libblsteam.so
+# bannerin (Rust controller-input transport): cargo output, the loom crate's own lockfile, and the
+# CI-built JNI writer copied into jniLibs.
+/app/src/main/cpp/bannerin/target/
+/app/src/main/cpp/bannerin/loom/target/
+/app/src/main/cpp/bannerin/loom/Cargo.lock
+/app/src/main/jniLibs/arm64-v8a/libbannerin.so
 scratchpad/
 
 # dxvk-nvapi dlls: fetched and sha256-checked by _build.yml from the release pinned in

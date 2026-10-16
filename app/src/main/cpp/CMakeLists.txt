@@ -79,10 +79,28 @@ add_library(fakeinput SHARED
 
 target_compile_options(fakeinput PRIVATE -Wall -Wextra -fvisibility=hidden)
 
+# BANNERIN, the controller-input transport reader (Rust, bannerin/): a static library with a plain
+# C ABI (bannerin/include/bannerin.h), built by CI before Gradle runs (bannerin/ci/build.sh from
+# .github/workflows/_build.yml). It depends on libc/libdl/pthread only and is linked with
+# --exclude-libs so none of its symbols is exported from the preloaded library.
+set(BANNERIN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/bannerin)
+set(BANNERIN_GUEST_LIB ${BANNERIN_DIR}/target/aarch64-linux-android/release/libbannerin_guest.a)
+if(NOT EXISTS ${BANNERIN_GUEST_LIB})
+    message(FATAL_ERROR "bannerin: ${BANNERIN_GUEST_LIB} is missing. Build it first: "
+            "NDK_BIN=<ndk>/toolchains/llvm/prebuilt/linux-x86_64/bin bannerin/ci/build.sh android")
+endif()
+add_library(bannerin_guest STATIC IMPORTED)
+set_target_properties(bannerin_guest PROPERTIES
+        IMPORTED_LOCATION ${BANNERIN_GUEST_LIB}
+        INTERFACE_INCLUDE_DIRECTORIES ${BANNERIN_DIR}/include
+)
+
 target_link_libraries(fakeinput
         log
         dl
+        bannerin_guest
 )
+target_link_options(fakeinput PRIVATE "-Wl,--exclude-libs,libbannerin_guest.a")
 
 # Force SSBS: keeps PSTATE.SSBS set across Wine's signal returns on arm64ec layers that were not
 # rebuilt with WINE_FORCE_SSBS (loaded via LD_PRELOAD when the container/game toggle is on).

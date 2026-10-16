@@ -1,0 +1,680 @@
+//! App-side writer engine for one pad slot.
+//!
+//! The writer keeps the slot's complete logical state (pad buttons and axes, the system-button
+//! overlay, connection, unplug count, per-button edge counters) in process memory, so a publish
+//! that cannot reach a backing file loses nothing: the next file it can write starts from the full
+//! state. A publish is O(1): diff, at most 11 journal stores, one state copy, one futex wake. It
+//! never allocates, never blocks and does no file I/O (file work happens in `prepare`, `release`
+//! and, rate-limited to once a second, when a publish finds the backing missing).
+//!
+//! Backing lifecycle:
+//! * `prepare` creates `<dir>/pad<slot>` if needed: a new file is fully initialised under a
+//!   temporary name, locked (flock, so readers can tell a dead writer from an idle one) and then
+//!   renamed over the path, so a reader can never see a half-built file. The file it replaces (an
+//!   older one of ours, or one left by an earlier app process) is marked retired and its sleepers
+//!   are woken, which makes every reader re-attach to the new file.
+//! * `release` retires the file and unlinks it. Readers keep their mapping (an unlinked file stays
+//!   valid while mapped), show a neutral pad, and re-attach when the next `prepare` creates a new
+//!   file. Files are never truncated while in use, so a reader's mapping can never fault.
+
+use core::sync::atomic::Ordering::{Relaxed, Release};
+
+use crate::abi::*;
+use crate::layout::*;
+use crate::pad::PadInput;
+use crate::proto;
+use crate::sys::{self, PathBuf};
+
+const DIR_CAP: usize = 1024;
+const HEAL_INTERVAL_NS: u64 = 1_000_000_000;
+
+pub const STAT_PUBLISHES: u32 = 0;
+pub const STAT_EDGES: u32 = 1;
+pub const STAT_WAKE_CALLS: u32 = 2;
+pub const STAT_WOKEN: u32 = 3;
+pub const STAT_UNPLUGS: u32 = 4;
+pub const STAT_READER_ATTACHES: u32 = 5;
+pub const STAT_READER_REATTACHES: u32 = 6;
+pub const STAT_READER_TAPS: u32 = 7;
+pub const STAT_READER_COALESCED: u32 = 8;
+pub const STAT_READER_RESYNCS: u32 = 9;
+pub const STAT_READER_FRAMES: u32 = 10;
+pub const STAT_READER_EVENTS: u32 = 11;
+pub const STAT_READER_REMOVALS: u32 = 12;
+pub const STAT_INSTANCE: u32 = 13;
+pub const STAT_FAILED_PUBLISHES: u32 = 14;
+pub const STAT_HAS_BACKING: u32 = 15;
+
+struct Backing {
+    ptr: *mut u8,
+    fd: i32,
+    dev: u64,
+    ino: u64,
+    instance: u64,
+}
+
+impl Backing {
+    fn shared<'a>(&self) -> &'a Shared {
+        unsafe { Shared::at(self.ptr) }
+    }
+}
+
+fn drop_backing(b: Backing) {
+    sys::munmap(b.ptr, FILE_SIZE);
+    sys::close(b.fd); // also drops the flock
+}
+
+/// Tell every reader of `sh` to move on: retired flag, bell, wake.
+fn retire_shared(sh: &Shared) {
+    sh.header.retired.store(1, Release);
+    sh.header.bell.fetch_add(1, Release);
+    sys::futex_wake(&sh.header.bell, i32::MAX, true);
+}
+
+/// Map whatever file currently sits at `path`, if it is one of ours, so it can be retired once
+/// the replacement is in place.
+fn open_existing(path: &PathBuf) -> Option<*mut u8> {
+    let fd = sys::openat(path.as_ptr(), sys::O_RDWR | sys::O_CLOEXEC, 0).ok()?;
+    let ok = matches!(sys::fstat(fd), Ok(st) if st.is_regular() && st.size >= FILE_SIZE as i64);
+    let p = if ok { sys::mmap(FILE_SIZE, sys::PROT_READ | sys::PROT_WRITE, sys::MAP_SHARED, fd).ok() } else { None };
+    sys::close(fd);
+    let p = p?;
+    if unsafe { Shared::at(p) }.header.magic.load(core::sync::atomic::Ordering::Acquire) == MAGIC {
+        Some(p)
+    } else {
+        sys::munmap(p, FILE_SIZE);
+        None
+    }
+}
+
+fn make_instance(slot: u32, nonce: u32) -> u64 {
+    let (sec, usec) = sys::realtime_us();
+    let v = sys::mono_ns()
+        ^ (((sec as u64).wrapping_mul(1_000_000).wrapping_add(usec as u64)) << 7)
+        ^ ((sys::getpid() as u64) << 40)
+        ^ ((slot as u64) << 61)
+        ^ ((nonce as u64) << 20);
+    if v == 0 {
+        1
+    } else {
+        v
+    }
+}
+
+fn init_header(sh: &Shared, slot: u32, instance: u64) {
+    let h = &sh.header;
+    h.major.store(FORMAT_MAJOR, Relaxed);
+    h.minor.store(FORMAT_MINOR, Relaxed);
+    h.file_size.store(FILE_SIZE as u32, Relaxed);
+    h.header_size.store(HEADER_SIZE as u32, Relaxed);
+    h.copy_size.store(COPY_SIZE as u32, Relaxed);
+    h.copy_count.store(COPY_COUNT as u32, Relaxed);
+    h.journal_len.store(JOURNAL_LEN as u32, Relaxed);
+    h.slot.store(slot, Relaxed);
+    h.instance.store(instance, Relaxed);
+    h.writer_pid.store(sys::getpid() as u32, Relaxed);
+    h.created_ns.store(sys::mono_ns(), Relaxed);
+}
+
+/// The writer for one slot. Not internally synchronised: the owner serialises calls.
+pub struct SlotWriter {
+    slot: u32,
+    pad: PadInput,
+    overlay: u16,
+    connected: bool,
+    counts: [u32; BUTTONS],
+    edges: u32,
+    unplug: u32,
+    pub_axes: [i32; AXES],
+    pub_flags: u32,
+    pub_unplug: u32,
+    pub_seq: u32,
+    dirty: bool,
+    backing: Option<Backing>,
+    dir: [u8; DIR_CAP],
+    dir_len: usize,
+    released: bool,
+    last_heal: u64,
+    nonce: u32,
+    failures: u64,
+}
+
+// The raw pointer is to a MAP_SHARED mapping owned by this writer; moving the writer between
+// threads is fine (the JNI layer keeps each one behind a mutex).
+unsafe impl Send for SlotWriter {}
+
+impl SlotWriter {
+    pub const fn new(slot: u32) -> SlotWriter {
+        SlotWriter {
+            slot,
+            pad: PadInput::NEUTRAL,
+            overlay: 0,
+            connected: false,
+            counts: [0; BUTTONS],
+            edges: 0,
+            unplug: 0,
+            pub_axes: [0; AXES],
+            pub_flags: 0,
+            pub_unplug: 0,
+            pub_seq: 0,
+            dirty: false,
+            backing: None,
+            dir: [0; DIR_CAP],
+            dir_len: 0,
+            released: false,
+            last_heal: 0,
+            nonce: 0,
+            failures: 0,
+        }
+    }
+
+    pub fn slot(&self) -> u32 {
+        self.slot
+    }
+
+    pub fn has_backing(&self) -> bool {
+        self.backing.is_some()
+    }
+
+    pub fn instance(&self) -> u64 {
+        self.backing.as_ref().map(|b| b.instance).unwrap_or(0)
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.connected
+    }
+
+    /// The visible pressed-button mask (pad OR overlay), as last committed.
+    pub fn buttons(&self) -> u16 {
+        parity(&self.counts)
+    }
+
+    fn dir_path(&self) -> Option<PathBuf> {
+        let mut p = PathBuf::new();
+        if self.dir_len == 0 || !p.push(&self.dir[..self.dir_len]) {
+            return None;
+        }
+        Some(p)
+    }
+
+    /// `<dir>/pad<slot>`.
+    pub fn pad_path(&self) -> Option<PathBuf> {
+        let mut p = self.dir_path()?;
+        if p.push(b"/pad") && p.push_u(self.slot as u64) {
+            Some(p)
+        } else {
+            None
+        }
+    }
+
+    /// Make sure `<dir>/pad<slot>` exists, is ours and is live. Idempotent; cheap when it is.
+    pub fn prepare(&mut self, dir: &[u8]) -> Result<(), i32> {
+        let mut d = dir;
+        while d.len() > 1 && d[d.len() - 1] == b'/' {
+            d = &d[..d.len() - 1];
+        }
+        if d.is_empty() || d.len() > DIR_CAP - 64 || d.contains(&0) {
+            return Err(sys::EINVAL);
+        }
+        if self.backing.is_some() && &self.dir[..self.dir_len] != d {
+            self.release(); // moving to another directory: give up the old file first
+        }
+        self.dir[..d.len()].copy_from_slice(d);
+        self.dir_len = d.len();
+        self.released = false;
+        if let Some(dp) = self.dir_path() {
+            let _ = sys::mkdirat(dp.as_ptr(), 0o700);
+        }
+        let path = self.pad_path().ok_or(sys::ENAMETOOLONG)?;
+        if let Some(b) = &self.backing {
+            if !b.shared().is_retired() {
+                if let Ok(st) = sys::stat(path.as_ptr()) {
+                    if st.dev == b.dev && st.ino == b.ino {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        self.create_backing(&path)
+    }
+
+    fn create_backing(&mut self, path: &PathBuf) -> Result<(), i32> {
+        let mut tmp = self.dir_path().ok_or(sys::ENAMETOOLONG)?;
+        self.nonce = self.nonce.wrapping_add(1);
+        let named = tmp.push(b"/.pad")
+            && tmp.push_u(self.slot as u64)
+            && tmp.push(b".")
+            && tmp.push_u(sys::getpid() as u64)
+            && tmp.push(b".")
+            && tmp.push_u(self.nonce as u64)
+            && tmp.push(b".tmp");
+        if !named {
+            return Err(sys::ENAMETOOLONG);
+        }
+        let fd = sys::openat(tmp.as_ptr(), sys::O_RDWR | sys::O_CREAT | sys::O_EXCL | sys::O_CLOEXEC, 0o600)?;
+        let fail = |e: i32, p: *mut u8| -> i32 {
+            sys::munmap(p, FILE_SIZE);
+            sys::close(fd);
+            let _ = sys::unlinkat(tmp.as_ptr());
+            e
+        };
+        if let Err(e) = sys::ftruncate(fd, FILE_SIZE) {
+            return Err(fail(e, core::ptr::null_mut()));
+        }
+        let p = match sys::mmap(FILE_SIZE, sys::PROT_READ | sys::PROT_WRITE, sys::MAP_SHARED, fd) {
+            Ok(p) => p,
+            Err(e) => return Err(fail(e, core::ptr::null_mut())),
+        };
+        let st = match sys::fstat(fd) {
+            Ok(s) => s,
+            Err(e) => return Err(fail(e, p)),
+        };
+        let sh = unsafe { Shared::at(p) };
+        let instance = make_instance(self.slot, self.nonce);
+        init_header(sh, self.slot, instance);
+        // A new file starts from the complete logical state; its journal starts empty (readers
+        // re-attaching to it begin with a full-state frame anyway).
+        self.pub_seq = 0;
+        self.write_copy(sh);
+        sh.header.magic.store(MAGIC, Release);
+        // Held for as long as this process keeps the file: a reader that can take a shared lock
+        // knows the writer is gone (crashed app) and shows a neutral pad instead of frozen input.
+        let _ = sys::flock(fd, sys::LOCK_EX | sys::LOCK_NB);
+        // Whatever sits at the path now (normally our own previous file, or one an earlier app
+        // process left behind), mapped before the rename so it can be retired after it.
+        let previous = open_existing(path);
+        if let Err(e) = sys::renameat(tmp.as_ptr(), path.as_ptr()) {
+            if let Some(q) = previous {
+                sys::munmap(q, FILE_SIZE);
+            }
+            return Err(fail(e, p));
+        }
+        if let Some(old) = self.backing.take() {
+            retire_shared(old.shared());
+            drop_backing(old);
+        }
+        if let Some(q) = previous {
+            let prev = unsafe { Shared::at(q) };
+            if !prev.is_retired() {
+                retire_shared(prev);
+            }
+            sys::munmap(q, FILE_SIZE);
+        }
+        self.backing = Some(Backing { ptr: p, fd, dev: st.dev, ino: st.ino, instance });
+        self.dirty = false;
+        Ok(())
+    }
+
+    /// Retire and unlink the backing (session end). The logical state is kept; the next
+    /// `prepare` publishes it into a new file.
+    pub fn release(&mut self) {
+        if let Some(b) = self.backing.take() {
+            retire_shared(b.shared());
+            if let Some(path) = self.pad_path() {
+                if let Ok(st) = sys::stat(path.as_ptr()) {
+                    if st.dev == b.dev && st.ino == b.ino {
+                        let _ = sys::unlinkat(path.as_ptr());
+                    }
+                }
+            }
+            drop_backing(b);
+        }
+        self.released = true;
+    }
+
+    fn write_copy(&mut self, sh: &Shared) {
+        self.pub_seq = self.pub_seq.wrapping_add(1);
+        if self.pub_seq == 0 {
+            self.pub_seq = 1;
+        }
+        let snap = Snapshot {
+            pub_seq: self.pub_seq,
+            flags: self.pub_flags,
+            unplug: self.pub_unplug,
+            edges: self.edges,
+            counts: self.counts,
+            axes: self.pub_axes,
+            time_ns: sys::mono_ns(),
+        };
+        proto::publish(&sh.copies, &sh.header.published, self.pub_seq, &snap.encode());
+        sh.header.bell.fetch_add(1, Release);
+        let woken = sys::futex_wake(&sh.header.bell, i32::MAX, true);
+        let h = &sh.header;
+        h.w_publishes.fetch_add(1, Relaxed);
+        h.w_wake_calls.fetch_add(1, Relaxed);
+        h.w_woken.fetch_add(woken as u64, Relaxed);
+        h.w_edges.store(self.edges as u64, Relaxed);
+    }
+
+    fn try_heal(&mut self) {
+        if self.released || self.dir_len == 0 {
+            return;
+        }
+        let now = sys::mono_ns();
+        if self.last_heal != 0 && now.wrapping_sub(self.last_heal) < HEAL_INTERVAL_NS {
+            return;
+        }
+        self.last_heal = now;
+        if let Some(path) = self.pad_path() {
+            let _ = self.create_backing(&path);
+        }
+    }
+
+    /// Diff the logical state against what was last published and publish the difference.
+    /// Returns true if the state is now visible to readers.
+    fn commit(&mut self, force: bool) -> bool {
+        let want = (self.pad.buttons | self.overlay) & ALL_BUTTONS;
+        let diff = want ^ parity(&self.counts);
+        let flags = if self.connected { FLAG_CONNECTED } else { 0 };
+        let changed = force
+            || self.dirty
+            || diff != 0
+            || self.pad.axes != self.pub_axes
+            || flags != self.pub_flags
+            || self.unplug != self.pub_unplug;
+        if !changed {
+            return self.backing.is_some();
+        }
+        let shp: *const u8 = match &self.backing {
+            Some(b) => b.ptr,
+            None => core::ptr::null(),
+        };
+        let sh: Option<&Shared> = if shp.is_null() { None } else { Some(unsafe { Shared::at(shp) }) };
+        let mut first = true;
+        for b in 0..BUTTONS {
+            if diff & (1 << b) != 0 {
+                self.edges = self.edges.wrapping_add(1);
+                self.counts[b] = self.counts[b].wrapping_add(1);
+                if let Some(sh) = sh {
+                    let mut p = b as u32;
+                    if want & (1 << b) != 0 {
+                        p |= J_PRESS;
+                    }
+                    if first {
+                        p |= J_GROUP;
+                    }
+                    proto::journal_put(&sh.journal, self.edges, p);
+                }
+                first = false;
+            }
+        }
+        self.pub_axes = self.pad.axes;
+        self.pub_flags = flags;
+        self.pub_unplug = self.unplug;
+        match sh {
+            Some(sh) => {
+                self.write_copy(sh);
+                self.dirty = false;
+                true
+            }
+            None => {
+                self.dirty = true;
+                self.failures += 1;
+                self.try_heal();
+                self.backing.is_some()
+            }
+        }
+    }
+
+    /// The pad's own complete state (absolute, not a delta).
+    pub fn set_pad(&mut self, p: PadInput) -> bool {
+        let mut p = p;
+        p.buttons &= ALL_BUTTONS;
+        for i in 0..AXES {
+            p.axes[i] = clamp_axis(i, p.axes[i]);
+        }
+        self.pad = p;
+        self.commit(false)
+    }
+
+    /// Buttons the app itself holds on top of the pad (Guide / A for the Quick Access Menu).
+    /// ORed with the pad, so clearing it never releases a button the user is holding.
+    pub fn set_overlay(&mut self, buttons: u16) -> bool {
+        self.overlay = buttons & ALL_BUTTONS;
+        self.commit(false)
+    }
+
+    /// Neutral: every button up (pad and overlay), every axis 0. Stays connected.
+    pub fn reset(&mut self) -> bool {
+        self.pad = PadInput::NEUTRAL;
+        self.overlay = 0;
+        self.commit(false)
+    }
+
+    /// A controller is assigned to this slot.
+    pub fn open(&mut self) -> bool {
+        self.connected = true;
+        self.commit(false)
+    }
+
+    /// The controller was unplugged: neutralise, then make every attached reader see a removal.
+    pub fn unplug(&mut self) -> bool {
+        let a = self.reset();
+        self.connected = false;
+        self.unplug = self.unplug.wrapping_add(1);
+        let b = self.commit(true);
+        if let Some(bk) = &self.backing {
+            bk.shared().header.w_unplugs.fetch_add(1, Relaxed);
+        }
+        a && b
+    }
+
+    pub fn stat(&self, which: u32) -> u64 {
+        match which {
+            STAT_EDGES => return self.edges as u64,
+            STAT_FAILED_PUBLISHES => return self.failures,
+            STAT_HAS_BACKING => return self.backing.is_some() as u64,
+            STAT_INSTANCE => return self.instance(),
+            _ => {}
+        }
+        let h = match &self.backing {
+            Some(b) => &b.shared().header,
+            None => return 0,
+        };
+        let v = match which {
+            STAT_PUBLISHES => &h.w_publishes,
+            STAT_WAKE_CALLS => &h.w_wake_calls,
+            STAT_WOKEN => &h.w_woken,
+            STAT_UNPLUGS => &h.w_unplugs,
+            STAT_READER_ATTACHES => &h.r_attaches,
+            STAT_READER_REATTACHES => &h.r_reattaches,
+            STAT_READER_TAPS => &h.r_taps,
+            STAT_READER_COALESCED => &h.r_coalesced,
+            STAT_READER_RESYNCS => &h.r_resyncs,
+            STAT_READER_FRAMES => &h.r_frames,
+            STAT_READER_EVENTS => &h.r_events,
+            STAT_READER_REMOVALS => &h.r_removals,
+            _ => return 0,
+        };
+        v.load(Relaxed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frame::{Cursor, Frame, FrameStats, Journal};
+    use core::sync::atomic::Ordering::Acquire;
+
+    fn tmpdir(tag: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let d = std::env::temp_dir().join(format!(
+            "bannerin-w-{}-{}-{}",
+            tag,
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    struct Map(*mut u8);
+    impl Map {
+        fn open(path: &std::path::Path) -> Map {
+            let mut p = PathBuf::new();
+            assert!(p.push(path.to_str().unwrap().as_bytes()));
+            let fd = sys::openat(p.as_ptr(), sys::O_RDONLY | sys::O_CLOEXEC, 0).unwrap();
+            let m = sys::mmap(FILE_SIZE, sys::PROT_READ, sys::MAP_SHARED, fd).unwrap();
+            sys::close(fd);
+            Map(m)
+        }
+        fn sh(&self) -> &Shared {
+            unsafe { Shared::at(self.0) }
+        }
+    }
+    impl Journal for Map {
+        fn get(&self, idx: u32) -> Option<u32> {
+            self.sh().journal_get(idx)
+        }
+    }
+
+    fn pad(buttons: u16) -> PadInput {
+        PadInput { buttons, axes: [0; AXES] }
+    }
+
+    #[test]
+    fn prepare_creates_a_valid_file_and_is_idempotent() {
+        let d = tmpdir("prep");
+        let mut w = SlotWriter::new(2);
+        w.prepare(d.to_str().unwrap().as_bytes()).unwrap();
+        let inst = w.instance();
+        assert_ne!(inst, 0);
+        let m = Map::open(&d.join("pad2"));
+        assert!(m.sh().valid_for(2));
+        assert!(!m.sh().valid_for(1));
+        assert!(!m.sh().is_retired());
+        w.prepare(d.to_str().unwrap().as_bytes()).unwrap();
+        assert_eq!(w.instance(), inst, "a second prepare reuses the live file");
+        assert_eq!(std::fs::metadata(d.join("pad2")).unwrap().len(), FILE_SIZE as u64);
+        // no temporary files left behind
+        let names: Vec<_> = std::fs::read_dir(&d).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names.len(), 1, "{:?}", names);
+    }
+
+    #[test]
+    fn noop_publish_does_not_publish_or_wake() {
+        let d = tmpdir("noop");
+        let mut w = SlotWriter::new(0);
+        w.prepare(d.to_str().unwrap().as_bytes()).unwrap();
+        w.open();
+        assert!(w.set_pad(PadInput { buttons: 1, axes: [5, 0, 0, 0, 0, 0, 0, 0] }));
+        let m = Map::open(&d.join("pad0"));
+        let bell = m.sh().header.bell.load(Acquire);
+        let pubs = w.stat(STAT_PUBLISHES);
+        for _ in 0..100 {
+            assert!(w.set_pad(PadInput { buttons: 1, axes: [5, 0, 0, 0, 0, 0, 0, 0] }));
+        }
+        assert_eq!(m.sh().header.bell.load(Acquire), bell);
+        assert_eq!(w.stat(STAT_PUBLISHES), pubs);
+    }
+
+    #[test]
+    fn overlay_never_releases_a_held_button() {
+        let d = tmpdir("ovl");
+        let mut w = SlotWriter::new(0);
+        w.prepare(d.to_str().unwrap().as_bytes()).unwrap();
+        w.set_pad(pad(1 << B_A));
+        w.set_overlay((1 << B_MODE) | (1 << B_A));
+        assert_eq!(w.buttons(), (1 << B_A) | (1 << B_MODE));
+        w.set_overlay(0);
+        assert_eq!(w.buttons(), 1 << B_A, "the pad still holds A");
+        w.set_pad(pad(0));
+        assert_eq!(w.buttons(), 0);
+    }
+
+    #[test]
+    fn reader_follows_the_file_through_publishes() {
+        let d = tmpdir("follow");
+        let mut w = SlotWriter::new(1);
+        w.prepare(d.to_str().unwrap().as_bytes()).unwrap();
+        w.open();
+        w.set_pad(PadInput { buttons: 1 << B_B, axes: [1000, -1000, 0, 0, 10, 0, 0, 1] });
+        let m = Map::open(&d.join("pad1"));
+        let mut c = Cursor::new();
+        let mut f = Frame::new();
+        let mut st = FrameStats::default();
+        let s = m.sh().snapshot(16).unwrap();
+        assert_eq!(s.flags & FLAG_CONNECTED, FLAG_CONNECTED);
+        assert!(c.next_frame(&s, &m, &mut f, &mut st));
+        assert_eq!(f.events()[B_B].value, 1);
+        // tap X between reads
+        w.set_pad(PadInput { buttons: (1 << B_B) | (1 << B_X), axes: [1000, -1000, 0, 0, 10, 0, 0, 1] });
+        w.set_pad(PadInput { buttons: 1 << B_B, axes: [0, 0, 0, 0, 0, 0, 0, 0] });
+        let s = m.sh().snapshot(16).unwrap();
+        let mut frames = Vec::new();
+        while c.next_frame(&s, &m, &mut f, &mut st) {
+            frames.push(f.events().to_vec());
+        }
+        assert_eq!(frames.len(), 2);
+        assert!(frames[0].iter().any(|e| e.kind == EV_KEY && e.code == BTN_X && e.value == 1));
+        assert!(frames[1].iter().any(|e| e.kind == EV_KEY && e.code == BTN_X && e.value == 0));
+        assert!(frames[1].iter().any(|e| e.kind == EV_ABS && e.code == ABS_X && e.value == 0));
+    }
+
+    #[test]
+    fn unplug_bumps_the_count_after_neutralising() {
+        let d = tmpdir("unplug");
+        let mut w = SlotWriter::new(0);
+        w.prepare(d.to_str().unwrap().as_bytes()).unwrap();
+        w.open();
+        w.set_pad(pad(1 << B_Y));
+        let m = Map::open(&d.join("pad0"));
+        let before = m.sh().snapshot(16).unwrap();
+        assert!(w.unplug());
+        let after = m.sh().snapshot(16).unwrap();
+        assert_eq!(after.unplug, before.unplug + 1);
+        assert_eq!(after.buttons(), 0);
+        assert_eq!(after.flags & FLAG_CONNECTED, 0);
+        assert_eq!(w.stat(STAT_UNPLUGS), 1);
+    }
+
+    #[test]
+    fn release_retires_and_unlinks_then_prepare_recreates_with_full_state() {
+        let d = tmpdir("rel");
+        let mut w = SlotWriter::new(3);
+        w.prepare(d.to_str().unwrap().as_bytes()).unwrap();
+        w.set_pad(pad(1 << B_START));
+        let old = Map::open(&d.join("pad3"));
+        w.release();
+        assert!(old.sh().is_retired());
+        assert!(!d.join("pad3").exists());
+        assert!(!w.set_pad(pad((1 << B_START) | (1 << B_A))), "no backing after release");
+        assert!(!d.join("pad3").exists(), "a publish after release does not recreate the file");
+        w.prepare(d.to_str().unwrap().as_bytes()).unwrap();
+        let new = Map::open(&d.join("pad3"));
+        let s = new.sh().snapshot(16).unwrap();
+        assert_eq!(s.buttons(), (1 << B_START) | (1 << B_A), "the new file carries the full state");
+    }
+
+    #[test]
+    fn a_new_writer_retires_a_file_left_by_an_earlier_one() {
+        let d = tmpdir("takeover");
+        let mut a = SlotWriter::new(0);
+        a.prepare(d.to_str().unwrap().as_bytes()).unwrap();
+        let first = Map::open(&d.join("pad0"));
+        let bell = first.sh().header.bell.load(Acquire);
+        let mut b = SlotWriter::new(0);
+        b.prepare(d.to_str().unwrap().as_bytes()).unwrap();
+        assert!(first.sh().is_retired());
+        assert_ne!(first.sh().header.bell.load(Acquire), bell, "sleepers on the old file are woken");
+        let second = Map::open(&d.join("pad0"));
+        assert!(!second.sh().is_retired());
+        assert_ne!(second.sh().header.instance.load(Acquire), first.sh().header.instance.load(Acquire));
+    }
+
+    #[test]
+    fn lost_backing_heals_with_full_state() {
+        let d = tmpdir("heal");
+        let mut w = SlotWriter::new(0);
+        w.prepare(d.to_str().unwrap().as_bytes()).unwrap();
+        // simulate the backing vanishing out from under the writer
+        let b = w.backing.take().unwrap();
+        drop_backing(b);
+        std::fs::remove_file(d.join("pad0")).unwrap();
+        assert!(w.set_pad(pad(1 << B_TL)), "the publish heals by recreating the file");
+        let m = Map::open(&d.join("pad0"));
+        assert_eq!(m.sh().snapshot(16).unwrap().buttons(), 1 << B_TL);
+        assert_eq!(w.stat(STAT_FAILED_PUBLISHES), 1);
+    }
+}
