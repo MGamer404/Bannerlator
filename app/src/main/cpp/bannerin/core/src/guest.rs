@@ -439,6 +439,8 @@ struct SlotRt {
     dead_instance: AtomicU64,
     handles: AtomicU32,
     kick: AtomicU32,
+    /// Consecutive slow checks that found the writer's lock free (helper-owned).
+    dead_votes: AtomicU32,
     hm: UnsafeCell<Mapped>, // owned by the slot's helper thread
 }
 
@@ -455,6 +457,7 @@ const SLOT_RT: SlotRt = SlotRt {
     dead_instance: AtomicU64::new(0),
     handles: AtomicU32::new(0),
     kick: AtomicU32::new(0),
+    dead_votes: AtomicU32::new(0),
     hm: UnsafeCell::new(Mapped::NONE),
 };
 static SLOTS: SlotTable = SlotTable { s: [SLOT_RT; MAX_SLOTS] };
@@ -976,6 +979,7 @@ fn slow_check(slot: usize, rt: &SlotRt) {
             Ok(m) => {
                 hm.release();
                 *hm = m;
+                rt.dead_votes.store(0, Relaxed);
                 rt.instance.store(m.instance, Release);
                 rt.file_gen.fetch_add(1, Release);
             }
@@ -989,17 +993,31 @@ fn slow_check(slot: usize, rt: &SlotRt) {
         }
     }
     if hm.shared().is_some() {
-        // The writer holds an exclusive flock for as long as it lives. Getting a shared one
-        // means it is gone. Any other failure (EWOULDBLOCK, or no lock support) means alive.
-        match sys::flock(hm.fd, sys::LOCK_SH | sys::LOCK_NB) {
-            Ok(()) => {
-                let _ = sys::flock(hm.fd, sys::LOCK_UN);
+        // The writer holds an exclusive flock for as long as it lives, so getting a shared one
+        // means it is gone. Neutralising a live pad is worse than noticing a dead writer a little
+        // later, so the verdict needs two consecutive checks (0.5 - 1 s), and a free lock only
+        // counts if the probed fd really is the mapped file. Any other answer means alive.
+        let free = matches!(sys::flock(hm.fd, sys::LOCK_SH | sys::LOCK_NB), Ok(()));
+        if free {
+            let _ = sys::flock(hm.fd, sys::LOCK_UN);
+        }
+        let ours = !free || matches!(sys::fstat(hm.fd), Ok(st) if st.dev == hm.dev && st.ino == hm.ino);
+        if free && !ours {
+            // Not the file we think it is: forget it, the next check maps the path again.
+            hm.release();
+            rt.dead_votes.store(0, Relaxed);
+            return;
+        }
+        if free {
+            let votes = rt.dead_votes.load(Relaxed).saturating_add(1);
+            rt.dead_votes.store(votes, Relaxed);
+            if votes >= 2 {
                 rt.dead_instance.store(hm.instance, Release);
             }
-            Err(_) => {
-                if rt.dead_instance.load(Acquire) == hm.instance {
-                    rt.dead_instance.store(0, Release);
-                }
+        } else {
+            rt.dead_votes.store(0, Relaxed);
+            if rt.dead_instance.load(Acquire) == hm.instance {
+                rt.dead_instance.store(0, Release);
             }
         }
     }
@@ -1127,6 +1145,12 @@ unsafe extern "C" fn atfork_child() {
     for rt in SLOTS.s.iter() {
         rt.helper.store(0, Relaxed);
         rt.retry_at.store(0, Relaxed);
+        rt.dead_votes.store(0, Relaxed);
+        // The helper's mapping and fd belonged to the parent's helper thread, which may have been
+        // in the middle of replacing them; the child's helper opens its own on its first check.
+        // (Its fd shares the parent's open file description, which must not be probed from here.)
+        let hm = &mut *rt.hm.get();
+        hm.release();
     }
     let mut counts = [0u32; MAX_SLOTS];
     let mut rebound = 0u64;
