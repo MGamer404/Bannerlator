@@ -48,18 +48,20 @@ jobs:
       timeout-minutes: 20
       run: app/src/main/cpp/bannerin/ci/build.sh test
 
-    - name: Fork scenario stress (40 runs)
+    - name: Scenario stress (fork scenario x60, whole suite x5)
       if: success() || failure()
-      timeout-minutes: 15
+      timeout-minutes: 20
       working-directory: app/src/main/cpp/bannerin
       run: |
         fails=0
-        for i in $(seq 1 40); do
-          if ! cargo test -q -p bannerin-guest forked_reader -- --test-threads=1 >/tmp/fork-$i.log 2>&1; then
-            fails=$((fails + 1)); echo "--- run $i failed"; grep -v '^$' /tmp/fork-$i.log | tail -25
+        run() {
+          if ! cargo test -q -p bannerin-guest "$@" -- --test-threads=1 >/tmp/stress.log 2>&1; then
+            fails=$((fails + 1)); echo "--- $* failed:"; grep -v '^$' /tmp/stress.log | tail -40
           fi
-        done
-        echo "fork scenario: $fails of 40 runs failed"
+        }
+        for i in $(seq 1 60); do run forked_reader; done
+        for i in $(seq 1 5); do run; done
+        echo "scenario stress: $fails of 65 runs failed"
         test "$fails" -eq 0
 
     - name: Loom model check
