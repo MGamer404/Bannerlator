@@ -7,7 +7,7 @@ EXPORTS
     XInputGetDSoundAudioDeviceGuids @6
     XInputGetBatteryInformation @7
     XInputGetKeystroke @8
-    XInputGetStateEx @100 NONAME
-    XInputWaitForGuideButton @101 NONAME
-    XInputCancelGuideButtonWait @102 NONAME
-    XInputPowerOffController @103 NONAME
+    XInputGetStateEx @100
+    XInputWaitForGuideButton @101
+    XInputCancelGuideButtonWait @102
+    XInputPowerOffController @103

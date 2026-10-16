@@ -7,3 +7,7 @@ EXPORTS
     XInputGetKeystroke @5
     XInputGetState @6
     XInputSetState @7
+    XInputGetStateEx @100
+    XInputWaitForGuideButton @101
+    XInputCancelGuideButtonWait @102
+    XInputPowerOffController @103

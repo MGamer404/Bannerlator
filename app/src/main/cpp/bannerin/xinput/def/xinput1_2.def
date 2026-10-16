@@ -5,3 +5,7 @@ EXPORTS
     XInputGetCapabilities @4
     XInputEnable @5
     XInputGetDSoundAudioDeviceGuids @6
+    XInputGetStateEx @100
+    XInputWaitForGuideButton @101
+    XInputCancelGuideButtonWait @102
+    XInputPowerOffController @103

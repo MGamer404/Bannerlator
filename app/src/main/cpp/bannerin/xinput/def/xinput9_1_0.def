@@ -4,3 +4,7 @@ EXPORTS
     XInputGetDSoundAudioDeviceGuids @3
     XInputGetState @4
     XInputSetState @5
+    XInputGetStateEx @100
+    XInputWaitForGuideButton @101
+    XInputCancelGuideButtonWait @102
+    XInputPowerOffController @103

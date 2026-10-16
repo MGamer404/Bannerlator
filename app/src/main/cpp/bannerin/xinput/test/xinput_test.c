@@ -96,27 +96,30 @@ static void step(unsigned n) {
 
 struct spec {
     const char *name;
-    const char *named[8];
-    unsigned ords[6];
+    const char *named[16];
+    unsigned ords[8];
     const char *absent[6];
 };
 
+/* Every DLL also exports the extended functions by name (Wine's own programs, e.g. joy.cpl, import
+ * XInputGetStateEx by name) at their Windows ordinals 100-103 (and 108 in xinput1_4). */
+#define BXI_EXT "XInputGetStateEx", "XInputWaitForGuideButton", "XInputCancelGuideButtonWait", "XInputPowerOffController"
 static const struct spec SPECS[] = {
-    {"xinput1_1", {"XInputGetState", "XInputSetState", "XInputGetCapabilities", "XInputEnable", "XInputGetDSoundAudioDeviceGuids"},
-     {0}, {"XInputGetBatteryInformation", "XInputGetKeystroke", "XInputGetAudioDeviceIds", "XInputGetStateEx"}},
-    {"xinput1_2", {"XInputGetState", "XInputSetState", "XInputGetCapabilities", "XInputEnable", "XInputGetDSoundAudioDeviceGuids"},
-     {0}, {"XInputGetBatteryInformation", "XInputGetKeystroke", "XInputGetAudioDeviceIds", "XInputGetStateEx"}},
+    {"xinput1_1", {"XInputGetState", "XInputSetState", "XInputGetCapabilities", "XInputEnable", "XInputGetDSoundAudioDeviceGuids", BXI_EXT},
+     {100, 101, 102, 103}, {"XInputGetBatteryInformation", "XInputGetKeystroke", "XInputGetAudioDeviceIds"}},
+    {"xinput1_2", {"XInputGetState", "XInputSetState", "XInputGetCapabilities", "XInputEnable", "XInputGetDSoundAudioDeviceGuids", BXI_EXT},
+     {100, 101, 102, 103}, {"XInputGetBatteryInformation", "XInputGetKeystroke", "XInputGetAudioDeviceIds"}},
     {"xinput1_3", {"XInputGetState", "XInputSetState", "XInputGetCapabilities", "XInputEnable", "XInputGetDSoundAudioDeviceGuids",
-                   "XInputGetBatteryInformation", "XInputGetKeystroke"},
-     {100, 101, 102, 103}, {"XInputGetAudioDeviceIds", "XInputGetStateEx", "XInputGetCapabilitiesEx"}},
+                   "XInputGetBatteryInformation", "XInputGetKeystroke", BXI_EXT},
+     {100, 101, 102, 103}, {"XInputGetAudioDeviceIds"}},
     {"xinput1_4", {"XInputGetState", "XInputSetState", "XInputGetCapabilities", "XInputEnable", "XInputGetBatteryInformation",
-                   "XInputGetKeystroke", "XInputGetAudioDeviceIds"},
-     {100, 101, 102, 103, 108}, {"XInputGetDSoundAudioDeviceGuids", "XInputGetStateEx", "XInputGetCapabilitiesEx"}},
-    {"xinput9_1_0", {"XInputGetCapabilities", "XInputGetDSoundAudioDeviceGuids", "XInputGetState", "XInputSetState"},
-     {0}, {"XInputEnable", "XInputGetKeystroke", "XInputGetBatteryInformation", "XInputGetStateEx"}},
+                   "XInputGetKeystroke", "XInputGetAudioDeviceIds", BXI_EXT, "XInputGetCapabilitiesEx"},
+     {100, 101, 102, 103, 108}, {"XInputGetDSoundAudioDeviceGuids"}},
+    {"xinput9_1_0", {"XInputGetCapabilities", "XInputGetDSoundAudioDeviceGuids", "XInputGetState", "XInputSetState", BXI_EXT},
+     {100, 101, 102, 103}, {"XInputEnable", "XInputGetKeystroke", "XInputGetBatteryInformation"}},
     {"xinputuap", {"XInputEnable", "XInputGetAudioDeviceIds", "XInputGetBatteryInformation", "XInputGetCapabilities",
-                   "XInputGetKeystroke", "XInputGetState", "XInputSetState"},
-     {0}, {"XInputGetDSoundAudioDeviceGuids", "XInputGetStateEx"}},
+                   "XInputGetKeystroke", "XInputGetState", "XInputSetState", BXI_EXT},
+     {100, 101, 102, 103}, {"XInputGetDSoundAudioDeviceGuids"}},
 };
 #define NSPECS (sizeof SPECS / sizeof SPECS[0])
 static HMODULE g_dll[NSPECS];
@@ -137,10 +140,15 @@ static void load_dlls(void) {
         WCHAR got[MAX_PATH];
         GetModuleFileNameW(h, got, MAX_PATH);
         CHECK(_wcsicmp(got, path) == 0, "%s.dll loaded from %ls, not from the test folder", s->name, got);
-        for (int k = 0; k < 8 && s->named[k]; k++)
+        for (int k = 0; k < 16 && s->named[k]; k++)
             CHECK(fp(h, s->named[k]) != NULL, "%s.dll lacks %s", s->name, s->named[k]);
-        for (int k = 0; k < 6 && s->ords[k]; k++)
+        for (int k = 0; k < 8 && s->ords[k]; k++)
             CHECK(fpo(h, s->ords[k]) != NULL, "%s.dll lacks ordinal %u", s->name, s->ords[k]);
+        /* the named extended exports are the same functions as their ordinals */
+        CHECK(fp(h, "XInputGetStateEx") == fpo(h, 100), "%s.dll: XInputGetStateEx is not ordinal 100", s->name);
+        CHECK(fp(h, "XInputPowerOffController") == fpo(h, 103), "%s.dll: XInputPowerOffController is not ordinal 103", s->name);
+        if (!strcmp(s->name, "xinput1_4"))
+            CHECK(fp(h, "XInputGetCapabilitiesEx") == fpo(h, 108), "xinput1_4.dll: XInputGetCapabilitiesEx is not ordinal 108");
         for (int k = 0; k < 6 && s->absent[k]; k++)
             CHECK(fp(h, s->absent[k]) == NULL, "%s.dll exports %s by name (it must not)", s->name, s->absent[k]);
         if (!strcmp(s->name, "xinput1_3") || !strcmp(s->name, "xinput1_4"))
@@ -515,6 +523,25 @@ int main(int argc, char **argv) {
             CloseHandle(pi.hProcess);
         }
         SetEnvironmentVariableW(L"BANNERIN_XINPUT_LOGVIA", NULL);
+
+        /* xinput_byname.exe imports XInputGetStateEx & co BY NAME (as Wine's joy.cpl does) */
+        WCHAR byname[MAX_PATH];
+        _snwprintf(byname, MAX_PATH, L"%lsxinput_byname.exe", dir);
+        byname[MAX_PATH - 1] = 0;
+        STARTUPINFOW si;
+        PROCESS_INFORMATION pi;
+        memset(&si, 0, sizeof si);
+        si.cb = sizeof si;
+        BOOL ok = CreateProcessW(byname, NULL, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi);
+        CHECK(ok, "cannot start xinput_byname.exe (%lu)", GetLastError());
+        if (ok) {
+            DWORD w = WaitForSingleObject(pi.hProcess, 15000), code = 99;
+            GetExitCodeProcess(pi.hProcess, &code);
+            CHECK(w == WAIT_OBJECT_0 && code == 0, "xinput_byname.exe: wait %lu, exit %lu (10+ = a by-name import failed)", w, code);
+            printf("    xinput_byname.exe (imports XInputGetStateEx, ..., XInputGetCapabilitiesEx by name): exit %lu\n", code);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
     }
 
     step(999);

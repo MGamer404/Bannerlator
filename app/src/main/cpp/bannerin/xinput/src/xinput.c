@@ -60,7 +60,7 @@
 #include "bxi_core.h"
 
 #ifndef BXI_VERSION
-#define BXI_VERSION "1.1"
+#define BXI_VERSION "1.2"
 #endif
 
 #if defined(__arm64ec__) || defined(_M_ARM64EC)
@@ -199,6 +199,10 @@ typedef struct bxi_slot {
     WORD want_l, want_r, sent_l, sent_r;
     ULONGLONG sent_at;
     int sent_valid;
+    /* rumble diagnostics (rate-limited log lines) */
+    int set_logged, logged_on;
+    DWORD motor_log_tick, nc_log_tick;
+    unsigned motor_suppressed, nc_suppressed;
     volatile LONG guide_cancel;
 } bxi_slot;
 
@@ -206,6 +210,7 @@ static bxi_slot g_slots[BXI_SLOTS];
 static INIT_ONCE g_init = INIT_ONCE_STATIC_INIT;
 static HMODULE g_module;
 static volatile LONG g_enabled = 1;
+static char g_dllname[64] = "xinput";
 static int g_pathmode = PATH_AUTO;
 static unsigned g_rumble_port = BXI_RUMBLE_PORT;
 static uint32_t g_mask;
@@ -284,6 +289,7 @@ static void log_attach(HMODULE self) {
     }
     image[sizeof image - 1] = 0;
     dll[sizeof dll - 1] = 0;
+    lstrcpynA(g_dllname, dll, (int)sizeof g_dllname);
     bxi_log("%s %s (%s) loaded into %s (pid %lu) [log via %s]", BXI_VERSION, dll, BXI_BUILD, image,
             (unsigned long)GetCurrentProcessId(), LOG_NAMES[g_logvia]);
 }
@@ -494,11 +500,15 @@ typedef int(WSAAPI *wsastartup_fn)(WORD, LPWSADATA);
 typedef SOCKET(WSAAPI *socket_fn)(int, int, int);
 typedef int(WSAAPI *ioctlsocket_fn)(SOCKET, long, u_long *);
 typedef int(WSAAPI *sendto_fn)(SOCKET, const char *, int, int, const struct sockaddr *, int);
+typedef int(WSAAPI *wsaerror_fn)(void);
 
 static INIT_ONCE g_net_init = INIT_ONCE_STATIC_INIT;
 static SOCKET g_sock = INVALID_SOCKET;
 static sendto_fn g_sendto;
+static wsaerror_fn g_wsaerror;
 static struct sockaddr_in g_dst;
+static volatile LONG g_send_failures;
+static volatile LONG g_send_fail_tick;
 
 static BOOL CALLBACK net_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
     (void)once; (void)param; (void)ctx;
@@ -511,6 +521,7 @@ static BOOL CALLBACK net_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
     socket_fn mksock = (socket_fn)(void (*)(void))GetProcAddress(ws, "socket");
     ioctlsocket_fn ioctl_p = (ioctlsocket_fn)(void (*)(void))GetProcAddress(ws, "ioctlsocket");
     sendto_fn sendto_p = (sendto_fn)(void (*)(void))GetProcAddress(ws, "sendto");
+    g_wsaerror = (wsaerror_fn)(void (*)(void))GetProcAddress(ws, "WSAGetLastError");
     WSADATA wd;
     if (!startup || !mksock || !ioctl_p || !sendto_p || startup(MAKEWORD(2, 2), &wd) != 0) {
         bxi_log("rumble: winsock unusable, rumble off");
@@ -529,18 +540,31 @@ static BOOL CALLBACK net_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
     g_dst.sin_addr.s_addr = 0x0100007fu; /* 127.0.0.1, network order */
     g_sendto = sendto_p;
     g_sock = s;
+    bxi_log("rumble: winsock loaded for the first rumble (%s, %s), datagrams to 127.0.0.1:%u", g_dllname, BXI_BUILD,
+            g_rumble_port);
     return TRUE;
 }
 
-static void rumble_send(uint32_t slot, WORD l, WORD r) {
+/* 1 if the datagram went out. A failure is logged (the first one, then at most every 10 s). */
+static int rumble_send(uint32_t slot, WORD l, WORD r) {
     InitOnceExecuteOnce(&g_net_init, net_once, NULL, NULL);
-    if (g_sock == INVALID_SOCKET) return;
+    if (g_sock == INVALID_SOCKET) return 0;
     unsigned char p[12] = {
         BXI_RUMBLE_CODE, 'B', 'X', 'R', '1', (unsigned char)slot,
         (unsigned char)(l & 0xff), (unsigned char)(l >> 8), (unsigned char)(r & 0xff), (unsigned char)(r >> 8),
         (unsigned char)(BXI_RUMBLE_DURATION_MS & 0xff), (unsigned char)(BXI_RUMBLE_DURATION_MS >> 8),
     };
-    g_sendto(g_sock, (const char *)p, (int)sizeof p, 0, (const struct sockaddr *)&g_dst, (int)sizeof g_dst);
+    if (g_sendto(g_sock, (const char *)p, (int)sizeof p, 0, (const struct sockaddr *)&g_dst, (int)sizeof g_dst) != SOCKET_ERROR)
+        return 1;
+    int err = g_wsaerror ? g_wsaerror() : -1;
+    LONG n = InterlockedIncrement(&g_send_failures);
+    DWORD t = GetTickCount(), last = (DWORD)__atomic_load_n(&g_send_fail_tick, __ATOMIC_RELAXED);
+    if (n == 1 || t - last >= 10000u) {
+        __atomic_store_n(&g_send_fail_tick, (LONG)t, __ATOMIC_RELAXED);
+        bxi_log("rumble: sendto 127.0.0.1:%u failed for slot %u, WSAGetLastError %d (%ld failure(s) so far)", g_rumble_port,
+                slot, err, (long)n);
+    }
+    return 0;
 }
 
 /* Under s->lock: whether the motors should be told something now, and what. */
@@ -565,6 +589,42 @@ static int rumble_due(bxi_slot *s, WORD *l, WORD *r) {
     return 1;
 }
 
+/* What a caller does about the motors once it has dropped the slot lock: send, and log a motors
+ * on/off change (at most one such line per slot every 500 ms, the skipped ones counted). */
+typedef struct {
+    int send, note;
+    WORD l, r;
+    unsigned suppressed;
+} rumble_job;
+
+static void rumble_plan(bxi_slot *s, rumble_job *j) { /* under s->lock */
+    memset(j, 0, sizeof *j);
+    j->send = rumble_due(s, &j->l, &j->r);
+    if (!j->send) return;
+    int on = j->l || j->r;
+    if (on == s->logged_on) return;
+    DWORD t = GetTickCount();
+    if (s->motor_log_tick && t - s->motor_log_tick < 500u) {
+        s->motor_suppressed++;
+        return;
+    }
+    j->note = 1;
+    j->suppressed = s->motor_suppressed;
+    s->motor_suppressed = 0;
+    s->logged_on = on;
+    s->motor_log_tick = t ? t : 1;
+}
+
+static void rumble_run(uint32_t slot, const rumble_job *j) {
+    if (!j->send) return;
+    int ok = rumble_send(slot, j->l, j->r);
+    if (!j->note) return;
+    char more[64] = "";
+    if (j->suppressed) snprintf(more, sizeof more, "; %u on/off change(s) before this not logged", j->suppressed);
+    bxi_log("slot %u: motors %s (low %u, high %u): datagram %s%s", slot, (j->l || j->r) ? "ON" : "off", (unsigned)j->l,
+            (unsigned)j->r, ok ? "sent" : "NOT sent", more);
+}
+
 /* ---------------------------------------------------------------------------------------------- */
 /* reads */
 
@@ -583,7 +643,6 @@ static DWORD get_state(DWORD idx, BXI_STATE *st, int guide) {
     bxi_init();
     bxi_slot *s = &g_slots[idx];
     uint32_t w[BXI_COPY_WORDS];
-    WORD rl = 0, rr = 0;
     DWORD ret;
     AcquireSRWLockExclusive(&s->lock);
     if (slot_read(s, w)) {
@@ -612,9 +671,10 @@ static DWORD get_state(DWORD idx, BXI_STATE *st, int guide) {
         s->want_l = s->want_r = 0;
         ret = ERROR_DEVICE_NOT_CONNECTED;
     }
-    int due = rumble_due(s, &rl, &rr);
+    rumble_job job;
+    rumble_plan(s, &job);
     ReleaseSRWLockExclusive(&s->lock);
-    if (due) rumble_send(idx, rl, rr);
+    rumble_run(idx, &job);
     return ret;
 }
 
@@ -645,19 +705,48 @@ DWORD WINAPI XInputSetState(DWORD dwUserIndex, BXI_VIBRATION *pVibration) {
     bxi_init();
     bxi_slot *s = &g_slots[dwUserIndex];
     uint32_t w[BXI_COPY_WORDS];
-    WORD rl = 0, rr = 0;
+    WORD vl = pVibration->wLeftMotorSpeed, vr = pVibration->wRightMotorSpeed;
     DWORD ret = ERROR_SUCCESS;
+    int first = 0, nc = 0;
+    unsigned nc_more = 0;
     AcquireSRWLockExclusive(&s->lock);
-    if (slot_read(s, w)) {
-        s->want_l = pVibration->wLeftMotorSpeed;
-        s->want_r = pVibration->wRightMotorSpeed;
+    int conn = slot_read(s, w);
+    if (conn) {
+        s->want_l = vl;
+        s->want_r = vr;
     } else {
         s->want_l = s->want_r = 0;
         ret = ERROR_DEVICE_NOT_CONNECTED;
     }
-    int due = rumble_due(s, &rl, &rr);
+    /* diagnostics: the first call per slot; then calls on a slot without a controller, at most one
+     * line per slot every 30 s (games poll all four slots every frame) */
+    DWORD t = GetTickCount();
+    if (!s->set_logged) {
+        s->set_logged = 1;
+        first = 1;
+        s->nc_log_tick = t;
+    } else if (!conn) {
+        if (t - s->nc_log_tick >= 30000u) {
+            nc = 1;
+            nc_more = s->nc_suppressed;
+            s->nc_suppressed = 0;
+            s->nc_log_tick = t;
+        } else {
+            s->nc_suppressed++;
+        }
+    }
+    rumble_job job;
+    rumble_plan(s, &job);
     ReleaseSRWLockExclusive(&s->lock);
-    if (due) rumble_send(dwUserIndex, rl, rr);
+    if (first)
+        bxi_log("slot %u: first XInputSetState in this process (%s, %s): low %u, high %u -> %s%s", (unsigned)dwUserIndex,
+                g_dllname, BXI_BUILD, (unsigned)vl, (unsigned)vr,
+                conn ? "ERROR_SUCCESS" : "ERROR_DEVICE_NOT_CONNECTED (no controller on this slot)",
+                __atomic_load_n(&g_enabled, __ATOMIC_ACQUIRE) ? "" : " (XInputEnable(FALSE) in force: motors held off)");
+    if (nc)
+        bxi_log("slot %u: XInputSetState(low %u, high %u) on a slot with no controller -> ERROR_DEVICE_NOT_CONNECTED"
+                " (%u more such call(s) in the last 30 s)", (unsigned)dwUserIndex, (unsigned)vl, (unsigned)vr, nc_more);
+    rumble_run(dwUserIndex, &job);
     return ret;
 }
 
@@ -667,11 +756,11 @@ void WINAPI XInputEnable(BOOL enable) {
     for (uint32_t i = 0; i < BXI_SLOTS; i++) {
         bxi_slot *s = &g_slots[i];
         if (!s->configured) continue;
-        WORD rl = 0, rr = 0;
+        rumble_job job;
         AcquireSRWLockExclusive(&s->lock);
-        int due = rumble_due(s, &rl, &rr);
+        rumble_plan(s, &job);
         ReleaseSRWLockExclusive(&s->lock);
-        if (due) rumble_send(i, rl, rr);
+        rumble_run(i, &job);
     }
 }
 

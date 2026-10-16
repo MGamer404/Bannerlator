@@ -33,7 +33,7 @@ run_case() { # run_case <dll dir> <test dir> <path mode>
   local arch="$1" tarch="$2" mode="$3" d port rc frc via
   d="$(mktemp -d)"
   mkdir -p "$d/slots" "$d/bin"
-  cp "$DLLS/$arch/"*.dll "$TESTS/$tarch/xinput_test.exe" "$TESTS/$tarch/xinput_gui.exe" "$d/bin/"
+  cp "$DLLS/$arch/"*.dll "$TESTS/$tarch/xinput_test.exe" "$TESTS/$tarch/xinput_gui.exe" "$TESTS/$tarch/xinput_byname.exe" "$d/bin/"
   port=$((40000 + RANDOM % 20000))
   echo
   echo "======== $arch DLLs, $tarch test programs, paths: $mode, rumble port $port"
@@ -60,6 +60,13 @@ run_case() { # run_case <dll dir> <test dir> <path mode>
     else
       echo "    DllMain line [log via $via]: missing"
     fi
+  done
+  echo "---- rumble diagnostics"
+  for pat in 'rumble: winsock loaded for the first rumble' \
+             'slot 0: first XInputSetState in this process .*low 40000, high 20000 -> ERROR_SUCCESS' \
+             'slot 0: motors ON (low 40000, high 20000): datagram sent' \
+             'slot 1: first XInputSetState in this process .*ERROR_DEVICE_NOT_CONNECTED'; do
+    if grep -aq "$pat" "$d/stderr.log"; then echo "    found: $pat"; else echo "!!!! missing rumble diagnostic: $pat"; rc=1; fi
   done
   if ! grep -a 'loaded into .*xinput_gui.exe' "$d/stderr.log" | grep -aq '\[log via wine_dbg\]'; then
     echo "!!!! the default log channel (wine_dbg) did not reach Wine's stderr from a GUI process"

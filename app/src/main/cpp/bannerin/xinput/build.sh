@@ -8,6 +8,10 @@
 #                             type checked, plus <outdir>/manifest.json
 #   build.sh tests <outdir>   <outdir>/{x86_64,i386,aarch64}/xinput_test.exe + xinput_gui.exe (Wine tests)
 #   build.sh host <outdir>    <outdir>/host_test (native, cc) and the feeder (cargo, release)
+#   build.sh wine-check <dlls dir> <root>...  our DLLs against the export tables of the Wine builtin
+#                             XInput DLLs found under <root> (a superset of their names and of the
+#                             ordinals programs import by), and every Wine module importing from an
+#                             XInput DLL (joy.cpl, ...) resolved against ours (test/wine_check.py)
 #
 # The PE side uses bylaws/llvm-mingw (its arm64ec target does not predefine __x86_64__, unlike
 # upstream's). One C source (src/xinput.c) is linked once per DLL name with that name's .def file
@@ -23,10 +27,17 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LLVM_MINGW_VER=20250920
-LLVM_MINGW_TAR="llvm-mingw-${LLVM_MINGW_VER}-ucrt-ubuntu-22.04-x86_64.tar.xz"
+case "$(uname -m)" in
+  aarch64|arm64)
+    LLVM_MINGW_HOST=aarch64; HOST_SUFFIX=-aarch64
+    LLVM_MINGW_SHA256=bce5cc755c613515fd44e1ee9523123d854103abae147571adb645450036274d ;;
+  *)
+    LLVM_MINGW_HOST=x86_64; HOST_SUFFIX=
+    LLVM_MINGW_SHA256=8dd8c34fc051a50c2fae86015f35057f8aae93fe1e19b34537ef1269a8b4c772 ;;
+esac
+LLVM_MINGW_TAR="llvm-mingw-${LLVM_MINGW_VER}-ucrt-ubuntu-22.04-${LLVM_MINGW_HOST}.tar.xz"
 LLVM_MINGW_URL="https://github.com/bylaws/llvm-mingw/releases/download/${LLVM_MINGW_VER}/${LLVM_MINGW_TAR}"
-LLVM_MINGW_SHA256=8dd8c34fc051a50c2fae86015f35057f8aae93fe1e19b34537ef1269a8b4c772
-LLVM_MINGW="${LLVM_MINGW:-$HOME/.cache/llvm-mingw-bylaws-${LLVM_MINGW_VER}}"
+LLVM_MINGW="${LLVM_MINGW:-$HOME/.cache/llvm-mingw-bylaws-${LLVM_MINGW_VER}${HOST_SUFFIX}}"
 
 DLLS="xinput1_1 xinput1_2 xinput1_3 xinput1_4 xinput9_1_0 xinputuap"
 ARCHES="x86_64 i386 arm64x"
@@ -216,19 +227,31 @@ for arch in arches:
         files.append({"arch": arch, "name": name + ".dll", "asset": f"{arch}/{name}.dll",
                       "sha256": hashlib.sha256(open(p, "rb").read()).hexdigest()})
 tag = hashlib.sha256("".join(f["sha256"] for f in files).encode()).hexdigest()[:12]
-json.dump({"name": "BANNERIN-XInput", "version": "1.1+" + tag, "dlls": dlls, "arches": arches, "files": files},
+json.dump({"name": "BANNERIN-XInput", "version": "1.2+" + tag, "dlls": dlls, "arches": arches, "files": files},
           open(os.path.join(out, "manifest.json"), "w"), indent=1)
-print(f"== bannerin-xinput: manifest.json: {len(files)} dlls, version 1.1+{tag}")
+print(f"== bannerin-xinput: manifest.json: {len(files)} dlls, version 1.2+{tag}")
 PY
 }
 
 tests() {
-  local out="${1:?usage: build.sh tests <outdir>}" arch cc
+  local out="${1:?usage: build.sh tests <outdir>}" arch cc tmp m dll k
   toolchain
   mkdir -p "$out"
+  tmp="$(mktemp -d)"
   for arch in x86_64 i386 aarch64; do
     cc="$(cc_for "$arch")"
-    mkdir -p "$out/$arch"
+    mkdir -p "$out/$arch" "$tmp/$arch"
+    # import libraries made from our .def files, so xinput_byname.exe imports the extended functions
+    # BY NAME (an i386 one from the decorated .def, with the decorations killed like the DLL's)
+    case "$arch" in x86_64) m=i386:x86-64 ;; i386) m=i386 ;; aarch64) m=arm64 ;; esac
+    for dll in xinput1_3 xinput1_4; do
+      k=""; [ "$arch" = i386 ] && k="-k"
+      llvm-dlltool -m "$m" -d "$(def_for "$arch" "$dll" "$tmp/$arch")" -D "$dll.dll" -l "$tmp/$arch/lib$dll.a" $k
+    done
+    # shellcheck disable=SC2046
+    "$cc" $CFLAGS_COMMON $(arch_flags "$arch") -o "$out/$arch/xinput_byname.exe" "$HERE/test/xinput_byname.c" \
+      -L"$tmp/$arch" -lxinput1_3 -lxinput1_4
+    llvm-readobj --coff-imports "$out/$arch/xinput_byname.exe" | grep -E 'Name: xinput|Symbol: XInput' | sed 's/^/     /'
     # shellcheck disable=SC2046
     "$cc" $CFLAGS_COMMON $(arch_flags "$arch") -o "$out/$arch/xinput_test.exe" "$HERE/test/xinput_test.c"
     # a GUI-subsystem child the test starts without std handles, like a game started by explorer
@@ -237,6 +260,7 @@ tests() {
     say "$arch: xinput_test.exe $(llvm-readobj --file-headers "$out/$arch/xinput_test.exe" | sed -n 's/^Format: //p' | head -1)," \
         "xinput_gui.exe $(llvm-readobj --file-headers "$out/$arch/xinput_gui.exe" | sed -n 's/^ *Subsystem: //p' | head -1)"
   done
+  rm -rf "$tmp"
 }
 
 host() {
@@ -248,10 +272,19 @@ host() {
   say "host_test + feeder built for $(uname -m)"
 }
 
+wine_check() {
+  local ours="${1:?usage: build.sh wine-check <dlls dir> <root>...}"
+  shift
+  [ "$#" -gt 0 ] || die "usage: build.sh wine-check <dlls dir> <root>..."
+  toolchain
+  python3 -I "$HERE/test/wine_check.py" "$(cd "$ours" && pwd)" "$@"
+}
+
 case "${1:-}" in
   toolchain) toolchain ;;
+  wine-check) shift; wine_check "$@" ;;
   dlls) dlls "${2:-}" ;;
   tests) tests "${2:-}" ;;
   host) host "${2:-}" ;;
-  *) die "usage: $0 toolchain | dlls <outdir> | tests <outdir> | host <outdir>" ;;
+  *) die "usage: $0 toolchain | dlls <outdir> | tests <outdir> | host <outdir> | wine-check <dlls dir> <root>..." ;;
 esac
