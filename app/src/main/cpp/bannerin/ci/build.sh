@@ -67,11 +67,11 @@ check_probe() {
 case "${1:-}" in
 test)
   say "host tests"
-  cargo test --workspace -- --test-threads=1
+  cargo test --workspace --no-fail-fast -- --test-threads=1
   ;;
 loom)
   say "loom model check"
-  (cd loom && LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}" cargo test --release)
+  (cd loom && LOOM_MAX_PREEMPTIONS="${LOOM_MAX_PREEMPTIONS:-2}" cargo test --release --no-fail-fast)
   ;;
 android)
   : "${NDK_BIN:?NDK_BIN must point at <ndk>/toolchains/llvm/prebuilt/linux-x86_64/bin}"

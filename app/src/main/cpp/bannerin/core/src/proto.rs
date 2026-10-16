@@ -63,8 +63,8 @@ pub struct StateCopy<T, const W: usize> {
     pub words: [T; W],
 }
 
-/// Writer side: publish `data` as publish number `n`. Must only ever be called by one writer at a
-/// time for a given ring (the app serialises each slot).
+/// Writer side: publish `data` as publish number `n` (`data[0]` must be `n`). Must only ever be
+/// called by one writer at a time for a given ring (the app serialises each slot).
 #[inline]
 pub fn publish<T: Word32, const W: usize>(
     copies: &[StateCopy<T, W>],
@@ -85,6 +85,12 @@ pub fn publish<T: Word32, const W: usize>(
 
 /// Reader side: copy the most recently published state into `out`. Returns false only if every
 /// one of `attempts` reads was overtaken by the writer lapping the ring.
+///
+/// Data word 0 must carry the publish number. A copy is accepted only if it holds exactly the
+/// publish `published` named when it was loaded: a copy the writer has already rewritten with a
+/// newer publish (it lapped the ring) is consistent but not yet published, and accepting it would
+/// let the next snapshot, of the copy `published` actually names, go backwards. With this rule
+/// successive snapshots by one reader are monotonic, because successive loads of `published` are.
 #[inline]
 pub fn snapshot<T: Word32, const W: usize>(
     copies: &[StateCopy<T, W>],
@@ -105,7 +111,7 @@ pub fn snapshot<T: Word32, const W: usize>(
         for (o, w) in out.iter_mut().zip(c.words.iter()) {
             *o = w.ld(Acquire);
         }
-        if c.seq.ld(Relaxed) == s1 {
+        if c.seq.ld(Relaxed) == s1 && out.first().map_or(true, |v| *v == n) {
             return true;
         }
         core::hint::spin_loop();
