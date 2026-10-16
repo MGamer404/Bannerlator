@@ -17,7 +17,8 @@
 //!   valid while mapped), show a neutral pad, and re-attach when the next `prepare` creates a new
 //!   file. Files are never truncated while in use, so a reader's mapping can never fault.
 
-use core::sync::atomic::Ordering::{Relaxed, Release};
+use core::sync::atomic::Ordering::{Relaxed, Release, SeqCst};
+use core::sync::atomic::{AtomicPtr, AtomicU32, AtomicU64};
 
 use crate::abi::*;
 use crate::layout::*;
@@ -46,6 +47,115 @@ pub const STAT_FAILED_PUBLISHES: u32 = 14;
 pub const STAT_HAS_BACKING: u32 = 15;
 pub const STAT_READER_PACED_FRAMES: u32 = 16;
 pub const STAT_READER_MERGED_AXIS: u32 = 17;
+pub const STAT_READER_AXIS_HZ: u32 = 18;
+pub const STAT_READER_AUTO_FALLBACKS: u32 = 19;
+pub const STAT_FRAME_INTERVAL_NS: u32 = 20;
+pub const STAT_GAME_FRAMES: u32 = 21;
+
+// ---------------------------------------------------------------------------------------------
+// Game frame feed: the app's present threads report every frame the game shows; the estimated
+// frame interval goes into the header of every live slot file, where readers in auto pacing
+// derive their stick-frame rate from it.
+
+/// A gap this long (pause, alt-tab, loading) is not a frame interval: the estimate goes stale.
+pub const FRAME_STALE_GAP_NS: u64 = 1_000_000_000;
+/// Presents closer than this are taken as the same frame presented twice.
+pub const FRAME_MIN_INTERVAL_NS: u64 = 500_000;
+/// Time constant of the release (a frame rate recovering): about 1 - 1/e per 150 ms.
+pub const FRAME_RELEASE_TAU_NS: u64 = 150_000_000;
+/// The header fields are stored at most this often (1 kHz).
+pub const FRAME_STORE_MIN_NS: u64 = 1_000_000;
+
+/// Fast attack, slow release: a longer interval (a dip) is taken at once
+/// (max(new, (est + new) / 2) is `new` when new > est); a shorter one (recovery) is approached
+/// exponentially with time constant FRAME_RELEASE_TAU_NS, step by step at the frame rate.
+pub fn estimate_interval(est: u64, new: u64) -> u64 {
+    if est == 0 || new >= est {
+        return new;
+    }
+    let alpha = ((new as u128 * 65536) / FRAME_RELEASE_TAU_NS as u128).min(65536) as u64;
+    est - (((est - new) as u128 * alpha as u128) >> 16) as u64
+}
+
+struct FrameFeed {
+    last: AtomicU64,
+    est: AtomicU64,
+    stored: AtomicU64,
+    frames: AtomicU64,
+}
+
+static FRAME_FEED: FrameFeed =
+    FrameFeed { last: AtomicU64::new(0), est: AtomicU64::new(0), stored: AtomicU64::new(0), frames: AtomicU64::new(0) };
+
+/// A slot file the feed writes into. `users` lets the owner wait out a frame thread that is
+/// storing into the mapping before it unmaps it; the frame thread itself never waits.
+struct Target {
+    ptr: AtomicPtr<u8>,
+    users: AtomicU32,
+}
+
+const TARGET: Target = Target { ptr: AtomicPtr::new(core::ptr::null_mut()), users: AtomicU32::new(0) };
+static TARGETS: [Target; 4] = [TARGET; 4];
+
+fn target_set(slot: u32, p: *mut u8) {
+    if let Some(t) = TARGETS.get(slot as usize) {
+        t.ptr.store(p, SeqCst);
+    }
+}
+
+/// Stop the feed writing into `p` and wait until no frame thread is inside it.
+fn target_clear(slot: u32, p: *mut u8) {
+    if let Some(t) = TARGETS.get(slot as usize) {
+        if t.ptr.compare_exchange(p, core::ptr::null_mut(), SeqCst, SeqCst).is_ok() {
+            let mut n = 0u32;
+            while t.users.load(SeqCst) != 0 {
+                n += 1;
+                if n < 64 {
+                    core::hint::spin_loop();
+                } else {
+                    sys::sched_yield();
+                }
+            }
+        }
+    }
+}
+
+/// One frame presented by the game, at `now` (CLOCK_MONOTONIC ns). Cheap and wait-free: the
+/// estimator, then (at most once per millisecond) two stores into each live slot header.
+pub fn game_frame(now: u64) {
+    let f = &FRAME_FEED;
+    f.frames.fetch_add(1, Relaxed);
+    let last = f.last.load(Relaxed);
+    if last != 0 {
+        let gap = now.wrapping_sub(last);
+        if gap < FRAME_MIN_INTERVAL_NS {
+            return;
+        }
+        let est = if gap > FRAME_STALE_GAP_NS { 0 } else { estimate_interval(f.est.load(Relaxed), gap) };
+        f.est.store(est, Relaxed);
+    }
+    f.last.store(now, Relaxed);
+    if now.wrapping_sub(f.stored.load(Relaxed)) < FRAME_STORE_MIN_NS {
+        return;
+    }
+    f.stored.store(now, Relaxed);
+    let est = f.est.load(Relaxed);
+    for t in TARGETS.iter() {
+        t.users.fetch_add(1, SeqCst);
+        let p = t.ptr.load(SeqCst);
+        if !p.is_null() {
+            let h = &unsafe { Shared::at(p) }.header;
+            h.frame_interval_ns.store(est, Relaxed);
+            h.frame_time_ns.store(now, Release);
+        }
+        t.users.fetch_sub(1, Release);
+    }
+}
+
+/// The feed's current (interval estimate, last frame time); zeros before the first frames.
+pub fn frame_info() -> (u64, u64) {
+    (FRAME_FEED.est.load(Relaxed), FRAME_FEED.last.load(Relaxed))
+}
 
 struct Backing {
     ptr: *mut u8,
@@ -61,7 +171,8 @@ impl Backing {
     }
 }
 
-fn drop_backing(b: Backing) {
+fn drop_backing(slot: u32, b: Backing) {
+    target_clear(slot, b.ptr);
     sys::munmap(b.ptr, FILE_SIZE);
     sys::close(b.fd); // also drops the flock
 }
@@ -274,6 +385,9 @@ impl SlotWriter {
         let sh = unsafe { Shared::at(p) };
         let instance = make_instance(self.slot, self.nonce);
         init_header(sh, self.slot, instance);
+        let (iv, ft) = frame_info();
+        sh.header.frame_interval_ns.store(iv, Relaxed);
+        sh.header.frame_time_ns.store(ft, Relaxed);
         // A new file starts from the complete logical state; its journal starts empty (readers
         // re-attaching to it begin with a full-state frame anyway).
         self.pub_seq = 0;
@@ -293,7 +407,7 @@ impl SlotWriter {
         }
         if let Some(old) = self.backing.take() {
             retire_shared(old.shared());
-            drop_backing(old);
+            drop_backing(self.slot, old);
         }
         if let Some(q) = previous {
             let prev = unsafe { Shared::at(q) };
@@ -303,6 +417,7 @@ impl SlotWriter {
             sys::munmap(q, FILE_SIZE);
         }
         self.backing = Some(Backing { ptr: p, fd, dev: st.dev, ino: st.ino, instance });
+        target_set(self.slot, p);
         self.dirty = false;
         Ok(())
     }
@@ -319,7 +434,7 @@ impl SlotWriter {
                     }
                 }
             }
-            drop_backing(b);
+            drop_backing(self.slot, b);
         }
         self.released = true;
     }
@@ -467,6 +582,8 @@ impl SlotWriter {
             STAT_FAILED_PUBLISHES => return self.failures,
             STAT_HAS_BACKING => return self.backing.is_some() as u64,
             STAT_INSTANCE => return self.instance(),
+            STAT_FRAME_INTERVAL_NS => return FRAME_FEED.est.load(Relaxed),
+            STAT_GAME_FRAMES => return FRAME_FEED.frames.load(Relaxed),
             _ => {}
         }
         let h = match &self.backing {
@@ -488,6 +605,8 @@ impl SlotWriter {
             STAT_READER_REMOVALS => &h.r_removals,
             STAT_READER_PACED_FRAMES => &h.r_paced_frames,
             STAT_READER_MERGED_AXIS => &h.r_merged_axis,
+            STAT_READER_AUTO_FALLBACKS => &h.r_auto_fallbacks,
+            STAT_READER_AXIS_HZ => return h.r_axis_hz.load(Relaxed) as u64,
             _ => return 0,
         };
         v.load(Relaxed)
@@ -668,13 +787,40 @@ mod tests {
     }
 
     #[test]
+    fn frame_estimator_attacks_fast_and_releases_slowly() {
+        const MS: u64 = 1_000_000;
+        let f60 = 16_666_667u64;
+        let f30 = 33_333_333u64;
+        // a dip is taken at once
+        assert_eq!(estimate_interval(f60, f30), f30);
+        assert_eq!(estimate_interval(0, f60), f60);
+        // recovery 30 -> 60 fps eases in over a few hundred ms
+        let (mut est, mut t) = (f30, 0u64);
+        let mut at_250 = 0;
+        while t < 500 * MS {
+            est = estimate_interval(est, f60);
+            t += f60;
+            if at_250 == 0 && t >= 250 * MS {
+                at_250 = est;
+            }
+        }
+        assert!(at_250 > f60 + MS && at_250 < f30 - 5 * MS, "halfway {} ns", at_250);
+        assert!(est < f60 + 2 * MS / 3, "after 0.5 s still {} ns", est);
+        // and settles
+        for _ in 0..200 {
+            est = estimate_interval(est, f60);
+        }
+        assert!(est >= f60 && est - f60 < 50_000, "{} ns", est);
+    }
+
+    #[test]
     fn lost_backing_heals_with_full_state() {
         let d = tmpdir("heal");
         let mut w = SlotWriter::new(0);
         w.prepare(d.to_str().unwrap().as_bytes()).unwrap();
         // simulate the backing vanishing out from under the writer
         let b = w.backing.take().unwrap();
-        drop_backing(b);
+        drop_backing(0, b);
         std::fs::remove_file(d.join("pad0")).unwrap();
         assert!(w.set_pad(pad(1 << B_TL)), "the publish heals by recreating the file");
         let m = Map::open(&d.join("pad0"));

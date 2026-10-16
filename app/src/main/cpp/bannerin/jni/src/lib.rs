@@ -187,6 +187,17 @@ pub extern "system" fn Java_com_winlator_star_inputcontrols_BannerinWriter_nativ
     }
 }
 
+/// `static native void nativeGameFrame()`: the game presented a frame (called from the app's
+/// present threads). Wait-free: the frame-interval estimator and a few atomic stores into the
+/// live slot files; no allocation, no lock, no JNI callback.
+#[no_mangle]
+pub extern "system" fn Java_com_winlator_star_inputcontrols_BannerinWriter_nativeGameFrame(
+    _env: JEnv,
+    _cls: JClass,
+) {
+    bannerin_core::writer::game_frame(bannerin_core::sys::mono_ns());
+}
+
 /// `static native long nativeStat(int slot, int which)`: see `bannerin_core::writer::STAT_*`.
 #[no_mangle]
 pub extern "system" fn Java_com_winlator_star_inputcontrols_BannerinWriter_nativeStat(

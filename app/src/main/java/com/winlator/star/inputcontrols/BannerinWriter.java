@@ -57,7 +57,15 @@ public final class BannerinWriter {
     public static final int STAT_READER_PACED_FRAMES = 16;
     /** Publishes readers merged into a later frame instead of delivering one each. */
     public static final int STAT_READER_MERGED_AXIS = 17;
-    private static final int STAT_COUNT = 18;
+    /** Auto pacing: the stick-frame rate (Hz) a reader last derived from the game's frame rate. */
+    public static final int STAT_READER_AXIS_HZ = 18;
+    /** Auto pacing: times a reader lost a fresh frame feed and fell back to the fixed 60 Hz. */
+    public static final int STAT_READER_AUTO_FALLBACKS = 19;
+    /** The game frame interval the frame feed currently estimates (ns, 0 = none or stale). */
+    public static final int STAT_FRAME_INTERVAL_NS = 20;
+    /** Game frames reported to the feed so far (this app process). */
+    public static final int STAT_GAME_FRAMES = 21;
+    private static final int STAT_COUNT = 22;
 
     // Each slot's counters as they stood when releaseAllRingSlots() retired its file, for the
     // session-end diagnostics that may run after the release.
@@ -85,6 +93,7 @@ public final class BannerinWriter {
     private static native boolean nativeReset(int slot);
     private static native boolean nativeUnplug(int slot);
     private static native long nativeStat(int slot, int which);
+    private static native void nativeGameFrame();
 
     // ------------------------------------------------------------------------------------------
     // static (process-wide)
@@ -161,6 +170,17 @@ public final class BannerinWriter {
             }
             nativeRelease(slot);
         }
+    }
+
+    /**
+     * The game presented a frame. Call it for every frame the game's own window presents (not the
+     * desktop shell), whether or not any HUD is shown: readers in auto pacing (the default) send
+     * stick-only updates at about 90 % of the game's frame rate, so a game that takes one input
+     * report per rendered frame never falls behind. Cheap enough for the present threads: one JNI
+     * call into a wait-free estimator plus a few atomic stores; no allocation, no lock.
+     */
+    public static void onGameFrame() {
+        if (NATIVE_OK) nativeGameFrame();
     }
 
     /** A counter for diagnostics (see the STAT_* constants), or 0. */

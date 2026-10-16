@@ -1100,7 +1100,7 @@ fn idle_pad_sleeps_and_a_raw_read_cannot_wedge_readiness() {
 // ---------------------------------------------------------------------------------------------
 // axis pacing (BANNERIN_AXIS_HZ)
 
-const T_DEFAULT: Duration = Duration::from_millis(8); // 125 Hz
+const T_DEFAULT: Duration = Duration::from_millis(8); // BANNERIN_AXIS_HZ=125
 
 fn sleep_until(t: Instant) {
     let now = Instant::now();
@@ -1146,8 +1146,9 @@ fn stick_only_frames_are_paced_to_axis_hz() {
     });
     let rpid = spawn("pace-reader", || {
         shm.wait(0, 1, 30)?;
-        sc.enter(); // BANNERIN_AXIS_HZ unset: the default
-        ensure!(bannerin_axis_hz() == 125, "default rate {}", bannerin_axis_hz());
+        sc.enter();
+        std::env::set_var("BANNERIN_AXIS_HZ", "125"); // a fixed rate behaves as before auto mode
+        ensure!(bannerin_axis_hz() == 125 && bannerin_axis_auto() == 0, "fixed rate {}", bannerin_axis_hz());
         let mut r = Rd::attach(0, sys::O_NONBLOCK)?;
         ensure!(is_full(&r.frame(1000)?), "full first");
         shm.set(1, 1);
@@ -1199,6 +1200,7 @@ fn rest_value_reaches_a_reader_blocked_in_poll_within_t() {
     let sc = Scene::new("rest");
     run("rest", || {
         sc.enter();
+        std::env::set_var("BANNERIN_AXIS_HZ", "125");
         let mut w = sc.writer(0);
         w.open();
         let mut r = Rd::attach(0, sys::O_NONBLOCK)?;
@@ -1375,6 +1377,246 @@ fn axis_hz_zero_restores_unpaced_stick_frames() {
         say(&format!("[unpaced] 500 publishes at 500 Hz -> {} stick frames, paced {}\n", frames, s.paced_frames));
         ensure!(frames >= 350, "only {} frames: BANNERIN_AXIS_HZ=0 must not pace", frames);
         ensure!(s.paced_frames == 0, "paced {}", s.paced_frames);
+        Ok(())
+    });
+}
+
+// ---------------------------------------------------------------------------------------------
+// auto pacing: stick frames follow the game's frame rate (BANNERIN_AXIS_HZ unset)
+
+/// What an auto-paced reader saw (all CLOCK_MONOTONIC ns, shared by both processes).
+struct AutoRun {
+    start: u64,
+    sticks: Vec<u64>,
+    edges: Vec<(u64, i32)>,
+    sent_edges: Vec<(u64, i32)>,
+    rest_sent: u64,
+    rest_seen: u64,
+    stats: StatsView,
+    slot: SlotStatsView,
+}
+
+const MS_NS: u64 = 1_000_000;
+
+impl AutoRun {
+    /// Stick-only frames per second that arrived in [start + from_ms, start + to_ms).
+    fn rate(&self, from_ms: u64, to_ms: u64) -> f64 {
+        let (a, b) = (self.start + from_ms * MS_NS, self.start + to_ms * MS_NS);
+        let n = self.sticks.iter().filter(|t| **t >= a && **t < b).count();
+        n as f64 * 1000.0 / (to_ms - from_ms) as f64
+    }
+    /// Smallest gap between consecutive stick frames inside the window.
+    fn min_gap_ms(&self, from_ms: u64, to_ms: u64) -> f64 {
+        let (a, b) = (self.start + from_ms * MS_NS, self.start + to_ms * MS_NS);
+        let w: Vec<u64> = self.sticks.iter().copied().filter(|t| *t >= a && *t < b).collect();
+        w.windows(2).map(|p| (p[1] - p[0]) as f64 / 1e6).fold(f64::MAX, f64::min)
+    }
+}
+
+/// Writer process: the game "presents" at each phase's fps (0 = no frames) through the real frame
+/// feed (`writer::game_frame`) while the pad publishes stick motion at 500 Hz, with a tap of A
+/// every 100 ms if `taps`; then the rest position. Reader process (auto mode): records arrivals,
+/// then runs `check` on them.
+fn auto_run<C: FnOnce(&AutoRun) -> Result<(), String>>(tag: &'static str, phases: &'static [(u32, u64)], taps: bool, check: C) {
+    let sc = Scene::new(tag);
+    let shm = Shm::new();
+    // shm: 0 writer ready, 1 reader ready, 2 writer done, 3 start, 4 rest sent, 5 reader done,
+    //      6 edges sent, 100 + 2k / 101 + 2k edge k (time, value)
+    let wpid = spawn("auto-writer", || {
+        let mut w = sc.writer(0);
+        w.open();
+        shm.set(0, 1);
+        shm.wait(1, 1, 30)?;
+        let start = Instant::now();
+        shm.set(3, sys::mono_ns());
+        let total_ms: u64 = phases.iter().map(|p| p.1).sum();
+        let feeder = std::thread::spawn(move || {
+            let mut t0 = start;
+            for &(fps, ms) in phases {
+                let end = t0 + Duration::from_millis(ms);
+                if fps > 0 {
+                    let step = Duration::from_nanos(1_000_000_000 / fps as u64);
+                    let mut next = t0;
+                    while next < end {
+                        sleep_until(next);
+                        bannerin_core::writer::game_frame(sys::mono_ns());
+                        next += step;
+                    }
+                }
+                sleep_until(end);
+                t0 = end;
+            }
+        });
+        let mut down = false;
+        let mut nedges = 0usize;
+        let edge = |v: bool, nedges: &mut usize| {
+            if *nedges < 200 {
+                shm.set(100 + 2 * *nedges, sys::mono_ns());
+                shm.set(101 + 2 * *nedges, v as u64);
+                *nedges += 1;
+                shm.set(6, *nedges as u64);
+            }
+        };
+        let n = (total_ms / 2) as u32;
+        for i in 0..n {
+            sleep_until(start + Duration::from_micros(2000 * i as u64));
+            if taps {
+                let want = i % 50 < 10;
+                if want != down {
+                    edge(want, &mut nedges);
+                    down = want;
+                }
+            }
+            w.set_pad(pad_axes(if down { 1 << B_A } else { 0 }, stick(i)));
+        }
+        if down {
+            edge(false, &mut nedges);
+            w.set_pad(pad_axes(0, stick(n)));
+        }
+        shm.set(4, sys::mono_ns());
+        w.set_pad(pad(0)); // let go
+        shm.set(2, 1);
+        shm.wait(5, 1, 60)?;
+        feeder.join().map_err(|_| "feeder panicked".to_string())?;
+        Ok(())
+    });
+    let rpid = spawn("auto-reader", || {
+        shm.wait(0, 1, 30)?;
+        sc.enter(); // BANNERIN_AXIS_HZ unset: auto
+        ensure!(bannerin_axis_auto() == 1, "auto mode is the default");
+        let mut r = Rd::attach(0, sys::O_NONBLOCK)?;
+        ensure!(is_full(&r.frame(1000)?), "full first");
+        shm.set(1, 1);
+        let mut run = AutoRun {
+            start: 0,
+            sticks: Vec::new(),
+            edges: Vec::new(),
+            sent_edges: Vec::new(),
+            rest_sent: 0,
+            rest_seen: 0,
+            stats: StatsView::default(),
+            slot: SlotStatsView::default(),
+        };
+        let mut x = 1;
+        let end = Instant::now() + Duration::from_secs(60);
+        while !(shm.get(2) == 1 && run.rest_seen != 0) {
+            ensure!(Instant::now() < end, "never saw the rest position");
+            r.poll(20);
+            match r.read_nb() {
+                Ok(_) | Err(sys::EAGAIN) => {}
+                Err(e) => return Err(format!("read errno {}", e)),
+            }
+            let now = sys::mono_ns();
+            while let Some(f) = r.take_frame() {
+                if let Some(v) = key(&f, BTN_A) {
+                    run.edges.push((now, v));
+                } else if is_axis_only(&f) {
+                    run.sticks.push(now);
+                }
+                if let Some(v) = abs(&f, ABS_X) {
+                    if v == 0 && x != 0 && shm.get(4) != 0 && run.rest_seen == 0 {
+                        run.rest_seen = now;
+                    }
+                    x = v;
+                }
+            }
+        }
+        unsafe { bannerin_slot_stats(0, &mut run.slot, core::mem::size_of::<SlotStatsView>()) };
+        shm.set(5, 1);
+        run.start = shm.get(3);
+        run.rest_sent = shm.get(4);
+        run.stats = stats();
+        for k in 0..shm.get(6) as usize {
+            run.sent_edges.push((shm.get(100 + 2 * k), shm.get(101 + 2 * k) as i32));
+        }
+        check(&run)
+    });
+    assert_eq!((wait_pid(wpid), wait_pid(rpid)), (0, 0), "auto pacing scenario '{}'", tag);
+}
+
+#[test]
+fn auto_pacing_follows_a_60_fps_game() {
+    auto_run("auto60", &[(60, 2200)], false, |r| {
+        let rate = r.rate(400, 2200);
+        let rest = (r.rest_seen - r.rest_sent) as f64 / 1e6;
+        say(&format!(
+            "[auto60] {:.1} stick frames/s (target 54), reader rate {} Hz, feed interval {:.2} ms, rest after {:.1} ms\n",
+            rate, r.stats.axis_hz, r.slot.frame_interval_ns as f64 / 1e6, rest
+        ));
+        ensure!((47.0..=60.0).contains(&rate), "{:.1}/s at 60 fps, want about 54", rate);
+        ensure!((50..=56).contains(&r.stats.axis_hz), "derived {} Hz", r.stats.axis_hz);
+        ensure!((50..=56).contains(&r.slot.reader_axis_hz), "file says {} Hz", r.slot.reader_axis_hz);
+        ensure!(rest <= 25.0, "rest position {:.1} ms after the last publish (T is about 19 ms)", rest);
+        ensure!(r.stats.auto_fallbacks == 0, "fell back {} times with a live feed", r.stats.auto_fallbacks);
+        Ok(())
+    });
+}
+
+#[test]
+fn auto_pacing_follows_a_120_fps_game() {
+    auto_run("auto120", &[(120, 2200)], false, |r| {
+        let rate = r.rate(400, 2200);
+        say(&format!("[auto120] {:.1} stick frames/s (target 108), reader rate {} Hz\n", rate, r.stats.axis_hz));
+        ensure!((95.0..=120.0).contains(&rate), "{:.1}/s at 120 fps, want about 108", rate);
+        ensure!((100..=112).contains(&r.stats.axis_hz), "derived {} Hz", r.stats.axis_hz);
+        Ok(())
+    });
+}
+
+#[test]
+fn auto_pacing_takes_a_frame_rate_dip_within_three_frames() {
+    auto_run("autodip", &[(60, 1000), (30, 1400)], false, |r| {
+        let before = r.rate(400, 1000);
+        // three frames at 30 fps = 100 ms after the dip
+        let after = r.rate(1100, 2400);
+        let gap = r.min_gap_ms(1100, 2400);
+        say(&format!("[autodip] 60 fps: {:.1}/s; from 3 frames after the dip to 30 fps: {:.1}/s (target 27), min gap {:.1} ms\n", before, after, gap));
+        ensure!(before >= 45.0, "before the dip {:.1}/s", before);
+        ensure!(after <= 30.0 && after >= 20.0, "after the dip {:.1}/s, want about 27", after);
+        ensure!(gap >= 30.0, "stick frames {:.1} ms apart after the dip (T is about 37 ms)", gap);
+        Ok(())
+    });
+}
+
+#[test]
+fn auto_pacing_recovers_within_half_a_second() {
+    auto_run("autorec", &[(30, 1200), (60, 1500)], false, |r| {
+        let low = r.rate(400, 1200);
+        let recovered = r.rate(1700, 2700);
+        say(&format!("[autorec] 30 fps: {:.1}/s; from 0.5 s after recovery to 60 fps: {:.1}/s (target 54)\n", low, recovered));
+        ensure!(low <= 30.0, "at 30 fps {:.1}/s", low);
+        ensure!((46.0..=60.0).contains(&recovered), "0.5 s after recovering {:.1}/s, want about 54", recovered);
+        Ok(())
+    });
+}
+
+#[test]
+fn auto_pacing_falls_back_to_60_hz_without_a_fresh_feed() {
+    auto_run("autostale", &[(120, 800), (0, 1600)], false, |r| {
+        let fed = r.rate(300, 800);
+        // the feed goes stale 250 ms after the last frame
+        let stale = r.rate(1150, 2400);
+        say(&format!("[autostale] fed 120 fps: {:.1}/s; feed stopped: {:.1}/s (target 60); fallbacks {}\n", fed, stale, r.stats.auto_fallbacks));
+        ensure!(fed >= 90.0, "with the feed {:.1}/s", fed);
+        ensure!((54.0..=66.0).contains(&stale), "without a fresh feed {:.1}/s, want 60", stale);
+        ensure!(r.stats.auto_fallbacks >= 1, "no auto->fallback transition counted");
+        ensure!(r.slot.reader_auto_fallbacks >= 1, "file counts {} fallbacks", r.slot.reader_auto_fallbacks);
+        Ok(())
+    });
+}
+
+#[test]
+fn auto_pacing_keeps_button_edges_immediate() {
+    auto_run("autotaps", &[(30, 1000), (0, 600), (120, 600)], true, |r| {
+        ensure!(!r.sent_edges.is_empty(), "no taps sent");
+        ensure!(r.edges.len() == r.sent_edges.len(), "{} edges sent, {} received", r.sent_edges.len(), r.edges.len());
+        ensure!(r.edges.iter().map(|e| e.1).eq(r.sent_edges.iter().map(|e| e.1)), "edges out of order");
+        let mut lat: Vec<u64> = r.edges.iter().zip(&r.sent_edges).map(|(g, s)| g.0.saturating_sub(s.0)).collect();
+        let worst = *lat.iter().max().unwrap();
+        let p95 = pct(&mut lat, 95);
+        say(&format!("[autotaps] {} edges at 30 fps / no feed / 120 fps: p95 {} us max {} us\n", r.edges.len(), p95 / 1000, worst / 1000));
+        ensure!(p95 <= 1_000_000, "button edge p95 {} us", p95 / 1000);
+        ensure!(worst <= 10_000_000, "button edge worst {} us", worst / 1000);
         Ok(())
     });
 }

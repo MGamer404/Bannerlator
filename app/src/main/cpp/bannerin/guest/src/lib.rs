@@ -150,6 +150,11 @@ pub extern "C" fn bannerin_axis_hz() -> u32 {
     guest::axis_hz()
 }
 
+#[no_mangle]
+pub extern "C" fn bannerin_axis_auto() -> c_int {
+    (guest::axis_config() == guest::AXIS_AUTO) as c_int
+}
+
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

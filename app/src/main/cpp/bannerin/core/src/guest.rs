@@ -45,10 +45,20 @@ pub const MAX_SLOTS: usize = 4;
 pub const PATH_CAP: usize = 1024;
 pub const ENV_PATHS: &[u8] = b"FAKE_EVDEV_MEMFD_PATHS\0";
 pub const ENV_AXIS_HZ: &[u8] = b"BANNERIN_AXIS_HZ\0";
-/// Axis-only frame rate per handle when BANNERIN_AXIS_HZ is unset (T = 8 ms).
-pub const AXIS_HZ_DEFAULT: u32 = 125;
+/// `BANNERIN_AXIS_HZ` value meaning "follow the game's frame rate" (unset, or `auto`).
+pub const AXIS_AUTO: u32 = u32::MAX;
 pub const AXIS_HZ_MIN: u32 = 30;
 pub const AXIS_HZ_MAX: u32 = 1000;
+/// Auto pacing: stick frames at this share of the game's frame rate...
+pub const AUTO_HEADROOM_PCT: u64 = 90;
+/// ...within these bounds...
+pub const AUTO_MIN_HZ: u64 = 20;
+pub const AUTO_MAX_HZ: u64 = 240;
+/// ...and at this fixed rate while there is no fresh frame feed (menus, a client UI, a session
+/// without the feed, an older app).
+pub const AUTO_FALLBACK_HZ: u64 = 60;
+/// A last frame older than this means the feed is not fresh.
+pub const AUTO_STALE_NS: u64 = 250_000_000;
 pub const API_VERSION: u32 = 1;
 
 /// Upper bound on how long a missed wake could delay input (the fallback re-check).
@@ -126,7 +136,8 @@ pub fn init() -> u32 {
                     CONFIG.mask.store(mask, Relaxed);
                     let hz = parse_axis_hz(sys::env(ENV_AXIS_HZ));
                     AXIS_HZ.store(hz, Relaxed);
-                    AXIS_NS.store(if hz == 0 { 0 } else { 1_000_000_000 / hz as u64 }, Relaxed);
+                    let ns = if hz == 0 || hz == AXIS_AUTO { 0 } else { 1_000_000_000 / hz as u64 };
+                    AXIS_NS.store(ns, Relaxed);
                     CONFIG.state.store(2, Release);
                     return mask;
                 }
@@ -146,15 +157,15 @@ pub fn init() -> u32 {
     }
 }
 
-/// `BANNERIN_AXIS_HZ`: unset or unparsable = the default, 0 = unpaced, otherwise clamped to
-/// AXIS_HZ_MIN..=AXIS_HZ_MAX.
+/// `BANNERIN_AXIS_HZ`: unset, `auto` or unparsable = AXIS_AUTO; 0 = unpaced; a number = that
+/// fixed rate, clamped to AXIS_HZ_MIN..=AXIS_HZ_MAX.
 pub fn parse_axis_hz(v: Option<&[u8]>) -> u32 {
     let v = match v {
         Some(v) => trim(v),
-        None => return AXIS_HZ_DEFAULT,
+        None => return AXIS_AUTO,
     };
     if v.is_empty() || v.len() > 9 || !v.iter().all(|c| c.is_ascii_digit()) {
-        return AXIS_HZ_DEFAULT;
+        return AXIS_AUTO; // "auto", or anything else that is not a number
     }
     let n = v.iter().fold(0u32, |n, c| n * 10 + (c - b'0') as u32);
     if n == 0 {
@@ -164,20 +175,79 @@ pub fn parse_axis_hz(v: Option<&[u8]>) -> u32 {
     }
 }
 
-static AXIS_HZ: AtomicU32 = AtomicU32::new(AXIS_HZ_DEFAULT);
-static AXIS_NS: AtomicU64 = AtomicU64::new(1_000_000_000 / AXIS_HZ_DEFAULT as u64);
-static CONFIG_LOGGED: AtomicU32 = AtomicU32::new(0);
-
-/// The pacing interval T for axis-only frames (0 = unpaced).
-#[inline]
-fn axis_ns() -> u64 {
-    AXIS_NS.load(Relaxed)
+/// Auto pacing: T for a game frame interval `est` whose last frame was at `frame_time`, at `now`;
+/// None when the feed is not fresh (the caller falls back).
+pub fn auto_interval(est: u64, frame_time: u64, now: u64) -> Option<u64> {
+    if est == 0 || frame_time == 0 || now.saturating_sub(frame_time) > AUTO_STALE_NS {
+        return None;
+    }
+    let t = est.saturating_mul(100) / AUTO_HEADROOM_PCT;
+    Some(t.clamp(1_000_000_000 / AUTO_MAX_HZ, 1_000_000_000 / AUTO_MIN_HZ))
 }
 
-/// The effective BANNERIN_AXIS_HZ (0 = unpaced).
-pub fn axis_hz() -> u32 {
+static AXIS_HZ: AtomicU32 = AtomicU32::new(AXIS_AUTO);
+static AXIS_NS: AtomicU64 = AtomicU64::new(0);
+static CONFIG_LOGGED: AtomicU32 = AtomicU32::new(0);
+
+/// The configured BANNERIN_AXIS_HZ: 0 = unpaced, AXIS_AUTO, or a fixed rate.
+pub fn axis_config() -> u32 {
     init();
     AXIS_HZ.load(Relaxed)
+}
+
+/// The stick-frame rate in force: the fixed rate, 0 when unpaced, or in auto mode the rate a
+/// reader in this process last derived (the fallback rate before any).
+pub fn axis_hz() -> u32 {
+    match axis_config() {
+        AXIS_AUTO => match STATS.axis_hz.load(Relaxed) {
+            0 => AUTO_FALLBACK_HZ as u32,
+            hz => hz as u32,
+        },
+        hz => hz,
+    }
+}
+
+const PACE_UNKNOWN: u8 = 0;
+const PACE_AUTO: u8 = 1;
+const PACE_FALLBACK: u8 = 2;
+
+/// The pacing interval T for this handle's axis-only frames at `now` (0 = unpaced). In auto
+/// mode it follows the frame feed in the handle's slot file; also keeps the pacing counters.
+fn axis_interval(d: &mut Data, now: u64) -> u64 {
+    if AXIS_HZ.load(Relaxed) != AXIS_AUTO {
+        return AXIS_NS.load(Relaxed);
+    }
+    let sh = match shared(d) {
+        Some(sh) if !d.dead => Some(sh),
+        _ => None,
+    };
+    let fed = sh.and_then(|sh| {
+        let h = &sh.header;
+        let ft = h.frame_time_ns.load(Acquire);
+        auto_interval(h.frame_interval_ns.load(Relaxed), ft, now)
+    });
+    let t = fed.unwrap_or(1_000_000_000 / AUTO_FALLBACK_HZ);
+    let state = if fed.is_some() { PACE_AUTO } else { PACE_FALLBACK };
+    if d.pace_state == PACE_AUTO && state == PACE_FALLBACK {
+        STATS.auto_fallbacks.fetch_add(1, Relaxed);
+        if d.writable {
+            if let Some(sh) = sh {
+                sh.header.r_auto_fallbacks.fetch_add(1, Relaxed);
+            }
+        }
+    }
+    d.pace_state = state;
+    let hz = (1_000_000_000 / t) as u32;
+    if hz != d.pace_hz {
+        d.pace_hz = hz;
+        STATS.axis_hz.store(hz as u64, Relaxed);
+        if d.writable {
+            if let Some(sh) = sh {
+                sh.header.r_axis_hz.store(hz, Relaxed);
+            }
+        }
+    }
+    t
 }
 
 /// Log the effective pacing once, the first time a logger is there to hear it.
@@ -191,9 +261,19 @@ fn log_config_once() {
     let hz = AXIS_HZ.load(Relaxed);
     let mut m = Msg::new();
     if hz == 0 {
-        m.s(b"bannerin: axis-only frames unpaced (BANNERIN_AXIS_HZ=0)");
+        m.s(b"bannerin: stick-only frames unpaced (BANNERIN_AXIS_HZ=0)");
+    } else if hz == AXIS_AUTO {
+        m.s(b"bannerin: stick-only frames paced to ")
+            .u(AUTO_HEADROOM_PCT)
+            .s(b"% of the game's frame rate (")
+            .u(AUTO_MIN_HZ)
+            .s(b"..")
+            .u(AUTO_MAX_HZ)
+            .s(b" Hz; ")
+            .u(AUTO_FALLBACK_HZ)
+            .s(b" Hz without a fresh frame feed); button and full-state frames are never delayed");
     } else {
-        m.s(b"bannerin: axis-only frames paced to ")
+        m.s(b"bannerin: stick-only frames paced to a fixed ")
             .u(hz as u64)
             .s(b" Hz per handle (T = ")
             .u(AXIS_NS.load(Relaxed) / 1000)
@@ -231,6 +311,8 @@ pub struct Stats {
     pub fork_rebinds: AtomicU64,
     pub paced_frames: AtomicU64,
     pub merged_axis_publishes: AtomicU64,
+    pub axis_hz: AtomicU64,
+    pub auto_fallbacks: AtomicU64,
 }
 
 const Z: AtomicU64 = AtomicU64::new(0);
@@ -256,6 +338,8 @@ pub static STATS: Stats = Stats {
     fork_rebinds: Z,
     paced_frames: Z,
     merged_axis_publishes: Z,
+    axis_hz: Z,
+    auto_fallbacks: Z,
 };
 
 /// Process-wide reader statistics (`struct bannerin_stats`).
@@ -285,6 +369,10 @@ pub struct StatsView {
     pub paced_frames: u64,
     /// Publishes merged into a later frame instead of delivered one each.
     pub merged_axis_publishes: u64,
+    /// The stick-frame rate a reader in this process last derived (auto mode; 0 = none yet).
+    pub axis_hz: u64,
+    /// Times a reader in auto mode lost a fresh frame feed and fell back to the fixed rate.
+    pub auto_fallbacks: u64,
 }
 
 pub fn stats() -> StatsView {
@@ -311,6 +399,8 @@ pub fn stats() -> StatsView {
         fork_rebinds: s.fork_rebinds.load(Relaxed),
         paced_frames: s.paced_frames.load(Relaxed),
         merged_axis_publishes: s.merged_axis_publishes.load(Relaxed),
+        axis_hz: s.axis_hz.load(Relaxed),
+        auto_fallbacks: s.auto_fallbacks.load(Relaxed),
     }
 }
 
@@ -336,6 +426,10 @@ pub struct SlotStatsView {
     pub retired: u32,
     pub reader_paced_frames: u64,
     pub reader_merged_axis_publishes: u64,
+    pub reader_axis_hz: u64,
+    pub reader_auto_fallbacks: u64,
+    pub frame_interval_ns: u64,
+    pub frame_time_ns: u64,
 }
 
 pub type LogFn = unsafe extern "C" fn(level: c_int, line: *const c_char);
@@ -494,6 +588,8 @@ struct Data {
     fpos: usize,
     ftime: (i64, i64),
     ready: bool,
+    pace_state: u8,
+    pace_hz: u32,
 }
 
 impl Data {
@@ -516,6 +612,8 @@ impl Data {
         fpos: 0,
         ftime: (0, 0),
         ready: false,
+        pace_state: PACE_UNKNOWN,
+        pace_hz: 0,
     };
 }
 
@@ -765,7 +863,8 @@ fn due(d: &mut Data, snap: &Snapshot, now: u64) -> Due {
     if d.fpos < d.frame.len {
         Due::Now
     } else {
-        d.cursor.due(snap, now, axis_ns())
+        let t = axis_interval(d, now);
+        d.cursor.due(snap, now, t)
     }
 }
 
@@ -835,7 +934,7 @@ struct InputEvent {
 const _: () = assert!(core::mem::size_of::<InputEvent>() == EVENT_SIZE);
 
 unsafe fn deliver(d: &mut Data, snap: &Snapshot, out: *mut u8, max: usize, fs: &mut FrameStats, now: u64) -> usize {
-    let t = axis_ns();
+    let t = axis_interval(d, now);
     let mut n = 0usize;
     while n < max {
         if d.fpos >= d.frame.len {
@@ -1450,6 +1549,10 @@ pub fn slot_stats(slot: i32) -> Result<SlotStatsView, i32> {
         v.retired = h.retired.load(Relaxed);
         v.reader_paced_frames = h.r_paced_frames.load(Relaxed);
         v.reader_merged_axis_publishes = h.r_merged_axis.load(Relaxed);
+        v.reader_axis_hz = h.r_axis_hz.load(Relaxed) as u64;
+        v.reader_auto_fallbacks = h.r_auto_fallbacks.load(Relaxed);
+        v.frame_interval_ns = h.frame_interval_ns.load(Relaxed);
+        v.frame_time_ns = h.frame_time_ns.load(Relaxed);
     }
     m.release();
     Ok(v)
@@ -1475,16 +1578,39 @@ mod tests {
 
     #[test]
     fn axis_hz_parsing() {
-        assert_eq!(parse_axis_hz(None), 125);
-        assert_eq!(parse_axis_hz(Some(b"")), 125);
-        assert_eq!(parse_axis_hz(Some(b"abc")), 125);
-        assert_eq!(parse_axis_hz(Some(b"-5")), 125);
+        assert_eq!(parse_axis_hz(None), AXIS_AUTO);
+        assert_eq!(parse_axis_hz(Some(b"")), AXIS_AUTO);
+        assert_eq!(parse_axis_hz(Some(b"auto")), AXIS_AUTO);
+        assert_eq!(parse_axis_hz(Some(b" AUTO ")), AXIS_AUTO);
+        assert_eq!(parse_axis_hz(Some(b"abc")), AXIS_AUTO);
+        assert_eq!(parse_axis_hz(Some(b"-5")), AXIS_AUTO);
         assert_eq!(parse_axis_hz(Some(b"0")), 0);
         assert_eq!(parse_axis_hz(Some(b" 60 ")), 60);
         assert_eq!(parse_axis_hz(Some(b"250")), 250);
         assert_eq!(parse_axis_hz(Some(b"10")), 30);
         assert_eq!(parse_axis_hz(Some(b"5000")), 1000);
-        assert_eq!(parse_axis_hz(Some(b"99999999999")), 125);
+        assert_eq!(parse_axis_hz(Some(b"99999999999")), AXIS_AUTO);
+    }
+
+    #[test]
+    fn auto_interval_follows_the_game_with_headroom_and_bounds() {
+        const MS: u64 = 1_000_000;
+        let now = 10_000 * MS;
+        let f60 = 16_666_667;
+        // 60 fps -> 54 Hz, 120 fps -> 108 Hz
+        assert_eq!(1_000_000_000 / auto_interval(f60, now - MS, now).unwrap(), 54);
+        assert_eq!(1_000_000_000 / auto_interval(f60 / 2, now, now).unwrap(), 108);
+        // 30 fps -> 27 Hz; bounds 20..240 Hz
+        assert_eq!(1_000_000_000 / auto_interval(2 * f60, now, now).unwrap(), 27);
+        assert_eq!(auto_interval(500 * MS, now, now), Some(50 * MS));
+        assert_eq!(auto_interval(MS, now, now), Some(1_000_000_000 / 240));
+        // not fresh: never set, unknown interval, or the last frame 250+ ms ago
+        assert_eq!(auto_interval(0, now, now), None);
+        assert_eq!(auto_interval(f60, 0, now), None);
+        assert_eq!(auto_interval(f60, now - 251 * MS, now), None);
+        assert!(auto_interval(f60, now - 249 * MS, now).is_some());
+        // a frame stamped a moment after the reader's clock read is fresh
+        assert!(auto_interval(f60, now + MS, now).is_some());
     }
 
     #[test]

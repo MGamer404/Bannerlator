@@ -1285,6 +1285,76 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // Reset to -1 when the HUD unbinds.
     private volatile int glZinkHealedWindowId = -1;
 
+    // Controller input pacing (BannerinWriter.onGameFrame) needs the game's frame rate whether or not
+    // a HUD is shown, so it keeps its own copy of the HUD's window choice: the same rules as
+    // changeFrameRatingVisibility (bind to a _MESA_DRV render window, upgrade off a fallback, rebind
+    // to another one or the focused application window on unmap) and as driveHudFrameTick's GL/Zink
+    // self-heal, applied to these fields instead of the HUD's. Written by the WM callbacks; the
+    // present threads only read the volatile ints. padFeedMesaDrvIds is touched by the WM thread only.
+    private volatile int padFeedWindowId = -1;
+    private volatile int padFeedHealedWindowId = -1;
+    private final java.util.LinkedHashSet<Integer> padFeedMesaDrvIds = new java.util.LinkedHashSet<>();
+    private long padFeedBindTryNs;                  // present threads; a lost race only delays a bind
+    private volatile boolean padFeedWaylandGame;    // Wayland: the compositor names a game surface
+
+    /** WM thread: keep the pad frame feed bound to the game's presenting window (see the fields). */
+    private void trackPadFeedWindow(Window window, Property property) {
+        if (property != null) {
+            if (!property.nameAsString().contains("_MESA_DRV")) return;
+            padFeedMesaDrvIds.add(window.id);
+            int bound = padFeedWindowId;
+            boolean boundToFallback = bound != -1 && !padFeedMesaDrvIds.contains(bound);
+            if (bound == -1 || boundToFallback) padFeedWindowId = window.id;
+            return;
+        }
+        padFeedMesaDrvIds.remove(window.id);
+        if (padFeedWindowId == -1 || window.id != padFeedWindowId) return;
+        padFeedHealedWindowId = -1;
+        Integer next = padFeedMesaDrvIds.isEmpty() ? null : padFeedMesaDrvIds.iterator().next();
+        if (next == null) {
+            try {
+                Window focused = xServer.windowManager.getFocusedWindow();
+                if (focused != null && focused.id != window.id && focused.isApplicationWindow()) next = focused.id;
+            } catch (Exception ignore) {}
+        }
+        padFeedWindowId = next != null ? next : -1;
+    }
+
+    /**
+     * Present threads: report one frame of the game's window to the controller transport. A few
+     * volatile reads on the hot path; WM state is only consulted while unbound (at most twice a
+     * second, the live-HUD rule: the focused application window) or for the GL/Zink self-heal.
+     */
+    private void feedPadFrame(int wid) {
+        int bound = padFeedWindowId;
+        if (bound == -1) {
+            long now = System.nanoTime();
+            if (now - padFeedBindTryNs < 500_000_000L) return;
+            padFeedBindTryNs = now;
+            try {
+                Window focused = xServer.windowManager.getFocusedWindow();
+                if (focused == null || focused.id != wid || !focused.isApplicationWindow()
+                        || focused.isDesktopWindow()) return;
+            } catch (Exception e) {
+                return;
+            }
+            padFeedWindowId = bound = wid;
+        }
+        if (wid != bound && wid != padFeedHealedWindowId) {
+            if (!guestGlIsZink()) return;
+            try {
+                Window focused = xServer.windowManager.getFocusedWindow();
+                boolean gameFocused = focused != null && focused.isApplicationWindow() && !focused.isDesktopWindow();
+                Window w = xServer.windowManager.getWindow(wid);
+                if (!gameFocused || (w != null && w.isDesktopWindow())) return;
+            } catch (Exception e) {
+                return;
+            }
+            padFeedHealedWindowId = wid;
+        }
+        com.winlator.star.inputcontrols.BannerinWriter.onGameFrame();
+    }
+
     /**
      * Drive every perf-HUD overlay for one presented frame on window {@code wid}. Single entry point
      * for all four present/tick paths (SHM copyArea content-update, Vulkan AHB copy, GL/Vulkan native
@@ -1303,6 +1373,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * or {@code mesaDrvWindowIds} here (those are owned by the WM thread) — the volatile int is enough.
      */
     private void driveHudFrameTick(int wid) {
+        feedPadFrame(wid);   // controller pacing follows the game's frames, HUD or not
         if (frameRatingWindowId == -1 || !hudCounterEnabled) return;   // HUD inactive or toggled off -> never count
         if (wid != frameRatingWindowId && wid != glZinkHealedWindowId) {
             if (!guestGlIsZink()) return;                      // only the GL/Zink present topology
@@ -3117,6 +3188,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             @Override
             public void onModifyWindowProperty(Window window, Property property) {
+                trackPadFeedWindow(window, property);
                 changeFrameRatingVisibility(window, property);
                 // The guest publishes its pid via _NET_WM_PID, which for many titles (e.g. DiRT 3)
                 // arrives AFTER the window maps — so at onMapWindow assignTaskAffinity could only pin by
@@ -3130,6 +3202,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             @Override
             public void onUnmapWindow(Window window) {
+                trackPadFeedWindow(window, null);
                 changeFrameRatingVisibility(window, null);
             }
         });
@@ -9126,6 +9199,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // compositor reports the window presenting GPU frames, then each of its frames.
         com.winlator.star.wayland.WaylandCompositor.setGameListener(new com.winlator.star.wayland.WaylandCompositor.GameListener() {
             @Override public void onGameSurface(String window, String gpuName) {
+                padFeedWaylandGame = window != null;   // the pad frame feed follows the same surface
                 if (window == null) {
                     frameRatingWindowId = -1;
                     fpsCounter.reset();
@@ -9170,6 +9244,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // only counts the frame. The HUD's own refresh (FrameRating/PerfHudView.update: sysfs
                 // temperature/GPU-load reads and BatteryManager binder calls, every 500 ms) runs on the
                 // sampler thread; one job is queued at a time, so a fast game can't pile them up.
+                if (padFeedWaylandGame) com.winlator.star.inputcontrols.BannerinWriter.onGameFrame();
                 if (frameRatingWindowId == -1 || !hudCounterEnabled) return;
                 fpsCounter.tick();
                 android.os.Handler h = waylandHudSampler;
@@ -10439,6 +10514,29 @@ public class XServerDisplayActivity extends AppCompatActivity {
                              .append(", removals ")
                              .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
                                      com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_REMOVALS))
+                             .append('\n');
+                        // Stick pacing: the rate the readers last derived from the game's frames (auto
+                        // mode, the default; 0 = no reader computed one), how often the frame feed
+                        // went stale under them (fixed 60 Hz then), and what the feed itself saw.
+                        long frameNs = com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                com.winlator.star.inputcontrols.BannerinWriter.STAT_FRAME_INTERVAL_NS);
+                        stats.append("slot0 stick pacing: ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_AXIS_HZ))
+                             .append(" Hz last, auto->fallback ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_AUTO_FALLBACKS))
+                             .append(", paced frames ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_PACED_FRAMES))
+                             .append(", merged updates ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_MERGED_AXIS))
+                             .append("; game frame feed: ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_GAME_FRAMES))
+                             .append(" frames, interval ")
+                             .append(frameNs > 0 ? String.format(java.util.Locale.ROOT, "%.2f ms", frameNs / 1e6) : "none")
                              .append('\n');
                         // Same file the start-of-session writer used; appended, so the counts at
                         // the end sit under the setup lines rather than replacing them.

@@ -24,14 +24,19 @@
  *   Every handle is an independent consumer: readers never affect each other.
  *
  * AXIS PACING (BANNERIN_AXIS_HZ, read once by bannerin_init)
- *   A frame that carries only axis changes is emitted at most once per T = 1 / BANNERIN_AXIS_HZ
- *   per handle. A stick change less than T after the handle's last frame is held (the fd does not
- *   become readable) and delivered with the latest values when T has passed, so the rest position
- *   after a release reaches the guest within T. Button frames and full-state frames are never
- *   held: they go out at once, carry the current axis values and restart the interval. Unset =
- *   125 Hz (T = 8 ms); 0 = unpaced (one frame per stick update); otherwise clamped to 30..1000.
- *   This keeps a guest HID stack that queues every report (Wine's queues 32 per handle and drops
- *   the oldest) from being fed a 500 Hz pad's reports faster than the game drains them.
+ *   A frame that carries only axis changes is emitted at most once per interval T per handle. A
+ *   stick change less than T after the handle's last frame is held (the fd does not become
+ *   readable) and delivered with the latest values when T has passed, so the rest position after
+ *   a release reaches the guest within T. Button frames and full-state frames are never held: they
+ *   go out at once, carry the current axis values and restart the interval. This keeps a guest HID
+ *   stack that queues every report (Wine's queues 32 per handle and drops the oldest, and a game
+ *   may take one per rendered frame) from being fed reports faster than the game drains them.
+ *     unset or "auto"  T follows the game: the app reports every frame the game presents and
+ *                      writes the estimated frame interval into the slot file; stick frames go at
+ *                      90 % of the game's frame rate, 20..240 Hz, and at a fixed 60 Hz while no
+ *                      fresh frame (< 250 ms old) has been reported (menus, client UI, desktop).
+ *     N (30..1000)     a fixed N Hz.
+ *     0                unpaced: one frame per stick update.
  *
  *   Canonical codes are delivered (triggers as ABS_BRAKE / ABS_GAS); any re-presentation (e.g. the
  *   Steam-virtual ABS_Z / ABS_RZ identity) is the evdev layer's job. Values are always inside the
@@ -124,6 +129,8 @@ struct bannerin_stats {
     uint64_t fork_rebinds;
     uint64_t paced_frames;           /* axis-only frames held back by pacing, then delivered */
     uint64_t merged_axis_publishes;  /* publishes merged into a later frame instead of their own */
+    uint64_t axis_hz;                /* auto mode: the stick-frame rate last derived (0 = none yet) */
+    uint64_t auto_fallbacks;         /* auto mode: times the frame feed went stale (fixed 60 Hz) */
 };
 
 /* Counters stored in a slot file: its writer's and the sum over all of its readers. */
@@ -146,6 +153,10 @@ struct bannerin_slot_stats {
     uint32_t retired;
     uint64_t reader_paced_frames;           /* zero in files written before format 1.1 */
     uint64_t reader_merged_axis_publishes;
+    uint64_t reader_axis_hz;                /* format 1.2: rate a reader last derived (auto mode) */
+    uint64_t reader_auto_fallbacks;
+    uint64_t frame_interval_ns;             /* the app's game frame interval estimate (0 = none) */
+    uint64_t frame_time_ns;                 /* CLOCK_MONOTONIC of the game's last reported frame */
 };
 
 /* level 0 = info, 1 = warning; line is NUL-terminated, valid only during the call. */
@@ -219,8 +230,12 @@ void bannerin_set_logger(bannerin_log_fn fn);
 /* BANNERIN_API_VERSION of the linked library. */
 uint32_t bannerin_api_version(void);
 
-/* The effective BANNERIN_AXIS_HZ (0 = unpaced). */
+/* The stick-frame rate in force: the fixed BANNERIN_AXIS_HZ, 0 when unpaced, or in auto mode the
+ * rate a reader in this process last derived from the game's frame rate (60 before any). */
 uint32_t bannerin_axis_hz(void);
+
+/* 1 if stick frames follow the game's frame rate (BANNERIN_AXIS_HZ unset or "auto"), else 0. */
+int bannerin_axis_auto(void);
 
 #ifdef __cplusplus
 }

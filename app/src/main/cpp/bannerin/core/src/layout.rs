@@ -4,7 +4,8 @@
 //! 0x000  Header (256 bytes)
 //!          0x00  magic "BANNERIN" (u64), format major/minor, sizes, slot, instance id,
 //!                retired flag, writer pid, creation time
-//!          0x40  bell (futex word, bumped on every publish and on retirement), published index
+//!          0x40  bell (futex word, bumped on every publish and on retirement), published index,
+//!                the game frame feed (interval, last frame time; minor 2)
 //!          0x80  writer statistics (+ two reader pacing counters at 0xa8, 0xb0 since minor 1)
 //!          0xc0  reader statistics (readers add to these)
 //! 0x100  4 state copies x 128 bytes (sequence word + 31 data words, see W_*)
@@ -25,8 +26,10 @@ use crate::proto::{self, StateCopy};
 
 pub const MAGIC: u64 = u64::from_le_bytes(*b"BANNERIN");
 pub const FORMAT_MAJOR: u32 = 1;
-/// Minor 1 added the pacing counters `r_paced_frames` / `r_merged_axis` (formerly padding).
-pub const FORMAT_MINOR: u32 = 1;
+/// Minor 1 added the pacing counters `r_paced_frames` / `r_merged_axis` (formerly padding);
+/// minor 2 the game frame feed (`frame_interval_ns`, `frame_time_ns`) and `r_axis_hz` /
+/// `r_auto_fallbacks`. All zero in older files, which readers treat as "no frame feed".
+pub const FORMAT_MINOR: u32 = 2;
 
 pub const HEADER_SIZE: usize = 256;
 pub const COPY_WORDS: usize = 31;
@@ -78,7 +81,13 @@ pub struct Header {
     // 0x40: the wake line
     pub bell: AtomicU32,
     pub published: AtomicU32,
-    pub _pad1: [AtomicU32; 14],
+    /// The game's estimated frame interval (ns, 0 = unknown or stale), written by the app's frame
+    /// feed (minor 2), and when the game last presented a frame (CLOCK_MONOTONIC ns).
+    pub frame_interval_ns: AtomicU64,
+    pub frame_time_ns: AtomicU64,
+    /// The stick-frame rate a reader last derived from them (minor 2).
+    pub r_axis_hz: AtomicU32,
+    pub _pad1: [AtomicU32; 9],
     // 0x80: writer statistics
     pub w_publishes: AtomicU64,
     pub w_wake_calls: AtomicU64,
@@ -90,7 +99,8 @@ pub struct Header {
     pub r_paced_frames: AtomicU64,
     /// Publishes readers merged into a later frame instead of delivering one each.
     pub r_merged_axis: AtomicU64,
-    pub _pad2: [AtomicU64; 1],
+    /// Times a reader in auto pacing lost a fresh frame feed and fell back to the fixed rate.
+    pub r_auto_fallbacks: AtomicU64,
     // 0xc0: reader statistics, summed over every reader of this file
     pub r_attaches: AtomicU64,
     pub r_reattaches: AtomicU64,
@@ -116,6 +126,10 @@ const _: () = {
     assert!(offset_of!(Header, instance) == 40);
     assert!(offset_of!(Header, bell) == 64);
     assert!(offset_of!(Header, published) == 68);
+    assert!(offset_of!(Header, frame_interval_ns) == 72);
+    assert!(offset_of!(Header, frame_time_ns) == 80);
+    assert!(offset_of!(Header, r_axis_hz) == 88);
+    assert!(offset_of!(Header, r_auto_fallbacks) == 184);
     assert!(offset_of!(Header, w_publishes) == 128);
     assert!(offset_of!(Header, r_paced_frames) == 168);
     assert!(offset_of!(Header, r_merged_axis) == 176);
