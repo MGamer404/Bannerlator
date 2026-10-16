@@ -27,11 +27,22 @@ fn say(msg: &str) {
     let _ = sys::write(2, msg.as_bytes());
 }
 
+/// The library's own diagnostics (re-attach, orphaned, writer gone, unplug, resync), to stderr
+/// with the pid, so a failing scenario shows which path the library took.
+unsafe extern "C" fn test_log(level: c_int, line: *const core::ffi::c_char) {
+    if level == 0 && std::env::var_os("BANNERIN_TEST_VERBOSE").is_none() {
+        return;
+    }
+    let msg = std::ffi::CStr::from_ptr(line).to_string_lossy();
+    say(&format!("  (pid {} lvl {}) {}\n", sys::getpid(), level, msg));
+}
+
 /// Run `f` in a forked child; returns the child's pid. The child never returns into the harness.
 fn spawn<F: FnOnce() -> Result<(), String>>(name: &'static str, f: F) -> i32 {
     let pid = unsafe { fork() };
     assert!(pid >= 0, "fork failed");
     if pid == 0 {
+        bannerin_set_logger(Some(test_log));
         std::panic::set_hook(Box::new(move |info| say(&format!("[{}] panic: {}\n", name, info))));
         let code = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
             Ok(Ok(())) => 0,
@@ -832,7 +843,17 @@ fn forked_reader_gets_its_own_stream() {
                 let mut t = Taps::new(BTN_X);
                 let end = Instant::now() + Duration::from_secs(60);
                 while t.releases < T {
-                    ensure!(Instant::now() < end, "child stuck at {}", t.releases);
+                    if Instant::now() >= end {
+                        let st = r.state();
+                        return Err(format!(
+                            "child stuck at {}; pending {} removed {} state {:?}; stats {:?}",
+                            t.releases,
+                            bannerin_has_pending(r.h),
+                            bannerin_is_removed(r.h),
+                            st.map(|s| (s.buttons, s.axes)),
+                            stats()
+                        ));
+                    }
                     r.poll(100);
                     for f in r.drain()? {
                         t.feed(&f)?;
@@ -852,7 +873,13 @@ fn forked_reader_gets_its_own_stream() {
         let mut issued = 0u64;
         let end = Instant::now() + Duration::from_secs(60);
         while t.releases < T {
-            ensure!(Instant::now() < end, "parent stuck at {} (issued {})", t.releases, issued);
+            ensure!(
+                Instant::now() < end,
+                "parent stuck at {} (issued {}); stats {:?}",
+                t.releases,
+                issued,
+                stats()
+            );
             let slowest = t.releases.min(shm.get(4));
             if issued < T && issued < slowest + 16 {
                 issued += 1;
