@@ -538,6 +538,28 @@ jobs:
       # org.gradle.caching=true (gradle.properties) reuses task outputs across runs.
       run: ./gradlew ${{ matrix.flavor.task }} -Dorg.gradle.jvmargs="-Xmx5g -XX:MaxMetaspaceSize=1g"
 
+    # The bionic libfakeinput.so now links libbannerin_guest.a: it must not gain a dependency or
+    # export any symbol of the transport (it is preloaded into every Wine process).
+    - name: Check libfakeinput.so (bionic) after linking bannerin
+      run: |
+        set -euo pipefail
+        NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+        SO=$(find app/build/intermediates -path '*arm64-v8a*' -name libfakeinput.so -print -quit)
+        test -n "$SO" || { echo "::error::built libfakeinput.so not found"; exit 1; }
+        echo "checking $SO"
+        NEED=$("$NDK_BIN/llvm-readelf" -d "$SO" | sed -n 's/.*NEEDED.*\[\(.*\)\]/\1/p')
+        echo "NEEDED: $(echo $NEED)"
+        for n in $NEED; do
+          case "$n" in
+            libc.so|libdl.so|liblog.so|libm.so|libc++_shared.so) ;;
+            *) echo "::error::libfakeinput.so needs $n"; exit 1 ;;
+          esac
+        done
+        BAD=$("$NDK_BIN/llvm-nm" -D --defined-only "$SO" | awk '{print $NF}' \
+          | grep -E '^(bannerin_|rust_eh_personality|__rust)|^_R[A-Z]|17h[0-9a-f]{16}E$' || true)
+        test -z "$BAD" || { echo "::error::libfakeinput.so exports transport symbols: $BAD"; exit 1; }
+        echo "libfakeinput.so: no transport exports, dependencies unchanged"
+
     - name: Get version info
       run: |
         echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
