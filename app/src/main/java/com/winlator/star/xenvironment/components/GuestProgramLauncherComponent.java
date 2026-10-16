@@ -34,7 +34,7 @@ import com.winlator.star.core.WinebusRumblePatcher;
 import com.winlator.star.fexcore.FEXCoreManager;
 import com.winlator.star.fexcore.FEXCorePreset;
 import com.winlator.star.fexcore.FEXCorePresetManager;
-import com.winlator.star.inputcontrols.FakeInputWriter;
+import com.winlator.star.inputcontrols.BannerinWriter;
 import com.winlator.star.xconnector.UnixSocketConfig;
 import com.winlator.star.xenvironment.EnvironmentComponent;
 import com.winlator.star.xenvironment.ImageFs;
@@ -579,7 +579,7 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         try {
             if (fakeinputSrc.exists()) {
                 // Refresh every launch so the guest reader can never skew from the
-                // app-side ring writer (a same-size rebuild defeats length checks).
+                // app-side writer (a same-size rebuild defeats length checks).
                 // Do NOT reintroduce a `!fakeinputDest.exists()` guard here.
                 FileUtils.copy(fakeinputSrc, fakeinputDest);
                 Log.d("GuestLauncher", "Copied libfakeinput.so to imagefs");
@@ -640,13 +640,13 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         envVars.put("FAKE_EVDEV_DIR", devInputDir.getAbsolutePath());
         envVars.put("FAKE_EVDEV_VIBRATION", "1");
 
-        // Fake-input transport is a fixed-size mmap ring per slot (see FakeInputWriter).
-        // Prepare all 4 slot rings and hand the native reader their canonical paths so
-        // an open() of /dev/input/eventN maps the matching ring. The static rings are
+        // Controller input reaches the guest through BANNERIN: one fixed-size state file per slot
+        // (see BannerinWriter). Prepare all 4 and hand the native reader their paths, so an open()
+        // of /dev/input/eventN attaches to the matching slot. The slot state is process-wide and
         // shared with the WinHandler writers created later in this same process.
-        String ringPaths = FakeInputWriter.getRingEnv(devInputDir);
-        if (ringPaths != null && !ringPaths.isEmpty()) {
-            envVars.put("FAKE_EVDEV_MEMFD_PATHS", ringPaths);
+        String padPaths = BannerinWriter.getRingEnv(devInputDir);
+        if (padPaths != null && !padPaths.isEmpty()) {
+            envVars.put("FAKE_EVDEV_MEMFD_PATHS", padPaths);
         }
 
         Log.d("GuestLauncher", "Final LD_PRELOAD: " + ld_preload);

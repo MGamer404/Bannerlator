@@ -248,8 +248,8 @@ jobs:
     # below, which needs it to exist) and the app-side JNI writer libbannerin.so into jniLibs. ci/
     # build.sh link-probes the static library the way the interposer links it and fails if it would
     # pull in anything beyond libc/libdl/pthread (liblog on Android) or export any of its symbols.
-    # The glibc build of the same library is probed right after the Linux-runtime fakeinput step,
-    # which installs the aarch64 cross compiler.
+    # The glibc build of the same library is built, probed and linked inside the Linux-runtime
+    # fakeinput step, which installs the aarch64 cross compiler.
     - name: bannerin toolchain
       id: bannerin-rust
       run: |
@@ -291,7 +291,7 @@ jobs:
     # The Steam client's own copy, built against glibc for the Linux runtime rootfs. A SEPARATE source
     # from the bionic one preloaded into Wine, so a change for the client cannot reach a Windows game.
     # The native Steam client has no Wine and no XInput, so a pad only reaches it as a real
-    # /dev/input/eventN — which is what this serves out of the app's fake-input rings. It goes in
+    # /dev/input/eventN — which is what this serves from the app's BANNERIN pad files. It goes in
     # assets rather than the rootfs asset so an existing installed runtime picks it up on the next
     # launch instead of waiting on a ~790MB runtime release. Built from source here, never
     # committed, so it cannot drift from the bionic copy.
@@ -301,15 +301,25 @@ jobs:
       run: |
         set -euo pipefail
         sudo apt-get update -qq
-        sudo apt-get install -y -qq g++-aarch64-linux-gnu >/dev/null
+        sudo apt-get install -y -qq gcc-aarch64-linux-gnu g++-aarch64-linux-gnu >/dev/null
         D=app/src/main/assets/linuxfs
         mkdir -p "$D"
+        # The controller-input transport's guest library for glibc (bannerin), link-probed by
+        # build.sh exactly the way it is linked below.
+        export NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+        app/src/main/cpp/bannerin/ci/build.sh glibc
+        BANNERIN_A=app/src/main/cpp/bannerin/target/aarch64-unknown-linux-gnu/release/libbannerin_guest.a
+        test -s "$BANNERIN_A"
         # Statically linked C++ runtime: this is preloaded into every Steam process, and Steam ships
         # its own libstdc++ while rewriting LD_LIBRARY_PATH. Pulling the system one in ahead of it is
         # a version-conflict waiting to happen, and it also makes the library independent of what the
         # rootfs carries. Costs ~1.4MB; only libc.so.6 is left as a dependency.
+        # bannerin is linked in with --exclude-libs, so none of its symbols is exported (it must not
+        # interpose on anything Steam loads), and --no-undefined, so a missing symbol fails here
+        # instead of silently keeping the preload out of every process.
         aarch64-linux-gnu-g++ -shared -fPIC -O2 -Wall -Wno-attributes -Wno-nonnull-compare -pthread -std=c++17 -static-libstdc++ -static-libgcc \
-          -o "$D/libfakeinput.so" app/src/main/cpp/winlator/fakeinput_steam.cpp -ldl
+          -Wl,--no-undefined -Wl,--exclude-libs,libbannerin_guest.a \
+          -o "$D/libfakeinput.so" app/src/main/cpp/winlator/fakeinput_steam.cpp "$BANNERIN_A" -ldl
         aarch64-linux-gnu-strip --strip-unneeded "$D/libfakeinput.so"
         NEED=$(aarch64-linux-gnu-readelf -d "$D/libfakeinput.so" | sed -n 's/.*NEEDED.*\[\(.*\)\]/\1/p')
         echo "NEEDED: $NEED"
@@ -328,12 +338,13 @@ jobs:
           grep -qx "$sym" <<<"$SYMS" \
             || { echo "::error::libfakeinput.so does not export $sym"; exit 1; }
         done
+        BAD=$(grep -E '^(bannerin_|rust_eh_personality|__rust)|^_R[A-Z]|17h[0-9a-f]{16}E$' <<<"$SYMS" || true)
+        test -z "$BAD" || { echo "::error::libfakeinput.so (glibc) exports transport symbols: $BAD"; exit 1; }
         ls -l "$D/libfakeinput.so"
         # The session shim as well, from the same sources the rootfs builds it from. It is what
         # /etc/ld.so.preload names in every runtime since r5, so refreshing it from the app is how a
         # fix inside it reaches a runtime that is already installed - the netlink stand-in in
         # udevmon.c is exactly that, and the device that needs it cannot take a new runtime image.
-        sudo apt-get install -y -qq gcc-aarch64-linux-gnu >/dev/null
         aarch64-linux-gnu-gcc -shared -fPIC -O2 -Wall -pthread \
           -o "$D/libblsession.so" tools/linuxfs/preload/*.c -ldl
         aarch64-linux-gnu-strip --strip-unneeded "$D/libblsession.so"
@@ -383,12 +394,6 @@ jobs:
         rm -rf mango-pkgs
         ls -l "$M"
         ls -l "$D/usr/local/bin/"
-
-    - name: bannerin guest library for the Linux runtime (glibc) + link probe
-      run: |
-        set -euo pipefail
-        export NDK_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-        app/src/main/cpp/bannerin/ci/build.sh glibc
 
     # The PulseAudio sink that sends the Steam client's own sound through the DirectAudio relay (tools/aaudio-sink, from The412Banner/SteamDeck).
     # It is compiled against upstream PulseAudio 13 headers and the app's own libpulse*, and added to the audio bundle the apk carries.

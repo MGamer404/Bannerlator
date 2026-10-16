@@ -53,6 +53,11 @@ public final class BannerinWriter {
     public static final int STAT_INSTANCE = 13;
     public static final int STAT_FAILED_PUBLISHES = 14;
     public static final int STAT_HAS_BACKING = 15;
+    private static final int STAT_COUNT = 16;
+
+    // Each slot's counters as they stood when releaseAllRingSlots() retired its file, for the
+    // session-end diagnostics that may run after the release.
+    private static final long[][] RELEASED_STATS = new long[MAX_SLOTS][STAT_COUNT];
 
     private static final boolean NATIVE_OK;
 
@@ -144,13 +149,30 @@ public final class BannerinWriter {
      */
     public static synchronized void releaseAllRingSlots() {
         if (!NATIVE_OK) return;
-        for (int slot = 0; slot < MAX_SLOTS; slot++) nativeRelease(slot);
+        for (int slot = 0; slot < MAX_SLOTS; slot++) {
+            if (nativeStat(slot, STAT_HAS_BACKING) != 0) {
+                for (int which = 0; which < STAT_COUNT; which++) {
+                    RELEASED_STATS[slot][which] = nativeStat(slot, which);
+                }
+            }
+            nativeRelease(slot);
+        }
     }
 
     /** A counter for diagnostics (see the STAT_* constants), or 0. */
     public static long getSlotStat(int slot, int which) {
         if (!NATIVE_OK || !validSlot(slot)) return 0;
         return nativeStat(slot, which);
+    }
+
+    /**
+     * {@link #getSlotStat} of the slot's live file, or, once {@link #releaseAllRingSlots()} has
+     * retired it at session end, the value it had then (0 if it never had a file).
+     */
+    public static synchronized long getSessionStat(int slot, int which) {
+        if (!NATIVE_OK || !validSlot(slot) || which < 0 || which >= STAT_COUNT) return 0;
+        if (nativeStat(slot, STAT_HAS_BACKING) != 0) return nativeStat(slot, which);
+        return RELEASED_STATS[slot][which];
     }
 
     // ------------------------------------------------------------------------------------------

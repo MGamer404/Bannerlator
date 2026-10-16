@@ -12,7 +12,7 @@ import com.winlator.star.core.GyroCalibrator;
 import com.winlator.star.core.StringUtils;
 import com.winlator.star.inputcontrols.ControlsProfile;
 import com.winlator.star.inputcontrols.ExternalController;
-import com.winlator.star.inputcontrols.FakeInputWriter;
+import com.winlator.star.inputcontrols.BannerinWriter;
 import com.winlator.star.inputcontrols.GamepadState;
 import com.winlator.star.inputcontrols.SteamControllerBackend;
 import com.winlator.star.widget.InputControlsView;
@@ -87,7 +87,7 @@ public class WinHandler {
     // Multi-controller support
     private static final int MAX_CONTROLLERS = 4;
     private static final int OSC_DEVICE_ID = -1;
-    private FakeInputWriter[] writers = new FakeInputWriter[MAX_CONTROLLERS];
+    private BannerinWriter[] writers = new BannerinWriter[MAX_CONTROLLERS];
     // ConcurrentHashMap: the vibration thread iterates this to resolve a slot's owning
     // device while the input/hotplug path (main thread) mutates it — avoid a CME.
     private Map<Integer, Integer> deviceToSlot = new ConcurrentHashMap<>();
@@ -680,7 +680,10 @@ public class WinHandler {
 
     public void stop() {
         running = false;
-        closeFakeInputWriter();
+        closeInputWriters();
+        // Session end: retire the slot files. A guest process still attached shows a neutral pad
+        // and re-attaches by itself to the files the next session prepares.
+        BannerinWriter.releaseAllRingSlots();
 
         if (socket != null) {
             socket.close();
@@ -1191,7 +1194,7 @@ public class WinHandler {
     }
 
     // Menu owns the controller while the drawer is open; zero tracked pad state and
-    // push it once through the ring so nothing (held stick, pressed button, latched
+    // publish it once so nothing (held stick, pressed button, latched
     // trigger) stays applied in the guest while the user isn't looking. Preserves
     // our slot pinning and per-slot rumble tuning (rumble state lives outside
     // GamepadState and is not touched here).
@@ -1629,7 +1632,7 @@ public class WinHandler {
     /**
      * Re-injects the current gamepad state for whichever target holds the activator, so a sustained
      * tilt keeps panning even while no controller/touch event is arriving. A no-op when the
-     * activator isn't held, and FakeInputWriter still diffs the axes, so an unchanged state writes
+     * activator isn't held, and BannerinWriter still diffs the axes, so an unchanged state writes
      * nothing.
      */
     private void pushGyroToActiveTarget() {
@@ -2160,12 +2163,12 @@ public class WinHandler {
     }
 
     /** Lazily creates and opens the fake-input writer backing a slot. Opening the writer
-     *  activates the slot's mmap ring (P0), which is what the guest sees as a controller. */
+     *  makes the slot live for readers (P0), which is what the guest sees as a controller. */
     private void ensureWriterForSlot(int slot) {
         if (slot < 0 || slot >= MAX_CONTROLLERS || fakeInputBasePath == null)
             return;
         if (writers[slot] == null) {
-            writers[slot] = new FakeInputWriter(fakeInputBasePath, slot);
+            writers[slot] = new BannerinWriter(fakeInputBasePath, slot);
             writers[slot].open();
         }
     }
@@ -2195,7 +2198,7 @@ public class WinHandler {
         }
 
         // Shared-slot co-owner (a DIFFERENT descriptor, or OSC) still on this slot? If so we must NOT
-        // tear the ring down — only the LAST contributor to leave a shared slot destroys it (mirrors the
+        // tear the slot down — only the LAST contributor to leave a shared slot destroys it (mirrors the
         // sibling-sub-device rule above, extended to distinct co-owners of a shared slot).
         boolean coOwnerHoldsSlot = false;
         for (Integer s : deviceToSlot.values()) {
@@ -2216,15 +2219,15 @@ public class WinHandler {
             if (fallbackSlot == slot) fallbackSlot = -1;
             if (writers[slot] != null) {
                 if (deviceId == OSC_DEVICE_ID) {
-                    // OSC / virtual pad: keep the ring alive across on-screen-controls
-                    // hide/show. softRelease resets the pad to neutral without bumping the
-                    // ring generation, so toggling the overlay never flaps the guest's
-                    // virtual controller — this is the P0 on-screen path, left intact.
+                    // OSC / virtual pad: keep the slot alive across on-screen-controls
+                    // hide/show. softRelease resets the pad to neutral without an unplug,
+                    // so toggling the overlay never flaps the guest's virtual controller —
+                    // this is the P0 on-screen path, left intact.
                     writers[slot].softRelease();
                 } else {
-                    // Physical disconnect: destroy() so the ring generation bumps and the
-                    // guest sees a REAL removal (the core hot-plug fix). A fresh writer is
-                    // created on reconnect, which re-activates the ring at a new generation.
+                    // Physical disconnect: destroy() so every reader of the slot sees a REAL
+                    // removal (the core hot-plug fix). A fresh writer is created on reconnect,
+                    // and the guest's fresh open gets the new device.
                     writers[slot].destroy();
                     writers[slot] = null;
                 }
@@ -2469,9 +2472,9 @@ public class WinHandler {
      * pin the device to that XInput player slot (Player 1 = slot 0), SLOT_IGNORE to drop it (free its
      * slot, never re-grab), or -1 to clear the override back to auto (FCFS). The override is recorded
      * first so every later assign path obeys it, then the change is applied immediately:
-     *   • Physical devices are torn down (releaseSlot → destroy() → ring generation bump → the guest
+     *   • Physical devices are torn down (releaseSlot → destroy() → an unplug → the guest
      *     sees a real removal) and re-seated on the new slot — the P1 physical-reassignment semantic.
-     *   • OSC keeps softRelease semantics: only its slot INDEX changes; its ring stays alive across
+     *   • OSC keeps softRelease semantics: only its slot INDEX changes; its slot stays alive across
      *     the move so the on-screen overlay never flaps.
      * Pinning onto a slot another device holds evicts that other device (it re-auto-assigns to the
      * next free slot). Returns the resulting slot, or -1 for ignore / unassigned. Main-thread only.
@@ -2504,7 +2507,7 @@ public class WinHandler {
             // next free slot), so OSC can take ANY slot including Player 1 (slot 0).
             if (normalized >= 0)
                 evictSlotOccupants(normalized, OSC_DESCRIPTOR);
-            // softRelease (inside releaseSlot for OSC) keeps the ring alive across the move; only the
+            // softRelease (inside releaseSlot for OSC) keeps the slot alive across the move; only the
             // slot INDEX changes. The re-seat below (or the next sendGamepadState frame) re-opens it.
             releaseSlot(OSC_DEVICE_ID);
             if (normalized >= 0)
@@ -2608,7 +2611,7 @@ public class WinHandler {
         }
         Log.d("WinHandler", "resetInputPipeline: rebuilding input transport in place.");
 
-        // 1) Tear down all rings + slot bookkeeping (overrides preserved so we re-seat the same pins).
+        // 1) Tear down all writers + slot bookkeeping (overrides preserved so we re-seat the same pins).
         cancelAllPendingDeviceReleases();
         for (int i = 0; i < MAX_CONTROLLERS; i++) {
             if (writers[i] != null) {
@@ -2777,12 +2780,12 @@ public class WinHandler {
     public void setFakeInputPath(String fakeInputPath) {
         if (fakeInputPath != null && !fakeInputPath.isEmpty()) {
             this.fakeInputBasePath = fakeInputPath;
-            Log.d("WinHandler", "FakeInputWriter base path set: " + fakeInputPath);
+            Log.d("WinHandler", "fake input base path set: " + fakeInputPath);
             startVibrationListener();
         }
     }
 
-    public void closeFakeInputWriter() {
+    public void closeInputWriters() {
         cancelAllPendingDeviceReleases();
         if (inputManager != null && inputDeviceListener != null) {
             inputManager.unregisterInputDeviceListener(inputDeviceListener);

@@ -511,11 +511,6 @@ class InputControlsFormatTest {
     }
 
     @Test
-    fun fakeInputWriter_bufferFitsOneCompleteXboxUpdate() {
-        assertEquals(29, FakeInputWriter.MAX_EVENTS_PER_UPDATE)
-    }
-
-    @Test
     fun touchscreenMousePriority_defaultsOnAndSurvivesBindingArrayResize() {
         val element = ControlElement(null)
         assertTrue(element.blocksTouchscreenMouseButtonsAt(0))

@@ -3184,10 +3184,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     // A previous session may have been killed without a clean exit (recents-swipe /
                     // background optimisation / force-stop) — none of those run onDestroy, so exit()
                     // (the only caller of terminateAllWineProcesses) never fired and the old
-                    // wineserver + wine tree can still be alive as orphans. A new session then
-                    // recreates the fake-input ring files those stale processes still hold mmap'd,
-                    // and the stale reader faults with SIGBUS the moment the new session touches
-                    // them → "The game exited before rendering / exit code 1" on the SECOND launch.
+                    // wineserver + wine tree can still be alive as orphans, still holding the
+                    // previous session's files, and the SECOND launch then failed with
+                    // "The game exited before rendering / exit code 1".
                     // Sweep before starting anything; this is a fresh launch, so every wine process
                     // found here is stale by construction. (A paused-session in-app resume never
                     // re-enters this runnable, so a live session can't be swept.)
@@ -10044,9 +10043,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         // Controllers for a Linux session.
-        // WinHandler already publishes the on-screen and physical pads into the fake-input rings (setFakeInputPath, in onCreate).
+        // WinHandler already publishes the on-screen and physical pads through BANNERIN (setFakeInputPath, in onCreate).
         // What this session lacks is a reader, because there is no Wine here to preload the interposer into.
-        // Handing the rings to the glibc build of libfakeinput.so makes the Steam client enumerate a real /dev/input/eventN.
+        // Handing the pad files to the glibc build of libfakeinput.so makes the Steam client enumerate a real /dev/input/eventN.
         // The pad then works in Big Picture and in the games launched from it.
         // Both paths below are bound into the session at their own host paths (LinuxRuntime.command), so nothing here needs translating.
         // xbox360: SDL and Steam key their mapping database on bus+vendor+product.
@@ -10175,24 +10174,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (fakeInputEnabled) {
             //noinspection ResultOfMethodCallIgnored
             fakeInputDir.mkdirs();
-            // The rings' own event nodes are what the client sees: the directory is bound in as
+            // The pads' own event nodes are what the client sees: the directory is bound in as
             // /dev/input itself (see gameBinds below), so an unhooked opendir/readdir lists it and
             // no js* node or classic-scan hint is needed. Verified on device with the runtime's proot.
-            com.winlator.star.inputcontrols.FakeInputWriter.prepareRingSlots(fakeInputDir, 4);
+            com.winlator.star.inputcontrols.BannerinWriter.prepareRingSlots(fakeInputDir, 4);
             // The client sees one controller per event node in this directory, so a node with no device behind it is a pad that never moves.
-            // Four were always listed, one per ring, while one real pad fed ring0 and the other three rings were never written.
+            // Four were always listed, one per slot, while one real pad fed slot 0 and the other three slots were never written.
             // A trip through the Quick Access Menu re-activates every listed pad for the game, and with four identical-looking pads nothing kept the real one on XInput slot 0.
             // The game reads player one from slot 0, so it came back alive with no controller.
             // Only the slots a device holds keep their node; with none yet, slot 0 is kept for the on-screen pad.
-            // The rings themselves all stay prepared, so a pad plugged in mid-session still has one: WinHandler creates its node when it takes the slot.
+            // The slot files themselves all stay prepared, so a pad plugged in mid-session still has one: WinHandler creates its node when it takes the slot.
             trimUnusedFakeInputNodes(fakeInputDir);
             Log.i("XServerDisplayActivity", "fake evdev nodes: "
                     + java.util.Arrays.toString(fakeInputDir.list()));
             guest.add("FAKE_EVDEV_DIR=" + fakeInputDir.getPath());
-            String fakeInputRings =
-                    com.winlator.star.inputcontrols.FakeInputWriter.getRingEnv(fakeInputDir);
-            if (fakeInputRings != null && !fakeInputRings.isEmpty()) {
-                guest.add("FAKE_EVDEV_MEMFD_PATHS=" + fakeInputRings);
+            String fakeInputPads =
+                    com.winlator.star.inputcontrols.BannerinWriter.getRingEnv(fakeInputDir);
+            if (fakeInputPads != null && !fakeInputPads.isEmpty()) {
+                guest.add("FAKE_EVDEV_MEMFD_PATHS=" + fakeInputPads);
             }
             guest.add("FAKE_EVDEV_IDENTITY=xbox360");
             // Rumble comes back over an abstract socket.
@@ -10237,8 +10236,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             sb.append("session libraries staged (name=bytes, -1 = failed): ")
               .append(stagedReport.toString().trim()).append('\n');
             sb.append("nodes: ").append(java.util.Arrays.toString(fakeInputDir.list())).append('\n');
-            File rings = new File(fakeInputDir.getParentFile(), "fakeinput-rings");
-            sb.append("rings: ").append(java.util.Arrays.toString(rings.list())).append('\n');
+            File pads = com.winlator.star.inputcontrols.BannerinWriter.backingDir(fakeInputDir);
+            sb.append("pad files: ").append(java.util.Arrays.toString(pads.list())).append('\n');
             // The touch profile is chosen later in the launch, so it is deliberately not reported here.
             sb.append("physical pad connected: ").append(hasConnectedGameController()).append('\n');
             sb.append("shortcut controlsProfile: ")
@@ -10363,7 +10362,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // store's database as installed there: the store shows it, the app can launch it.
         com.winlator.star.linux.LinuxSteamLibrary.adoptClientInstalls(
                 this, com.winlator.star.linux.LinuxRuntime.rootDir(this));
-        // Apps may not list /dev/input; the fake evdev nodes the input rings back stand in for it.
+        // Apps may not list /dev/input; the fake evdev nodes the app's pads back stand in for it.
         gameBinds = new ArrayList<>(gameBinds);
         if (fakeInputEnabled) gameBinds.add(fakeInputDir.getPath() + ":/dev/input");
         gameBinds.add(linuxBatteryDir.getPath() + ":/sys/class/power_supply");
@@ -10406,31 +10405,50 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     } catch (Throwable t) {
                         Log.w("XServerDisplayActivity", "could not adopt the client's installs", t);
                     }
-                    // How many events the app pushed into slot 0 over the whole session. Zero means no
-                    // input ever left the app, which separates "the pad wrote nothing" from "the
-                    // client read nothing" - the two look identical from the outside.
+                    // How many updates the app published into slot 0 over the whole session, and what
+                    // the session's readers took from it. Zero publishes means no input ever left the
+                    // app, which separates "the pad wrote nothing" from "the client read nothing" - the
+                    // two look identical from the outside. Read through getSessionStat because the
+                    // session end may already have retired the slot file (WinHandler.stop).
                     try {
-                        File ring0 = new File(fakeInputDir.getParentFile(), "fakeinput-rings/ring0");
-                        long writes = -1;
-                        if (ring0.isFile()) {
-                            try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(ring0, "r")) {
-                                raf.seek(16);
-                                byte[] b = new byte[8];
-                                raf.readFully(b);
-                                writes = java.nio.ByteBuffer.wrap(b)
-                                        .order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong();
-                            }
-                        }
-                        // Same file the start-of-session writer used; appended, so the ring
-                        // counts at the end sit under the setup lines rather than replacing them.
+                        final int slot0 = 0;
+                        StringBuilder stats = new StringBuilder();
+                        stats.append("session ended: ").append(status).append('\n');
+                        stats.append("slot0 updates published by the app: ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_PUBLISHES))
+                             .append(" (failed: ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_FAILED_PUBLISHES))
+                             .append(")\n");
+                        stats.append("slot0 readers: attaches ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_ATTACHES))
+                             .append(", re-attaches ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_REATTACHES))
+                             .append(", frames ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_FRAMES))
+                             .append(", taps ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_TAPS))
+                             .append(", coalesced taps ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_COALESCED))
+                             .append(", removals ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_REMOVALS))
+                             .append('\n');
+                        // Same file the start-of-session writer used; appended, so the counts at
+                        // the end sit under the setup lines rather than replacing them.
                         File diag = new File(logDir, "fake-input.txt");
                         java.nio.file.Files.write(diag.toPath(),
-                                ("session ended: " + status + "\nring0 events written by the app: "
-                                        + writes + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                                stats.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
                                 java.nio.file.StandardOpenOption.APPEND,
                                 java.nio.file.StandardOpenOption.CREATE);
                     } catch (Exception e) {
-                        Log.w("XServerDisplayActivity", "could not record ring stats", e);
+                        Log.w("XServerDisplayActivity", "could not record controller stats", e);
                     }
                     // A session that died before it ever drew would otherwise end as a flash of
                     // black: leave its exit status and the log folder readable for a moment first.
@@ -11186,11 +11204,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         winHandler.setManualSlotOverrides(parseSlotOverrides(resolvedControllerSlotOverridesJson()));
 
         // Pre-assign any controllers that are already connected, BEFORE Wine boots. This opens
-        // their slot rings up front so the guest sees them from its first device enumeration
+        // their slots up front so the guest sees them from its first device enumeration
         // instead of only after the first input event. The fake-input path was set in onCreate
         // (setFakeInputPath), and the launcher component builds FAKE_EVDEV_MEMFD_PATHS during
         // startEnvironmentComponents below, so this must sit here — after the path is known and
-        // before the guest starts reading the rings.
+        // before the guest starts reading the slots.
         winHandler.preAssignConnectedControllers();
 
         // Pre-launch: pull the freshest GOG cloud saves INTO the prefix before the guest boots, so the
@@ -11874,7 +11892,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // A Linux session is controller-first: the Steam client IS the shell.
             // Big Picture has no keyboard/mouse affordance worth falling back to.
             // So when no touch profile has been picked, seed the bundled "Virtual Gamepad" layout.
-            // It binds GAMEPAD_*, which is what reaches the fake-evdev rings the session reads (FAKE_EVDEV_* above).
+            // It binds GAMEPAD_*, which is what reaches the fake-evdev pads the session reads (FAKE_EVDEV_* above).
             // The client then sees a controller rather than synthesised key presses.
             // #338's rule still applies: a physical pad that is already connected owns the slot, so don't add a phantom one.
             // Same switch as the session's controller wiring: seeding the overlay is part of that

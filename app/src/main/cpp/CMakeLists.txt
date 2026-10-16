@@ -41,7 +41,6 @@ add_library(winlator SHARED
         winlator/alsa_client.c
         winlator/vulkan.c
         winlator/perf_turbo.c
-        winlator/ring_fence.c
 )
 
 target_compile_options(winlator PRIVATE -Wall -Wextra)

@@ -24,7 +24,7 @@ import java.util.Locale;
  *       device.txt     the device, its GPU and drivers, and the settings the session ran with
  *       network.txt    transport, addresses and DNS as the session started (never the SSID)
  *       session.log    the guest session: proot, gamescope, the client's stdout  (was a loose file)
- *       fake-input.txt the controller rings' diagnostics                        (was a loose file)
+ *       fake-input.txt the controllers' diagnostics                             (was a loose file)
  *       app.log        this process's own logcat - only while launch logging is on
  *       audio.log      the PulseAudio daemon's log for the session
  *       crash.log      Android's crash buffer as the session ended
