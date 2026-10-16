@@ -80,13 +80,15 @@ def_exports() {
        /^EXPORTS/ { f = 1 }' "$1" | sort
 }
 
-# actual "<ordinal> <name|->" lines of a DLL
+# actual "<ordinal> <name|->" lines of a DLL (the export address table also lists the unused
+# ordinals between the numbered ones, with RVA 0: those are skipped)
 dll_exports() {
   llvm-readobj --coff-exports "$1" | awk '
-    /^ *Export \{/ { o = ""; n = "-" }
+    /^ *Export \{/ { o = ""; n = "-"; r = "" }
     /^ *Ordinal:/ { o = $2 }
     /^ *Name:/ { if (NF >= 2) n = $2 }
-    /^ *\}/ { if (o != "") print o, n; o = "" }' | sort
+    /^ *RVA:/ { r = $2 }
+    /^ *\}/ { if (o != "" && r != "" && r != "0x0") print o, n; o = "" }' | sort
 }
 
 check_dll() { # check_dll <arch> <dll name> <file> <def>
