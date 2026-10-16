@@ -2851,13 +2851,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         containerManager.activateContainer(container);
 
-        // Pre-create all 4 event files so Wine registers every slot at startup.
-        // Wine scans /dev/input/ once on boot — slots that don't exist then are never seen,
-        // even if created later. OSC takes slot 0; physical controllers need slots 1-3.
-        for (int i = 0; i < 4; i++) {
-            try { new File(devInputDir, "event" + i).createNewFile(); } catch (Exception e) {}
-        }
-        Log.d("XServerDisplayActivity", "Pre-created 4 controller event file(s)");
+        // Controller discovery nodes: a slot's event<N> exists only while a controller holds that slot.
+        // WinHandler's slot writer creates it when a pad or the on-screen pad takes the slot (pads that
+        // are connected at launch are pre-assigned before Wine boots, the on-screen pad when setupUI
+        // shows it) and removes it when the slot is released; the guest's evdev layer redirects the
+        // inotify watch on /dev/input to this directory, so SDL (winebus' only bus here) sees nodes come
+        // and go. All four used to be created here unconditionally, and slots 1-3, never written, were
+        // listed to games as three phantom pads. A Linux session keeps player 1 listed for the Steam
+        // client (setupLinuxSession creates event0 itself).
+        winHandler.setKeepPlayerOneNode(gamescopeMode);
 
         taskAffinityMask = (short) ProcessHelper.getAffinityMask(container.getCPUList(true));
         taskAffinityMaskWoW64 = (short) ProcessHelper.getAffinityMask(container.getCPUListWoW64(true));
@@ -10317,6 +10319,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // The game reads player one from slot 0, so it came back alive with no controller.
             // Only the slots a device holds keep their node; with none yet, slot 0 is kept for the on-screen pad.
             // The slot files themselves all stay prepared, so a pad plugged in mid-session still has one: WinHandler creates its node when it takes the slot.
+            // Nothing pre-creates the nodes any more (onCreate starts every launch with none), so player 1's is made here.
+            try {
+                //noinspection ResultOfMethodCallIgnored
+                new File(fakeInputDir, "event0").createNewFile();
+            } catch (java.io.IOException e) {
+                Log.w("XServerDisplayActivity", "fake evdev: could not create event0", e);
+            }
             trimUnusedFakeInputNodes(fakeInputDir);
             Log.i("XServerDisplayActivity", "fake evdev nodes: "
                     + java.util.Arrays.toString(fakeInputDir.list()));
@@ -11378,6 +11387,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // startEnvironmentComponents below, so this must sit here — after the path is known and
         // before the guest starts reading the slots.
         winHandler.preAssignConnectedControllers();
+        // What the guest will list at boot: one node per slot a controller holds, nothing else.
+        Log.i("XServerDisplayActivity", "fake evdev nodes at boot: "
+                + java.util.Arrays.toString(devInputDir.list()) + ", slots held: " + winHandler.getUsedSlotsSnapshot());
 
         // Pre-launch: pull the freshest GOG cloud saves INTO the prefix before the guest boots, so the
         // game reads current progress (Galaxy-parity download-on-launch). We're on the launch worker

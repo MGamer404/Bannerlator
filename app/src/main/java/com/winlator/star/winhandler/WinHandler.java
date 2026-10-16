@@ -166,6 +166,16 @@ public class WinHandler {
     // the main looper — the InputDeviceListener is registered with a null Handler, so its
     // callbacks land on the main thread too.
     private static final long PHYSICAL_DISCONNECT_DEBOUNCE_MS = 400;
+    // On-screen pad slot release, debounced. Hiding the on-screen controls (auto-hide when a pad takes
+    // over, the user's own toggle, a YIELD move, a manual reassignment) soft-releases the slot at once
+    // and unplugs it (writer destroy: a removal for every reader, and the event<N> node deleted) only
+    // if nothing claims the slot again within this window. Show/hide flapping therefore never flaps the
+    // guest's controller, and a slot no contributor holds is never left listed as a phantom pad.
+    private static final long OSC_RELEASE_DEBOUNCE_MS = 1500;
+    private final Runnable[] pendingSlotUnplugs = new Runnable[MAX_CONTROLLERS];
+    // Linux session: the Steam client reads player 1, so slot 0's node stays listed even while
+    // nothing holds it (the on-screen pad's release there stays a soft release, as before).
+    private volatile boolean keepPlayerOneNode = false;
     private final Handler inputHandler = new Handler(Looper.getMainLooper());
     private final Map<Integer, Runnable> pendingDeviceReleases = new HashMap<>();
     private LocalServerSocket vibrationServer;
@@ -2231,10 +2241,70 @@ public class WinHandler {
     private void ensureWriterForSlot(int slot) {
         if (slot < 0 || slot >= MAX_CONTROLLERS || fakeInputBasePath == null)
             return;
+        // Whoever claims the slot keeps it listed: a soft-released on-screen slot waiting to be
+        // unplugged is reused (its writer reopens on the next publish) instead of flapping.
+        cancelSlotUnplug(slot);
         if (writers[slot] == null) {
             writers[slot] = new BannerinWriter(fakeInputBasePath, slot);
             writers[slot].open();
         }
+    }
+
+    /** Unplugs a slot the on-screen pad left, unless something claims it within the debounce. */
+    private void scheduleSlotUnplug(final int slot) {
+        if (slot < 0 || slot >= MAX_CONTROLLERS)
+            return;
+        cancelSlotUnplug(slot);
+        final BannerinWriter writer = writers[slot];
+        if (writer == null)
+            return;
+        Runnable unplug = new Runnable() {
+            @Override
+            public void run() {
+                if (pendingSlotUnplugs[slot] != this)
+                    return;
+                pendingSlotUnplugs[slot] = null;
+                // Claimed again (by the on-screen pad or anyone else), or already replaced: keep it.
+                if (usedSlots.contains(slot) || writers[slot] != writer)
+                    return;
+                if (slot == 0 && keepPlayerOneNode)
+                    return;
+                writer.destroy();
+                writers[slot] = null;
+                Log.d("WinHandler", "Slot " + slot + " unplugged: no controller holds it (on-screen pad released)");
+            }
+        };
+        pendingSlotUnplugs[slot] = unplug;
+        inputHandler.postDelayed(unplug, OSC_RELEASE_DEBOUNCE_MS);
+    }
+
+    private void cancelSlotUnplug(int slot) {
+        if (slot < 0 || slot >= MAX_CONTROLLERS)
+            return;
+        Runnable pending = pendingSlotUnplugs[slot];
+        if (pending != null) {
+            pendingSlotUnplugs[slot] = null;
+            inputHandler.removeCallbacks(pending);
+        }
+    }
+
+    private void cancelAllSlotUnplugs() {
+        for (int i = 0; i < MAX_CONTROLLERS; i++)
+            cancelSlotUnplug(i);
+    }
+
+    /** Linux session: keep player 1's node listed while nothing holds slot 0 (see keepPlayerOneNode). */
+    public void setKeepPlayerOneNode(boolean keep) {
+        keepPlayerOneNode = keep;
+    }
+
+    /** The slots a controller holds right now, for the launch log. Read from deviceToSlot (concurrent),
+     *  so it is safe off the main thread. */
+    public java.util.List<Integer> getUsedSlotsSnapshot() {
+        java.util.TreeSet<Integer> held = new java.util.TreeSet<>();
+        for (Integer s : deviceToSlot.values())
+            if (s != null && s >= 0 && s < MAX_CONTROLLERS) held.add(s);
+        return new java.util.ArrayList<>(held);
     }
 
     private void releaseSlot(int deviceId) {
@@ -2283,11 +2353,11 @@ public class WinHandler {
             if (fallbackSlot == slot) fallbackSlot = -1;
             if (writers[slot] != null) {
                 if (deviceId == OSC_DEVICE_ID) {
-                    // OSC / virtual pad: keep the slot alive across on-screen-controls
-                    // hide/show. softRelease resets the pad to neutral without an unplug,
-                    // so toggling the overlay never flaps the guest's virtual controller —
-                    // this is the P0 on-screen path, left intact.
+                    // OSC / virtual pad: neutral at once without an unplug, so a quick hide/show
+                    // never flaps the guest's virtual controller; if nobody claims the slot within
+                    // OSC_RELEASE_DEBOUNCE_MS it is unplugged and its node removed (no phantom pad).
                     writers[slot].softRelease();
+                    scheduleSlotUnplug(slot);
                 } else {
                     // Physical disconnect: destroy() so every reader of the slot sees a REAL
                     // removal (the core hot-plug fix). A fresh writer is created on reconnect,
@@ -2677,6 +2747,7 @@ public class WinHandler {
 
         // 1) Tear down all writers + slot bookkeeping (overrides preserved so we re-seat the same pins).
         cancelAllPendingDeviceReleases();
+        cancelAllSlotUnplugs();
         for (int i = 0; i < MAX_CONTROLLERS; i++) {
             if (writers[i] != null) {
                 writers[i].destroy();
@@ -2851,6 +2922,7 @@ public class WinHandler {
 
     public void closeInputWriters() {
         cancelAllPendingDeviceReleases();
+        cancelAllSlotUnplugs();
         if (inputManager != null && inputDeviceListener != null) {
             inputManager.unregisterInputDeviceListener(inputDeviceListener);
         }
@@ -3054,7 +3126,12 @@ public class WinHandler {
         for (ExternalController controller : profile.getControllers()) {
             controller.state.reset();
             controller.remappedState.reset();
-            sendGamepadState(controller);
+            // A profile entry for a pad that isn't connected resolves to deviceId -1, the on-screen
+            // pad's id: sending it would claim a slot and list a pad with nothing behind it. Only an
+            // entry whose pad holds a slot has anything to neutralise.
+            int deviceId = controller.getDeviceId();
+            if (deviceId != OSC_DEVICE_ID && deviceToSlot.containsKey(deviceId))
+                sendGamepadState(controller);
         }
     }
 

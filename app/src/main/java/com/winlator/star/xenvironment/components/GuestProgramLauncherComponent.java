@@ -632,12 +632,11 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
             envVars.put("WINE_FORCE_SSBS", forceSsbs ? "1" : "0");
         }
 
+        // No discovery node is created here: event<N> exists only while a controller holds slot N
+        // (WinHandler's slot writers create and remove them). An always-present event0 was a pad with
+        // nothing behind it whenever no controller held player 1.
         File devInputDir = new File(imageFs.getRootDir(), "dev/input");
         devInputDir.mkdirs();
-        File event0 = new File(devInputDir, "event0");
-        if (!event0.exists()) {
-                try { event0.createNewFile(); } catch (Exception e) {}
-        }
 
         envVars.put("FAKE_EVDEV_DIR", devInputDir.getAbsolutePath());
         envVars.put("FAKE_EVDEV_VIBRATION", "1");
