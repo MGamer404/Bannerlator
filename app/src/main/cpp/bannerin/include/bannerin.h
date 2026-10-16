@@ -33,7 +33,9 @@
  *   may take one per rendered frame) from being fed reports faster than the game drains them.
  *     unset or "auto"  frame credits: the app counts every frame the game itself presents (never
  *                      generated or HUD frames) into the slot file, and a handle may send ONE
- *                      stick-only frame per new game frame. Credits do not accumulate past one, so
+ *                      stick-only frame per new game frame, and at most BANNERIN_AXIS_AUTO_MAX per
+ *                      second (default 60, 20..240: some games draw far faster than they read
+ *                      input and queue every report). Credits do not accumulate past one, so
  *                      the first movement after an idle spell goes out at once; a change waiting
  *                      for a credit is woken by the next frame (the app rings the bell only while a
  *                      wake thread waits), or delivered anyway after max(2 frame intervals, 50 ms)
@@ -108,6 +110,7 @@ extern "C" {
 #define BANNERIN_AXIS_MODE_FALLBACK 2   /* auto without a fresh frame feed: fixed 60 Hz */
 #define BANNERIN_AXIS_MODE_FIXED    3   /* BANNERIN_AXIS_HZ = N */
 #define BANNERIN_AXIS_MODE_UNPACED  4   /* BANNERIN_AXIS_HZ = 0 */
+#define BANNERIN_AXIS_MODE_CEILING  5   /* auto, fresh feed, game faster than BANNERIN_AXIS_AUTO_MAX */
 
 /* Opaque, never 0. A stale handle (after detach) is always refused with -EBADF. */
 typedef uint32_t bannerin_handle;
@@ -174,6 +177,7 @@ struct bannerin_slot_stats {
     uint64_t reader_axis_mode;              /* BANNERIN_AXIS_MODE_* a reader last paced in */
     uint64_t frame_waiters;                 /* wake threads waiting for the next game frame */
     uint64_t reader_helper_wakes;           /* wake-thread wake-ups, all reader processes */
+    uint64_t reader_auto_max;               /* format 1.4: the auto ceiling in force (Hz) */
 };
 
 /* level 0 = info, 1 = warning; line is NUL-terminated, valid only during the call. */

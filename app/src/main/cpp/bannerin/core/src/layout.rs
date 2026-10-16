@@ -29,9 +29,9 @@ pub const FORMAT_MAJOR: u32 = 1;
 /// Minor 1 added the pacing counters `r_paced_frames` / `r_merged_axis` (formerly padding);
 /// minor 2 the game frame feed (`frame_interval_ns`, `frame_time_ns`) and `r_axis_hz` /
 /// `r_auto_fallbacks`; minor 3 the frame credits (`frame_count`, `frame_waiters`, `r_axis_mode`)
-/// and `r_helper_wakes`.
+/// and `r_helper_wakes`; minor 4 `r_auto_max` and AXIS_MODE_CEILING.
 /// All zero in older files, which readers treat as "no frame feed".
-pub const FORMAT_MINOR: u32 = 3;
+pub const FORMAT_MINOR: u32 = 4;
 
 /// `r_axis_mode` values: how a reader last paced stick-only frames.
 pub const AXIS_MODE_UNKNOWN: u32 = 0;
@@ -43,6 +43,9 @@ pub const AXIS_MODE_FALLBACK: u32 = 2;
 pub const AXIS_MODE_FIXED: u32 = 3;
 /// BANNERIN_AXIS_HZ = 0.
 pub const AXIS_MODE_UNPACED: u32 = 4;
+/// Auto with a fresh feed, but the game presents faster than the auto ceiling
+/// (BANNERIN_AXIS_AUTO_MAX): the ceiling's minimum interval governs, credits still apply.
+pub const AXIS_MODE_CEILING: u32 = 5;
 
 pub const HEADER_SIZE: usize = 256;
 pub const COPY_WORDS: usize = 31;
@@ -107,7 +110,8 @@ pub struct Header {
     /// Reader wake threads currently waiting for the next game frame: the feed wakes the bell for
     /// a frame only while this is non-zero (minor 3).
     pub frame_waiters: AtomicU32,
-    pub _pad1a: AtomicU32,
+    /// The auto-mode ceiling a reader paces under (Hz, BANNERIN_AXIS_AUTO_MAX; minor 4).
+    pub r_auto_max: AtomicU32,
     /// Wake-ups of the readers' per-slot wake threads, summed over every reader process (minor 3):
     /// what an idle pad costs in CPU wake-ups.
     pub r_helper_wakes: AtomicU64,
@@ -156,6 +160,7 @@ const _: () = {
     assert!(offset_of!(Header, r_axis_mode) == 92);
     assert!(offset_of!(Header, frame_count) == 96);
     assert!(offset_of!(Header, frame_waiters) == 104);
+    assert!(offset_of!(Header, r_auto_max) == 108);
     assert!(offset_of!(Header, r_helper_wakes) == 112);
     assert!(offset_of!(Header, r_auto_fallbacks) == 184);
     assert!(offset_of!(Header, w_publishes) == 128);

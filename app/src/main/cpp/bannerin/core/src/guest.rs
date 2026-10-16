@@ -45,6 +45,13 @@ pub const MAX_SLOTS: usize = 4;
 pub const PATH_CAP: usize = 1024;
 pub const ENV_PATHS: &[u8] = b"FAKE_EVDEV_MEMFD_PATHS\0";
 pub const ENV_AXIS_HZ: &[u8] = b"BANNERIN_AXIS_HZ\0";
+pub const ENV_AXIS_AUTO_MAX: &[u8] = b"BANNERIN_AXIS_AUTO_MAX\0";
+/// Auto mode never sends stick-only frames faster than this per handle, whatever the game's frame
+/// rate (BANNERIN_AXIS_AUTO_MAX, clamped to AUTO_MAX_MIN..=AUTO_MAX_MAX): some games draw far faster
+/// than they read input and queue every report.
+pub const AUTO_MAX_DEFAULT: u32 = 60;
+pub const AUTO_MAX_MIN: u32 = 20;
+pub const AUTO_MAX_MAX: u32 = 240;
 /// `BANNERIN_AXIS_HZ` value meaning "follow the game's frame rate" (unset, or `auto`).
 pub const AXIS_AUTO: u32 = u32::MAX;
 pub const AXIS_HZ_MIN: u32 = 30;
@@ -70,6 +77,8 @@ const IDLE_AFTER_NS: u64 = 250_000_000;
 /// not needed for input; it only paces the writer-liveness / file-replacement check (a crashed
 /// writer cannot ring), which runs on those wakes.
 const IDLE_SLEEP_NS: u64 = 1_000_000_000;
+/// See deliver(): how late a ceiling-paced stick frame may be and still keep the grid.
+const CEILING_SLACK_NS: u64 = 1_000_000;
 /// Cadence of path / writer-liveness checks and of re-attach attempts for orphaned handles.
 const SLOW_NS: u64 = 500_000_000;
 const SNAP_ATTEMPTS: u32 = 64;
@@ -141,6 +150,7 @@ pub fn init() -> u32 {
                         None => 0,
                     };
                     CONFIG.mask.store(mask, Relaxed);
+                    AUTO_MAX.store(parse_auto_max(sys::env(ENV_AXIS_AUTO_MAX)), Relaxed);
                     let hz = parse_axis_hz(sys::env(ENV_AXIS_HZ));
                     AXIS_HZ.store(hz, Relaxed);
                     let ns = if hz == 0 || hz == AXIS_AUTO { 0 } else { 1_000_000_000 / hz as u64 };
@@ -182,6 +192,21 @@ pub fn parse_axis_hz(v: Option<&[u8]>) -> u32 {
     }
 }
 
+/// `BANNERIN_AXIS_AUTO_MAX`: unset or not a number = AUTO_MAX_DEFAULT, else clamped to
+/// AUTO_MAX_MIN..=AUTO_MAX_MAX.
+pub fn parse_auto_max(v: Option<&[u8]>) -> u32 {
+    let v = match v {
+        Some(v) => trim(v),
+        None => return AUTO_MAX_DEFAULT,
+    };
+    if v.is_empty() || v.len() > 9 || !v.iter().all(|c| c.is_ascii_digit()) {
+        return AUTO_MAX_DEFAULT;
+    }
+    v.iter().fold(0u32, |n, c| n * 10 + (c - b'0') as u32).clamp(AUTO_MAX_MIN, AUTO_MAX_MAX)
+}
+
+static AUTO_MAX: AtomicU32 = AtomicU32::new(AUTO_MAX_DEFAULT);
+
 /// Auto pacing at `now`, from a slot file's frame feed: Some((frame count, stall bound)) while the
 /// feed is fresh, None when it is not (the caller falls back to AUTO_FALLBACK_HZ).
 pub fn credit_feed(count: u64, frame_time: u64, interval: u64, now: u64) -> Option<(u64, u64)> {
@@ -218,14 +243,15 @@ pub fn axis_hz() -> u32 {
 enum Pace {
     /// At most one per interval (fixed N Hz, the 60 Hz fallback, or 0 = unpaced).
     Interval(u64),
-    /// One per new game frame: `count` is the slot file's frame counter, `stall` how long a held
-    /// change may wait for the next one.
-    Credit { count: u64, stall: u64 },
+    /// One per new game frame and at least `min` ns apart (the auto ceiling): `count` is the
+    /// slot file's frame counter, `stall` how long a held change may wait for the next frame.
+    Credit { count: u64, stall: u64, min: u64 },
 }
 
 /// Record how this handle paces (r_axis_mode / r_axis_hz, process stats) when that changes.
 fn note_mode(d: &mut Data, sh: Option<&Shared>, mode: u32, hz: u32) {
-    if d.pace_mode == layout::AXIS_MODE_CREDITS && mode == layout::AXIS_MODE_FALLBACK {
+    let fed = d.pace_mode == layout::AXIS_MODE_CREDITS || d.pace_mode == layout::AXIS_MODE_CEILING;
+    if fed && mode == layout::AXIS_MODE_FALLBACK {
         STATS.auto_fallbacks.fetch_add(1, Relaxed);
         if d.writable {
             if let Some(sh) = sh {
@@ -245,6 +271,7 @@ fn note_mode(d: &mut Data, sh: Option<&Shared>, mode: u32, hz: u32) {
         if let Some(sh) = sh {
             sh.header.r_axis_mode.store(mode, Relaxed);
             sh.header.r_axis_hz.store(hz, Relaxed);
+            sh.header.r_auto_max.store(AUTO_MAX.load(Relaxed), Relaxed);
         }
     }
 }
@@ -270,9 +297,17 @@ fn pacing(d: &mut Data, now: u64) -> Pace {
     });
     match feed {
         Some(((count, stall), interval)) => {
-            let hz = if interval == 0 { 0 } else { (1_000_000_000 / interval) as u32 };
-            note_mode(d, sh, layout::AXIS_MODE_CREDITS, hz);
-            Pace::Credit { count, stall }
+            let max = AUTO_MAX.load(Relaxed);
+            let min = 1_000_000_000 / max as u64;
+            // Which limit governs: the game's frames (credits), or the ceiling when it presents
+            // faster than that.
+            let (mode, hz) = if interval != 0 && interval < min {
+                (layout::AXIS_MODE_CEILING, max)
+            } else {
+                (layout::AXIS_MODE_CREDITS, if interval == 0 { 0 } else { (1_000_000_000 / interval) as u32 })
+            };
+            note_mode(d, sh, mode, hz);
+            Pace::Credit { count, stall, min }
         }
         None => {
             note_mode(d, sh, layout::AXIS_MODE_FALLBACK, AUTO_FALLBACK_HZ as u32);
@@ -281,17 +316,24 @@ fn pacing(d: &mut Data, now: u64) -> Pace {
     }
 }
 
-/// A pending stick-only frame under frame credits: due now if a game frame arrived since this
-/// handle's last stick-only frame (credits never accumulate past one), or once it has waited
-/// `stall`; otherwise held until the next frame or that bound.
-fn credit_due(d: &mut Data, count: u64, stall: u64, now: u64) -> Due {
-    if count != d.credit_count {
-        return Due::Now; // a new frame (or the counter restarted with a new app process)
+/// A pending stick-only frame under frame credits: due once a game frame arrived since this
+/// handle's last stick-only frame (credits never accumulate past one) AND at least `min` has passed
+/// since that frame (the auto ceiling); a change still waiting for a frame goes anyway after
+/// `stall`. Held until then: for the next frame (Frame) or just the ceiling (At).
+fn credit_due(d: &mut Data, count: u64, stall: u64, min: u64, now: u64) -> Due {
+    // A new frame, or the counter restarted with a new app process.
+    let credit = count != d.credit_count;
+    let ceiling_at = if d.last_axis_emit == 0 { 0 } else { d.last_axis_emit.wrapping_add(min) };
+    if credit && now >= ceiling_at {
+        return Due::Now;
     }
     if d.hold_since == 0 {
         d.hold_since = now;
     }
-    let deadline = d.hold_since.wrapping_add(stall);
+    if credit {
+        return Due::At(ceiling_at);
+    }
+    let deadline = d.hold_since.wrapping_add(stall).max(ceiling_at);
     if now >= deadline {
         Due::Now
     } else {
@@ -312,7 +354,9 @@ fn log_config_once() {
     if hz == 0 {
         m.s(b"bannerin: stick-only frames unpaced (BANNERIN_AXIS_HZ=0)");
     } else if hz == AXIS_AUTO {
-        m.s(b"bannerin: stick-only frames paced by frame credits (one per game frame; ")
+        m.s(b"bannerin: stick-only frames paced by frame credits (one per game frame, at most ")
+            .u(AUTO_MAX.load(Relaxed) as u64)
+            .s(b"/s; ")
             .u(AUTO_FALLBACK_HZ)
             .s(b" Hz without a fresh frame feed); button and full-state frames are never delayed");
     } else {
@@ -483,6 +527,7 @@ pub struct SlotStatsView {
     pub reader_axis_mode: u64,
     pub frame_waiters: u64,
     pub reader_helper_wakes: u64,
+    pub reader_auto_max: u64,
 }
 
 pub type LogFn = unsafe extern "C" fn(level: c_int, line: *const c_char);
@@ -651,8 +696,10 @@ struct Data {
     last_bell: u32,
     /// Frame counter value when this handle last sent a stick-only frame under frame credits.
     credit_count: u64,
-    /// When the pending stick change started waiting for a credit (0 = not waiting).
+    /// When the pending stick change started waiting (0 = not waiting).
     hold_since: u64,
+    /// When this handle last sent a stick-only frame under frame credits (the ceiling's clock).
+    last_axis_emit: u64,
 }
 
 impl Data {
@@ -681,6 +728,7 @@ impl Data {
         last_bell: 0,
         credit_count: 0,
         hold_since: 0,
+        last_axis_emit: 0,
     };
 }
 
@@ -931,7 +979,7 @@ fn due(d: &mut Data, snap: &Snapshot, now: u64) -> Due {
         return Due::Now;
     }
     match pacing(d, now) {
-        Pace::Credit { count, stall } if d.cursor.only_axes_pending(snap) => credit_due(d, count, stall, now),
+        Pace::Credit { count, stall, min } if d.cursor.only_axes_pending(snap) => credit_due(d, count, stall, min, now),
         Pace::Credit { .. } => {
             d.hold_since = 0;
             d.cursor.due(snap, now, 0)
@@ -1024,11 +1072,11 @@ unsafe fn deliver(d: &mut Data, snap: &Snapshot, out: *mut u8, max: usize, fs: &
             // Under frame credits a stick-only frame needs one; anything else goes at once.
             let (t, credit) = match pace {
                 Pace::Interval(t) => (t, None),
-                Pace::Credit { count, stall } if d.cursor.only_axes_pending(snap) => {
-                    if credit_due(d, count, stall, now) != Due::Now {
+                Pace::Credit { count, stall, min } if d.cursor.only_axes_pending(snap) => {
+                    if credit_due(d, count, stall, min, now) != Due::Now {
                         break;
                     }
-                    (0, Some(count))
+                    (0, Some((count, min)))
                 }
                 Pace::Credit { .. } => (0, None),
             };
@@ -1041,8 +1089,18 @@ unsafe fn deliver(d: &mut Data, snap: &Snapshot, out: *mut u8, max: usize, fs: &
                 d.frame.len = 0;
                 break;
             }
-            if let Some(count) = credit {
+            if let Some((count, min)) = credit {
                 d.credit_count = count; // spent; a button frame never spends it
+                // Keep the ceiling on its own grid: a frame sent a wake latency after its slot
+                // starts the next interval from the slot, not from now, or the cadence would drift
+                // behind the game's frames (at 60 fps under a 60/s ceiling it lost a credit every
+                // few dozen frames). Only within 1 ms, so the spacing never shrinks by more.
+                let slot = d.last_axis_emit.wrapping_add(min);
+                d.last_axis_emit = if d.last_axis_emit != 0 && now >= slot && now - slot < CEILING_SLACK_NS {
+                    slot
+                } else {
+                    now
+                };
                 if d.hold_since != 0 {
                     fs.paced_frames += 1;
                 }
@@ -1745,6 +1803,7 @@ pub fn slot_stats(slot: i32) -> Result<SlotStatsView, i32> {
         v.reader_axis_mode = h.r_axis_mode.load(Relaxed) as u64;
         v.frame_waiters = h.frame_waiters.load(Relaxed) as u64;
         v.reader_helper_wakes = h.r_helper_wakes.load(Relaxed);
+        v.reader_auto_max = h.r_auto_max.load(Relaxed) as u64;
     }
     m.release();
     Ok(v)
@@ -1782,6 +1841,17 @@ mod tests {
         assert_eq!(parse_axis_hz(Some(b"10")), 30);
         assert_eq!(parse_axis_hz(Some(b"5000")), 1000);
         assert_eq!(parse_axis_hz(Some(b"99999999999")), AXIS_AUTO);
+    }
+
+    #[test]
+    fn auto_max_parsing() {
+        assert_eq!(parse_auto_max(None), 60);
+        assert_eq!(parse_auto_max(Some(b"")), 60);
+        assert_eq!(parse_auto_max(Some(b"abc")), 60);
+        assert_eq!(parse_auto_max(Some(b" 120 ")), 120);
+        assert_eq!(parse_auto_max(Some(b"5")), 20);
+        assert_eq!(parse_auto_max(Some(b"0")), 20);
+        assert_eq!(parse_auto_max(Some(b"999")), 240);
     }
 
     #[test]
