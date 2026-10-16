@@ -192,6 +192,9 @@ public class Container {
     private boolean forceSsbs = true;
     private String renderer = "vulkan";
     private boolean exclusiveXInput = true;
+    // "Direct XInput (BANNERIN)": XInput games read the pad straight from the BANNERIN slot files
+    // (core/BannerinXInput). Default off; only persisted when on.
+    private boolean bannerinXInput = false;
     private ContainerManager containerManager;
 
 
@@ -1325,6 +1328,14 @@ public class Container {
         this.exclusiveXInput = exclusiveXInput;
     }
 
+    public boolean isBannerinXInput() {
+        return bannerinXInput;
+    }
+
+    public void setBannerinXInput(boolean bannerinXInput) {
+        this.bannerinXInput = bannerinXInput;
+    }
+
 
 
     public String getRenderer() { return renderer; }
@@ -1428,6 +1439,7 @@ public class Container {
             data.put("primaryController", primaryController);
             data.put("controllerMapping", controllerMapping);
             data.put("exclusiveXInput", exclusiveXInput);
+            if (bannerinXInput) data.put("bannerinXInput", true);
             data.put("renderer", renderer);
             data.put("rendererNative", rendererNative);
             data.put("rendererNativeBackend", rendererNativeBackend);
@@ -1572,6 +1584,9 @@ public class Container {
                     break;
                 case "exclusiveXInput" :
                     setExclusiveXInput(data.getBoolean(key));
+                    break;
+                case "bannerinXInput" :
+                    setBannerinXInput(data.optBoolean(key, false));
                     break;
                 case "renderer" :
                     setRenderer(data.getString(key));

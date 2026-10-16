@@ -1077,6 +1077,13 @@ internal object SettingsRegistry {
             ),
         ),
         SettingDef(
+            id = "input.bannerinXInput", category = "input", group = "Controllers", level = ADVANCED,
+            label = "Direct XInput (BANNERIN)", hint = "XInput games read the controller directly, with no input queue (no stale stick after release). Off by default.", tech = "bannerinXInput",
+            control = { _, _ -> Control.Toggle },
+            vm = vmBool({ it.bannerinXInput }, { vm, v -> vm.bannerinXInput = v }),
+            game = key10("bannerinXInput"),
+        ),
+        SettingDef(
             id = "input.controllerApi", category = "input", group = "Controllers", level = ADVANCED,
             label = "Controller type games see", hint = "Most modern games want Xbox. Pick Generic for older games, Both if unsure.", tech = "Enable XInput / Enable DInput",
             control = { _, _ -> seg("$INPUT_XINPUT" to "Xbox (XInput)", "$INPUT_DINPUT" to "Generic (DirectInput)", "$INPUT_BOTH" to "Both") },

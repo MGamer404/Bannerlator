@@ -285,6 +285,20 @@ jobs:
           app/src/main/jniLibs/arm64-v8a/libbannerin.so
         test -s app/src/main/cpp/bannerin/target/aarch64-linux-android/release/libbannerin_guest.a
 
+    # --- BANNERIN-XInput: the replacement XInput DLLs (app/src/main/cpp/bannerin/xinput) -------------
+    # Built from source with the pinned bylaws/llvm-mingw for x86_64, i386 and arm64ec, every DLL's
+    # export table, imports and machine type checked, into assets/bannerin-xinput/ with a manifest of
+    # their sha256s (never committed). core/BannerinXInput installs them into a prefix when a container
+    # turns on "Direct XInput (BANNERIN)". The Wine end-to-end test is bannerin-xinput.yml.
+    - name: Cache llvm-mingw (BANNERIN-XInput)
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/llvm-mingw-bylaws-20250920
+        key: llvm-mingw-bylaws-20250920-ubuntu-22.04-x86_64
+
+    - name: Build BANNERIN-XInput DLLs into assets
+      run: app/src/main/cpp/bannerin/xinput/build.sh dlls app/src/main/assets/bannerin-xinput
+
     # --- fake evdev for the Linux runtime session -------------------------------------------
     # NOT the jniLibs libfakeinput.so: that one is built from winlator/fakeinput.cpp against bionic
     # and preloaded into Wine. This is the client's own source, winlator/fakeinput_steam.cpp.

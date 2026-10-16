@@ -374,6 +374,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     var enableXInput by mutableStateOf(true)
     var enableDInput by mutableStateOf(false)
     var exclusiveXInput by mutableStateOf(true)
+    // Direct XInput (BANNERIN): XInput games read the BANNERIN slot files directly (core/BannerinXInput).
+    var bannerinXInput by mutableStateOf(false)
 
     // Controller vibration (PC-accurate dual-motor rumble), per-container. Mode: 0=Off 1=Controller
     // 2=Device(phone) 3=Both (Container.VIBRATION_MODE_*). Intensity 0..100 scales amplitude. Both
@@ -730,6 +732,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         enableXInput   = (inputType and WinHandler.FLAG_INPUT_TYPE_XINPUT.toInt()) != 0
         enableDInput   = (inputType and WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()) != 0
         exclusiveXInput = seed?.isExclusiveXInput ?: true
+        bannerinXInput = seed?.isBannerinXInput ?: false
         if (!exclusiveXInput) {
             enableXInput = true; enableDInput = true
         }
@@ -1367,6 +1370,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         c.setReshadeParams(reshadeLoadout.paramsJsonOrNull())
         c.setReshadeEffect(reshadeLoadout.firstEffectName())
         c.setExclusiveXInput(exclusiveXInput)
+        c.setBannerinXInput(bannerinXInput)
         c.setVibrationMode(vibrationMode)
         c.setVibrationIntensity(vibrationIntensity)
         // Player Slots + On-screen mode + auto-hide: seeded from the app-drawer global ONLY for a

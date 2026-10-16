@@ -29,6 +29,11 @@
 /app/src/main/cpp/bannerin/loom/target/
 /app/src/main/cpp/bannerin/loom/Cargo.lock
 /app/src/main/jniLibs/arm64-v8a/libbannerin.so
+# BANNERIN-XInput: the CI test feeder's cargo output, and the DLLs + manifest _build.yml builds into
+# the assets (app/src/main/cpp/bannerin/xinput/build.sh dlls), never committed.
+/app/src/main/cpp/bannerin/xinput/feeder/target/
+/app/src/main/cpp/bannerin/xinput/feeder/Cargo.lock
+/app/src/main/assets/bannerin-xinput/
 scratchpad/
 
 # dxvk-nvapi dlls: fetched and sha256-checked by _build.yml from the release pinned in

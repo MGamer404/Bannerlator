@@ -1130,6 +1130,19 @@ public class WinHandler {
                 activity.getXServerView().requestRender();
                 break;
             }
+            case RequestCodes.XINPUT_RUMBLE: {
+                // Direct XInput (BANNERIN-XInput DLL): the game's XInputSetState for one slot, through
+                // the same gates and per-slot dispatch as the evdev force-feedback rumble.
+                if (receivePacket.getLength() < 12) break;
+                if (receiveData.get() != 'B' || receiveData.get() != 'X' || receiveData.get() != 'R'
+                        || receiveData.get() != '1') break;
+                int slot = receiveData.get() & 0xFF;
+                int strong = receiveData.getShort() & 0xFFFF;
+                int weak = receiveData.getShort() & 0xFFFF;
+                int durationMs = receiveData.getShort() & 0xFFFF;
+                triggerVibration(strong, weak, durationMs, slot);
+                break;
+            }
             default: {
                 // Handle any other request codes if needed
                 break;
@@ -1161,7 +1174,8 @@ public class WinHandler {
                     synchronized (actions) {
                         receiveData.rewind();
                         byte requestCode = receiveData.get();
-                        Log.d("WinHandlerTM", "recv code=" + requestCode + " from port " + receivePacket.getPort());
+                        if (requestCode != RequestCodes.XINPUT_RUMBLE)
+                            Log.d("WinHandlerTM", "recv code=" + requestCode + " from port " + receivePacket.getPort());
                         handleRequest(requestCode, receivePacket.getPort());
                     }
                 }

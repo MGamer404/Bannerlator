@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# BANNERIN-XInput: build the replacement XInput DLLs and their CI tests. Used by
+# .github/workflows/_build.yml (DLLs into the APK assets) and .github/workflows/bannerin-xinput.yml.
+#
+#   build.sh toolchain        fetch the pinned llvm-mingw into $LLVM_MINGW (default ~/.cache/...)
+#   build.sh dlls <outdir>    <outdir>/{x86_64,i386,arm64ec}/<dll>.dll for every XInput DLL name, each
+#                             export table and import list checked, plus <outdir>/manifest.json
+#   build.sh tests <outdir>   <outdir>/{x86_64,i386}/xinput_test.exe (the Wine end-to-end test)
+#   build.sh host <outdir>    <outdir>/host_test (native, cc) and the feeder (cargo, release)
+#
+# The PE side uses bylaws/llvm-mingw (its arm64ec target does not predefine __x86_64__, unlike
+# upstream's). One C source (src/xinput.c) is linked once per DLL name with that name's .def file
+# (def/), so each DLL has exactly the exports and ordinals of the Windows DLL it stands in for.
+# i386 .def files get stdcall decorations here and the link strips them (--kill-at).
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+LLVM_MINGW_VER=20250920
+LLVM_MINGW_TAR="llvm-mingw-${LLVM_MINGW_VER}-ucrt-ubuntu-22.04-x86_64.tar.xz"
+LLVM_MINGW_URL="https://github.com/bylaws/llvm-mingw/releases/download/${LLVM_MINGW_VER}/${LLVM_MINGW_TAR}"
+LLVM_MINGW_SHA256=8dd8c34fc051a50c2fae86015f35057f8aae93fe1e19b34537ef1269a8b4c772
+LLVM_MINGW="${LLVM_MINGW:-$HOME/.cache/llvm-mingw-bylaws-${LLVM_MINGW_VER}}"
+
+DLLS="xinput1_1 xinput1_2 xinput1_3 xinput1_4 xinput9_1_0 xinputuap"
+ARCHES="x86_64 i386 arm64ec"
+
+say() { printf '== bannerin-xinput: %s\n' "$*"; }
+die() { printf '::error::bannerin-xinput: %s\n' "$*" >&2; exit 1; }
+
+toolchain() {
+  if [ ! -x "$LLVM_MINGW/bin/x86_64-w64-mingw32-clang" ]; then
+    say "fetching $LLVM_MINGW_TAR"
+    local tmp; tmp="$(mktemp -d)"
+    curl -fsSL --retry 5 --retry-delay 5 -o "$tmp/t.tar.xz" "$LLVM_MINGW_URL"
+    echo "$LLVM_MINGW_SHA256  $tmp/t.tar.xz" | sha256sum -c -
+    mkdir -p "$LLVM_MINGW"
+    tar -xJf "$tmp/t.tar.xz" -C "$LLVM_MINGW" --strip-components=1
+    rm -rf "$tmp"
+  fi
+  export PATH="$LLVM_MINGW/bin:$PATH"
+  for t in x86_64 i686 arm64ec; do
+    command -v "$t-w64-mingw32-clang" >/dev/null || die "llvm-mingw has no $t-w64-mingw32-clang"
+  done
+  say "llvm-mingw $LLVM_MINGW_VER: $(x86_64-w64-mingw32-clang --version | head -1)"
+}
+
+cc_for() {
+  case "$1" in
+    x86_64) echo x86_64-w64-mingw32-clang ;;
+    i386) echo i686-w64-mingw32-clang ;;
+    arm64ec) echo arm64ec-w64-mingw32-clang ;;
+    *) die "unknown arch $1" ;;
+  esac
+}
+
+# Extra flags per arch. i386 gets SSE2 so the reader's full fence is mfence (see bxi_core.h).
+arch_flags() {
+  case "$1" in
+    i386) echo "-msse2 -mfpmath=sse" ;;
+    *) echo "" ;;
+  esac
+}
+
+# stdcall argument bytes of every export (i386 decoration).
+I386_DECOR='XInputGetState:8 XInputSetState:8 XInputGetStateEx:8 XInputGetCapabilities:12 XInputGetDSoundAudioDeviceGuids:12 XInputGetBatteryInformation:12 XInputGetKeystroke:12 XInputWaitForGuideButton:12 XInputEnable:4 XInputCancelGuideButtonWait:4 XInputPowerOffController:4 XInputGetAudioDeviceIds:20 XInputGetCapabilitiesEx:16'
+
+def_for() { # def_for <arch> <dll> <tmpdir> -> path of the .def to link with
+  local src="$HERE/def/$2.def"
+  if [ "$1" != i386 ]; then echo "$src"; return; fi
+  awk -v table="$I386_DECOR" 'BEGIN { n = split(table, a, " "); for (i = 1; i <= n; i++) { split(a[i], kv, ":"); m[kv[1]] = kv[2] } }
+       ($1 in m) { sub($1, $1 "@" m[$1]) } { print }' "$src" > "$3/$2.def"
+  echo "$3/$2.def"
+}
+
+# expected "<ordinal> <name|->" lines of a .def (NONAME exports have no name)
+def_exports() {
+  awk 'f && NF { ord = ""; for (i = 2; i <= NF; i++) if ($i ~ /^@[0-9]+$/) ord = substr($i, 2);
+                 name = $1; for (i = 2; i <= NF; i++) if ($i == "NONAME") name = "-";
+                 print (ord == "" ? "?" : ord), name }
+       /^EXPORTS/ { f = 1 }' "$1" | sort
+}
+
+# actual "<ordinal> <name|->" lines of a DLL
+dll_exports() {
+  llvm-readobj --coff-exports "$1" | awk '
+    /^ *Export \{/ { o = ""; n = "-" }
+    /^ *Ordinal:/ { o = $2 }
+    /^ *Name:/ { if (NF >= 2) n = $2 }
+    /^ *\}/ { if (o != "") print o, n; o = "" }' | sort
+}
+
+check_dll() { # check_dll <arch> <dll name> <file> <def>
+  local arch="$1" name="$2" f="$3" def="$4" want got fmt imports bad
+  fmt="$(llvm-readobj --file-headers "$f" | sed -n 's/^Format: //p' | head -1)"
+  case "$arch" in
+    x86_64) [ "$fmt" = "COFF-x86-64" ] || die "$f is $fmt, want COFF-x86-64" ;;
+    i386) [ "$fmt" = "COFF-i386" ] || die "$f is $fmt, want COFF-i386" ;;
+    arm64ec) # an ARM64EC image may carry the AMD64 machine type; its CHPE metadata is what makes it EC
+      if ! grep -qiE 'arm64ec|arm64x' <<<"$fmt"; then
+        llvm-readobj --coff-load-config "$f" | grep -qi 'CHPE' || die "$f is $fmt without CHPE metadata, not ARM64EC"
+        fmt="$fmt+CHPE"
+      fi ;;
+  esac
+  want="$(def_exports "$HERE/def/$name.def")"
+  got="$(dll_exports "$f")"
+  # lld numbers exports the .def leaves unnumbered (xinputuap); compare names only for those
+  if grep -q '^? ' <<<"$want"; then
+    want="$(awk '{print $2}' <<<"$want" | sort)"; got="$(awk '{print $2}' <<<"$got" | sort)"
+  fi
+  if [ "$want" != "$got" ]; then
+    printf 'want:\n%s\ngot:\n%s\n' "$want" "$got"
+    die "$arch/$name.dll exports differ from def/$name.def"
+  fi
+  imports="$(llvm-readobj --coff-imports "$f" | sed -n 's/^ *Name: //p' | tr 'A-Z' 'a-z' | sort -u)"
+  bad="$(grep -vxE 'kernel32\.dll|ucrtbase\.dll|msvcrt\.dll|api-ms-win-crt-[a-z0-9-]+\.dll' <<<"$imports" || true)"
+  [ -z "$bad" ] || die "$arch/$name.dll imports $(echo $bad) (only kernel32 and the C runtime are allowed)"
+  grep -aq 'BANNERIN-XInput' "$f" || die "$arch/$name.dll lacks its BANNERIN-XInput marker"
+  printf '     %-8s %-12s %6d bytes  %-14s imports: %s\n' "$arch" "$name.dll" "$(stat -c %s "$f")" "$fmt" "$(echo $imports)"
+}
+
+CFLAGS_COMMON="-std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -I$HERE/src"
+
+dlls() {
+  local out="${1:?usage: build.sh dlls <outdir>}" tmp arch name cc def
+  toolchain
+  mkdir -p "$out"; out="$(cd "$out" && pwd)"
+  tmp="$(mktemp -d)"
+  for arch in $ARCHES; do
+    cc="$(cc_for "$arch")"
+    mkdir -p "$out/$arch"
+    # shellcheck disable=SC2046
+    "$cc" $CFLAGS_COMMON $(arch_flags "$arch") -c "$HERE/src/xinput.c" -o "$tmp/xinput-$arch.o"
+    for name in $DLLS; do
+      def="$(def_for "$arch" "$name" "$tmp")"
+      local kill=""; [ "$arch" = i386 ] && kill="-Wl,--kill-at"
+      "$cc" -shared -s -Wl,--no-insert-timestamp $kill -o "$out/$arch/$name.dll" "$tmp/xinput-$arch.o" "$def" -lkernel32
+      check_dll "$arch" "$name" "$out/$arch/$name.dll" "$def"
+    done
+  done
+  rm -rf "$tmp"
+  python3 - "$out" "$DLLS" "$ARCHES" <<'PY'
+import hashlib, json, os, sys
+out, dlls, arches = sys.argv[1], sys.argv[2].split(), sys.argv[3].split()
+files = []
+for arch in arches:
+    for name in dlls:
+        p = os.path.join(out, arch, name + ".dll")
+        files.append({"arch": arch, "name": name + ".dll", "asset": f"{arch}/{name}.dll",
+                      "sha256": hashlib.sha256(open(p, "rb").read()).hexdigest()})
+tag = hashlib.sha256("".join(f["sha256"] for f in files).encode()).hexdigest()[:12]
+json.dump({"name": "BANNERIN-XInput", "version": "1.0+" + tag, "dlls": dlls, "arches": arches, "files": files},
+          open(os.path.join(out, "manifest.json"), "w"), indent=1)
+print(f"== bannerin-xinput: manifest.json: {len(files)} dlls, version 1.0+{tag}")
+PY
+}
+
+tests() {
+  local out="${1:?usage: build.sh tests <outdir>}" arch cc
+  toolchain
+  mkdir -p "$out"
+  for arch in x86_64 i386; do
+    cc="$(cc_for "$arch")"
+    mkdir -p "$out/$arch"
+    # shellcheck disable=SC2046
+    "$cc" $CFLAGS_COMMON $(arch_flags "$arch") -o "$out/$arch/xinput_test.exe" "$HERE/test/xinput_test.c"
+    say "$arch/xinput_test.exe: $(llvm-readobj --file-headers "$out/$arch/xinput_test.exe" | sed -n 's/^Format: //p' | head -1)"
+  done
+}
+
+host() {
+  local out="${1:?usage: build.sh host <outdir>}"
+  mkdir -p "$out"
+  "${CC:-cc}" -std=gnu11 -O2 -Wall -Wextra -Werror -pthread -o "$out/host_test" "$HERE/test/host_test.c"
+  (cd "$HERE/feeder" && cargo build --release)
+  cp "$HERE/feeder/target/release/bannerin-xinput-feeder" "$out/"
+  say "host_test + feeder built for $(uname -m)"
+}
+
+case "${1:-}" in
+  toolchain) toolchain ;;
+  dlls) dlls "${2:-}" ;;
+  tests) tests "${2:-}" ;;
+  host) host "${2:-}" ;;
+  *) die "usage: $0 toolchain | dlls <outdir> | tests <outdir> | host <outdir>" ;;
+esac

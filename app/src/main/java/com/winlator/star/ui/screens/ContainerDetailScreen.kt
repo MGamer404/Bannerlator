@@ -2591,6 +2591,26 @@ private fun AdvancedTab(
                     Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
                 }
             }
+            // Direct XInput (BANNERIN): XInput games read the pad straight from the BANNERIN slot
+            // files instead of Wine's HID report queue (core/BannerinXInput).
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = viewModel.bannerinXInput,
+                    onCheckedChange = { viewModel.bannerinXInput = it }
+                )
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.bannerin_xinput))
+                    Text(
+                        stringResource(R.string.bannerin_xinput_summary),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.5.sp
+                    )
+                }
+                IconButton(onClick = { helpRes = R.string.help_bannerin_xinput }) {
+                    Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
+                }
+            }
         }
 
         // Vibration section — per-container rumble target + intensity default. Also live-tunable

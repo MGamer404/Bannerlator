@@ -1,0 +1,108 @@
+name: BANNERIN-XInput
+
+# The replacement XInput DLLs (app/src/main/cpp/bannerin/xinput):
+#   dlls  build x86_64, i386 and arm64ec with the pinned bylaws/llvm-mingw, check every DLL's export
+#         table (names + ordinals) against its .def, its imports and its machine type; build the
+#         Wine test programs
+#   host  the reader + XInput mapping (the DLL's own bxi_core.h) on Linux x86_64 AND aarch64,
+#         against the app's real writer engine publishing as fast as it can (torn / backwards /
+#         mis-mapped snapshots fail the job; on aarch64 the barriers are the arm64ec DLL's)
+#   wine  end to end under Wine on x86_64: x86_64 DLLs (all three DOS path forms) and i386 DLLs
+#         (WoW64) read slot files the writer engine publishes, incl. live-update latency (proves
+#         Wine's read-only views are live MAP_SHARED mappings), file retire/replace/loss, unplug,
+#         rumble datagrams, capabilities, keystrokes and the Guide wait
+# The APK build (_build.yml) runs the same build.sh dlls before Gradle.
+on:
+  push:
+    paths:
+      - 'app/src/main/cpp/bannerin/xinput/**'
+      - 'app/src/main/cpp/bannerin/core/**'
+      - '.github/workflows/bannerin-xinput.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dlls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Cache llvm-mingw
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/llvm-mingw-bylaws-20250920
+        key: llvm-mingw-bylaws-20250920-ubuntu-22.04-x86_64
+
+    - name: Build the DLLs (x86_64, i386, arm64ec) and check their exports
+      run: app/src/main/cpp/bannerin/xinput/build.sh dlls out/dlls
+
+    - name: Build the Wine test programs (x86_64, i386)
+      run: app/src/main/cpp/bannerin/xinput/build.sh tests out/tests
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: bannerin-xinput
+        path: out/
+        if-no-files-found: error
+        retention-days: 14
+
+  host:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Rust
+      run: |
+        if ! command -v cargo >/dev/null; then
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        fi
+
+    - name: Build host_test + feeder
+      run: app/src/main/cpp/bannerin/xinput/build.sh host out/host
+
+    - name: Mapping + path grammar
+      run: out/host/host_test unit
+
+    - name: Reader vs the app's writer engine (stress)
+      run: |
+        set -euo pipefail
+        d="$(mktemp -d)"
+        out/host/bannerin-xinput-feeder stress "$d" 7 &
+        f=$!
+        out/host/host_test stress "$d/pad0" 5
+        wait "$f"
+
+  wine:
+    needs: dlls
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: bannerin-xinput
+        path: out
+
+    - name: Install Wine (64-bit + 32-bit)
+      run: |
+        set -euo pipefail
+        sudo dpkg --add-architecture i386
+        sudo apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends wine wine64 wine32:i386 >/dev/null
+        wine --version
+
+    - name: Build the feeder
+      run: app/src/main/cpp/bannerin/xinput/build.sh host out/host
+
+    - name: End to end under Wine
+      run: bash app/src/main/cpp/bannerin/xinput/test/run_wine.sh out/dlls out/tests out/host/bannerin-xinput-feeder

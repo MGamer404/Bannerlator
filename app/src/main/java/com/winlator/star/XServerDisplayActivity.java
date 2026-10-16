@@ -8081,6 +8081,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
         nvapiSync = com.winlator.star.core.DxvkNvapi.sync(this, new File(imageFs.getRootDir(), ImageFs.WINEPREFIX),
                 com.winlator.star.core.UnrealHdr.usesDxvkNvapi(unrealHdrMode));
 
+        // Direct XInput (BANNERIN): the BANNERIN-XInput dlls into this prefix (system32 + syswow64), or
+        // the prefix's own xinput dlls back when the setting is off (core.BannerinXInput). Every launch,
+        // idempotent, finishes or undoes an interrupted one; setupXEnvironment adds the
+        // WINEDLLOVERRIDES entry and writes the session log line.
+        bxinputSync = com.winlator.star.core.BannerinXInput.sync(this, new File(imageFs.getRootDir(), ImageFs.WINEPREFIX),
+                com.winlator.star.core.BannerinXInput.effective(container, shortcut),
+                wineInfo != null && wineInfo.isArm64EC(),
+                com.winlator.star.core.BannerinXInput.archOverride(container, shortcut));
+
         String wincomponents = shortcut != null ? shortcut.getExtra("wincomponents", container.getWinComponents()) : container.getWinComponents();
         if (!wincomponents.equals(container.getExtra("wincomponents"))) {
             extractWinComponentFiles();
@@ -8389,6 +8398,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
      *  prefix for it (core.DxvkNvapi); both are read by setupXEnvironment on the same launch thread. */
     private String unrealHdrMode = com.winlator.star.core.UnrealHdr.OFF;
     private com.winlator.star.core.DxvkNvapi.Result nvapiSync;
+    private com.winlator.star.core.BannerinXInput.Result bxinputSync;
 
     /** One line for this session's log under {@code area}: the Wayland session log (Download/Wayland-logs)
      *  on Wayland, the Wine debug log on X11 when the Log Manager has it open; logcat always. */
@@ -8398,6 +8408,37 @@ public class XServerDisplayActivity extends AppCompatActivity {
             try { com.winlator.star.wayland.WaylandCompositor.nativeLog(area, line); } catch (Throwable ignored) {}
         } else if (wineDebugWriter != null) {
             wineDebugWriter.println("Bannerlator " + area + ": " + line);
+        }
+    }
+
+    /** Direct XInput (BANNERIN, core.BannerinXInput; launch worker thread, after the user's env vars are
+     *  merged): when setupWineSystemFiles put the dlls in the prefix, WINEDLLOVERRIDES gains
+     *  xinput1_1,xinput1_2,xinput1_3,xinput1_4,xinput9_1_0,xinputuap=n,b (a user's own entry for any of
+     *  them is kept). One "xinput" line in the session log; off logs only when this launch put the
+     *  prefix's own dlls back. */
+    private void applyBannerinXInputEnv(EnvVars envVars) {
+        try {
+            com.winlator.star.core.BannerinXInput.Result sync = bxinputSync;
+            if (sync == null) return;
+            if (!sync.on) {
+                if (sync.detail != null) logSessionLine("xinput", "Direct XInput (BANNERIN) off: " + sync.detail);
+                return;
+            }
+            StringBuilder line = new StringBuilder("Direct XInput (BANNERIN) on: ")
+                    .append(sync.detail != null ? sync.detail : "dlls not installed");
+            if (sync.installed) {
+                java.util.List<String> kept = new ArrayList<>();
+                String before = envVars.has("WINEDLLOVERRIDES") ? envVars.get("WINEDLLOVERRIDES") : "";
+                String after = com.winlator.star.core.BannerinXInput.withDllOverrides(before, kept);
+                if (!after.equals(before)) envVars.put("WINEDLLOVERRIDES", after);
+                line.append("; WINEDLLOVERRIDES=").append(after);
+                if (!kept.isEmpty()) line.append(" (yours kept for ").append(String.join(",", kept)).append(")");
+            } else {
+                line.append("; no override, Wine's builtin xinput stays in use");
+            }
+            logSessionLine("xinput", line.toString());
+        } catch (Throwable t) {
+            Log.w("XServerDisplayActivity", "Direct XInput (BANNERIN) environment failed", t);
         }
     }
 
@@ -11038,6 +11079,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // merges and the HDR env above, so a DXVK_ENABLE_NVAPI / WINEDLLOVERRIDES / DXVK_CONFIG entry
             // of the user's wins and the log line can say whether DXVK_HDR is on.
             applyUnrealHdrEnv(envVars);
+            applyBannerinXInputEnv(envVars);
             if (waylandMode) applyWaylandGpuSpoofEnv(envVars);
 
             // OpenGL safe mode (Wayland only, default ON): GALLIUM_THREAD=0 removes Mesa's

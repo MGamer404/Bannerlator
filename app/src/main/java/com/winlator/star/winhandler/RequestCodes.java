@@ -15,4 +15,8 @@ abstract class RequestCodes {
     public static final byte KEYBOARD_EVENT = 11;
     public static final byte BRING_TO_FRONT = 12;
     public static final byte CURSOR_POS_FEEDBACK = 13;
+    /** BANNERIN-XInput (Direct XInput) rumble: "BXR1", slot u8, low/high-frequency motor u16 LE
+     *  (raw XInput 0..65535), duration ms u16 LE; 12 bytes with the code. Sent by the guest DLL
+     *  (app/src/main/cpp/bannerin/xinput) only when the motors change, plus a refresh while running. */
+    public static final byte XINPUT_RUMBLE = 14;
 }
