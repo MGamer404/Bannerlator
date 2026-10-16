@@ -60,8 +60,16 @@ pub const AUTO_STALE_NS: u64 = 250_000_000;
 pub const AUTO_STALL_MIN_NS: u64 = 50_000_000;
 pub const API_VERSION: u32 = 1;
 
-/// Upper bound on how long a missed wake could delay input (the fallback re-check).
+/// Upper bound on how long a missed wake could delay input while a slot is active (the
+/// fallback re-check).
 const FALLBACK_NS: u64 = 4_000_000;
+/// A slot is idle once nothing has been published and nothing held for this long...
+const IDLE_AFTER_NS: u64 = 250_000_000;
+/// ...and then its wake thread (and a blocked read) sleeps on the bell with this timeout. Every
+/// publish, game frame a reader waits for, retirement and detach rings the bell, so the timeout is
+/// not needed for input; it only paces the writer-liveness / file-replacement check (a crashed
+/// writer cannot ring), which runs on those wakes.
+const IDLE_SLEEP_NS: u64 = 1_000_000_000;
 /// Cadence of path / writer-liveness checks and of re-attach attempts for orphaned handles.
 const SLOW_NS: u64 = 500_000_000;
 const SNAP_ATTEMPTS: u32 = 64;
@@ -474,6 +482,7 @@ pub struct SlotStatsView {
     pub frame_count: u64,
     pub reader_axis_mode: u64,
     pub frame_waiters: u64,
+    pub reader_helper_wakes: u64,
 }
 
 pub type LogFn = unsafe extern "C" fn(level: c_int, line: *const c_char);
@@ -637,6 +646,9 @@ struct Data {
     ready: bool,
     pace_mode: u32,
     pace_hz: u32,
+    /// Blocking reads: when this handle last saw input or a publish, and the bell it last saw.
+    last_active: u64,
+    last_bell: u32,
     /// Frame counter value when this handle last sent a stick-only frame under frame credits.
     credit_count: u64,
     /// When the pending stick change started waiting for a credit (0 = not waiting).
@@ -665,6 +677,8 @@ impl Data {
         ready: false,
         pace_mode: layout::AXIS_MODE_UNKNOWN,
         pace_hz: 0,
+        last_active: 0,
+        last_bell: 0,
         credit_count: 0,
         hold_since: 0,
     };
@@ -1283,6 +1297,8 @@ extern "C" fn helper_main(arg: *mut c_void) -> *mut c_void {
     let rt = &SLOTS.s[slot];
     let mut last_slow = 0u64;
     let mut first = true;
+    let mut last_bell = 0u32;
+    let mut last_active = sys::mono_ns();
     loop {
         let now = sys::mono_ns();
         let slow = first || now.wrapping_sub(last_slow) >= SLOW_NS;
@@ -1292,10 +1308,15 @@ extern "C" fn helper_main(arg: *mut c_void) -> *mut c_void {
             first = false;
         }
         if rt.handles.load(Acquire) == 0 {
+            // No handle on this slot in this process: nothing to deliver or check. Stop asking
+            // for frame wakes and block until attach kicks (no timeout, no periodic wake).
+            frame_register(rt, false, 0);
             let k = rt.kick.load(Acquire);
             if rt.handles.load(Acquire) == 0 {
-                let _ = sys::futex_wait(&rt.kick, k, Some(SLOW_NS), false);
+                let _ = sys::futex_wait(&rt.kick, k, None, false);
             }
+            first = true; // re-check the file when a handle comes back
+            last_active = sys::mono_ns();
             continue;
         }
         let target = unsafe { (*rt.hm.get()).shared() }.map(|sh| {
@@ -1308,17 +1329,38 @@ extern "C" fn helper_main(arg: *mut c_void) -> *mut c_void {
         if frame_register(rt, hold.frame, target.map_or(0, |t| t.2)) {
             continue; // a game frame landed while we were looking: hand out its credit now
         }
+        // Active while something was published lately or a change is held: the short fallback
+        // re-check. Idle otherwise: a long sleep, which also paces the liveness check. Either way
+        // the wait compares against the bell value read BEFORE servicing, so a publish that lands
+        // while we decide makes the wait return at once instead of being slept through.
+        if let Some((_, v, _)) = target {
+            if v != last_bell {
+                last_bell = v;
+                last_active = now;
+            }
+        }
+        if hold.deadline.is_some() || hold.frame {
+            last_active = now;
+        }
+        let idle = now.wrapping_sub(last_active) >= IDLE_AFTER_NS;
+        let base = if idle || target.is_none() { IDLE_SLEEP_NS } else { FALLBACK_NS };
         let r = match target {
-            Some((w, v, _)) => sys::futex_wait(w, v, Some(wait_ns(FALLBACK_NS, hold.deadline)), true),
+            Some((w, v, _)) => sys::futex_wait(w, v, Some(wait_ns(base, hold.deadline)), true),
             None => {
                 let k = rt.kick.load(Acquire);
-                sys::futex_wait(&rt.kick, k, Some(wait_ns(SLOW_NS / 2, hold.deadline)), false)
+                sys::futex_wait(&rt.kick, k, Some(wait_ns(base, hold.deadline)), false)
             }
         };
         match r {
             Err(sys::ETIMEDOUT) => STATS.helper_timeouts.fetch_add(1, Relaxed),
             _ => STATS.helper_wakes.fetch_add(1, Relaxed),
         };
+        let hm = unsafe { &*rt.hm.get() };
+        if hm.writable {
+            if let Some(sh) = hm.shared() {
+                sh.header.r_helper_wakes.fetch_add(1, Relaxed);
+            }
+        }
     }
 }
 
@@ -1509,6 +1551,16 @@ pub fn detach(h: u32) -> Result<(), i32> {
     let fd = d.guest_fd;
     d.guest_fd = -1;
     let slot = d.slot;
+    // A read blocked on this handle may be in a long idle sleep: wake it (FUTEX_WAKE needs no
+    // write access and changes nothing; other sleepers on the bell just go back to sleep).
+    match shared(d) {
+        Some(sh) => {
+            sys::futex_wake(&sh.header.bell, i32::MAX, true);
+        }
+        None => {
+            sys::futex_wake(&IDLE, i32::MAX, false);
+        }
+    }
     unlock(e);
     SLOTS.s[slot].handles.fetch_sub(1, AcqRel);
     sys::close(fd);
@@ -1611,6 +1663,11 @@ pub unsafe fn read(h: u32, buf: *mut u8, len: usize, nonblocking: bool) -> Resul
             Ok(n)
         };
         let held = sync_ready(d, &snap, now);
+        if val != d.last_bell || matches!(outcome, Ok(n) if n > 0) || held.deadline.is_some() {
+            d.last_bell = val;
+            d.last_active = now;
+        }
+        let idle = now.wrapping_sub(d.last_active) >= IDLE_AFTER_NS;
         unlock(e);
         ensure_helper(slot);
         emit_notes(slot, fd, &notes);
@@ -1625,7 +1682,8 @@ pub unsafe fn read(h: u32, buf: *mut u8, len: usize, nonblocking: bool) -> Resul
         // Sleep until a publish, the moment a held stick frame falls due, or the fallback.
         // (A wait for a game frame is announced by the slot's wake thread, which services this
         // handle too; the frame rings the same bell.)
-        if let Err(sys::EINTR) = sys::futex_wait(word, val, Some(wait_ns(FALLBACK_NS, held.deadline)), shared_word) {
+        let base = if idle { IDLE_SLEEP_NS } else { FALLBACK_NS };
+        if let Err(sys::EINTR) = sys::futex_wait(word, val, Some(wait_ns(base, held.deadline)), shared_word) {
             break Err(sys::EINTR);
         }
     };
@@ -1686,6 +1744,7 @@ pub fn slot_stats(slot: i32) -> Result<SlotStatsView, i32> {
         v.frame_count = h.frame_count.load(Relaxed);
         v.reader_axis_mode = h.r_axis_mode.load(Relaxed) as u64;
         v.frame_waiters = h.frame_waiters.load(Relaxed) as u64;
+        v.reader_helper_wakes = h.r_helper_wakes.load(Relaxed);
     }
     m.release();
     Ok(v)

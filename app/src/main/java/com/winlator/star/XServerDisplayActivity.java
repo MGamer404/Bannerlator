@@ -10557,6 +10557,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                              .append(", frame wakes ")
                              .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
                                      com.winlator.star.inputcontrols.BannerinWriter.STAT_FRAME_WAKES))
+                             .append("; reader wake-thread wake-ups ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_HELPER_WAKES))
                              .append('\n');
                         // Same file the start-of-session writer used; appended, so the counts at
                         // the end sit under the setup lines rather than replacing them.

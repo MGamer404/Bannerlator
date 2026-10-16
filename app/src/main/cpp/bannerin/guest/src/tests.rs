@@ -1735,3 +1735,56 @@ fn the_frame_feed_rings_only_while_a_reader_waits_for_a_frame() {
     });
     assert_eq!((wait_pid(wpid), wait_pid(rpid)), (0, 0));
 }
+
+#[test]
+fn idle_slots_barely_wake_and_a_publish_at_the_idle_edge_is_not_lost() {
+    let sc = Scene::new("idlewake");
+    run("idlewake", || {
+        sc.enter();
+        let mut w0 = sc.writer(0);
+        w0.open();
+        let mut w1 = sc.writer(1);
+        w1.open();
+        let mut r0 = Rd::attach(0, sys::O_NONBLOCK)?;
+        r0.frame(1000)?;
+        // slot 1 was opened once and closed again: its wake thread has no handle left
+        let r1 = Rd::attach(1, sys::O_NONBLOCK)?;
+        ensure!(bannerin_detach(r1.h) == 0, "detach");
+        let slot_wakes = |slot: i32| -> u64 {
+            let mut v = SlotStatsView::default();
+            unsafe { bannerin_slot_stats(slot, &mut v, core::mem::size_of::<SlotStatsView>()) };
+            v.reader_helper_wakes
+        };
+        std::thread::sleep(Duration::from_millis(700)); // past the active window
+        let (s0, a0, b0) = (stats(), slot_wakes(0), slot_wakes(1));
+        std::thread::sleep(Duration::from_secs(5));
+        let (s1, a1, b1) = (stats(), slot_wakes(0), slot_wakes(1));
+        let total = (s1.helper_wakes + s1.helper_timeouts) - (s0.helper_wakes + s0.helper_timeouts);
+        say(&format!(
+            "[idlewake] 5 s without input: wake-thread wake-ups {} in the process, slot 0 (open) {}, slot 1 (closed) {}\n",
+            total, a1 - a0, b1 - b0
+        ));
+        ensure!(a1 - a0 <= 12, "an idle open slot woke {} times in 5 s", a1 - a0);
+        ensure!(b1 - b0 == 0, "a slot with no handle woke {} times", b1 - b0);
+        ensure!(total <= 12, "{} wake-ups in 5 s", total);
+        ensure!(s1.frames == s0.frames, "an idle pad delivered something");
+        // A publish landing right as the wake thread turns idle (250 ms after the last activity)
+        // must still be signalled at once: sweep the publish across that edge.
+        let mut lat = Vec::new();
+        for k in 0..40u64 {
+            r0.drain()?;
+            let t0 = Instant::now();
+            w0.set_pad(pad_axes(if k % 2 == 0 { 1 << B_A } else { 0 }, [k as i32 * 100, 0, 0, 0, 0, 0, 0, 0]));
+            ensure!(r0.poll(1000) & POLLIN != 0, "publish {} never signalled", k);
+            lat.push(t0.elapsed());
+            r0.frame(100)?;
+            std::thread::sleep(Duration::from_micros(245_000 + 250 * k)); // 245 .. 255 ms
+        }
+        lat.sort();
+        let (p50, worst) = (lat[20], lat[39]);
+        say(&format!("[idlewake] publishes across the idle edge: p50 {:?} max {:?}\n", p50, worst));
+        ensure!(p50 < Duration::from_millis(2), "p50 {:?}", p50);
+        ensure!(worst < Duration::from_millis(20), "a publish at the idle edge took {:?}", worst);
+        Ok(())
+    });
+}

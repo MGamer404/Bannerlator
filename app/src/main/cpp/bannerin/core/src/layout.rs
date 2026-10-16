@@ -28,7 +28,8 @@ pub const MAGIC: u64 = u64::from_le_bytes(*b"BANNERIN");
 pub const FORMAT_MAJOR: u32 = 1;
 /// Minor 1 added the pacing counters `r_paced_frames` / `r_merged_axis` (formerly padding);
 /// minor 2 the game frame feed (`frame_interval_ns`, `frame_time_ns`) and `r_axis_hz` /
-/// `r_auto_fallbacks`; minor 3 the frame credits (`frame_count`, `frame_waiters`, `r_axis_mode`).
+/// `r_auto_fallbacks`; minor 3 the frame credits (`frame_count`, `frame_waiters`, `r_axis_mode`)
+/// and `r_helper_wakes`.
 /// All zero in older files, which readers treat as "no frame feed".
 pub const FORMAT_MINOR: u32 = 3;
 
@@ -106,7 +107,11 @@ pub struct Header {
     /// Reader wake threads currently waiting for the next game frame: the feed wakes the bell for
     /// a frame only while this is non-zero (minor 3).
     pub frame_waiters: AtomicU32,
-    pub _pad1: [AtomicU32; 5],
+    pub _pad1a: AtomicU32,
+    /// Wake-ups of the readers' per-slot wake threads, summed over every reader process (minor 3):
+    /// what an idle pad costs in CPU wake-ups.
+    pub r_helper_wakes: AtomicU64,
+    pub _pad1: [AtomicU32; 2],
     // 0x80: writer statistics
     pub w_publishes: AtomicU64,
     pub w_wake_calls: AtomicU64,
@@ -151,6 +156,7 @@ const _: () = {
     assert!(offset_of!(Header, r_axis_mode) == 92);
     assert!(offset_of!(Header, frame_count) == 96);
     assert!(offset_of!(Header, frame_waiters) == 104);
+    assert!(offset_of!(Header, r_helper_wakes) == 112);
     assert!(offset_of!(Header, r_auto_fallbacks) == 184);
     assert!(offset_of!(Header, w_publishes) == 128);
     assert!(offset_of!(Header, r_paced_frames) == 168);

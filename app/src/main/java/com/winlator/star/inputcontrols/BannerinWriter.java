@@ -69,7 +69,9 @@ public final class BannerinWriter {
     public static final int STAT_READER_AXIS_MODE = 22;
     /** Futex wakes the frame feed issued (only while a reader waited for a frame). */
     public static final int STAT_FRAME_WAKES = 23;
-    private static final int STAT_COUNT = 24;
+    /** Wake-ups of the readers' per-slot wake threads, summed over every reader process. */
+    public static final int STAT_READER_HELPER_WAKES = 24;
+    private static final int STAT_COUNT = 25;
 
     // Each slot's counters as they stood when releaseAllRingSlots() retired its file, for the
     // session-end diagnostics that may run after the release.

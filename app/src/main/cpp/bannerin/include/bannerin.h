@@ -52,8 +52,10 @@
  *   reports POLLHUP once the controller is unplugged. Plain poll/select/ppoll/epoll on it work
  *   with no interposer help, so mixed waits with other fds need no emulation; a helper thread per
  *   slot (lazily started, all signals blocked) keeps the flag current within about a millisecond
- *   of each publish, with a 4 ms fallback re-check, and also wakes at the moment a held (paced)
- *   stick frame falls due, so a reader blocked in poll(-1) still gets it on time. Do NOT read() it directly: deliver events with
+ *   of each publish, and also wakes at the moment a held (paced) stick frame falls due, so a
+ *   reader blocked in poll(-1) still gets it on time. While input flows it re-checks every 4 ms in
+ *   case a wake was missed; once nothing has been published or held for 250 ms it sleeps with a
+ *   1 s timeout (the writer-liveness check), and a slot with no open handle never wakes at all. Do NOT read() it directly: deliver events with
  *   bannerin_read(). A raw read of it (e.g. after exec without O_CLOEXEC) yields at most a single
  *   byte, never anything shaped like an input_event.
  *
@@ -171,6 +173,7 @@ struct bannerin_slot_stats {
     uint64_t frame_count;                   /* format 1.3: game frames counted (the credits) */
     uint64_t reader_axis_mode;              /* BANNERIN_AXIS_MODE_* a reader last paced in */
     uint64_t frame_waiters;                 /* wake threads waiting for the next game frame */
+    uint64_t reader_helper_wakes;           /* wake-thread wake-ups, all reader processes */
 };
 
 /* level 0 = info, 1 = warning; line is NUL-terminated, valid only during the call. */
@@ -190,7 +193,7 @@ int bannerin_init(void);
 int bannerin_attach(int slot, int open_flags, bannerin_handle *out_handle);
 
 /* Release the handle AND close its guest fd (call it from the close() hook instead of passing the
- * close through). A read blocked in another thread on this handle returns -EBADF within 4 ms.
+ * close through). A read blocked in another thread on this handle is woken and returns -EBADF.
  * Returns 0 or -EBADF. */
 int bannerin_detach(bannerin_handle h);
 
