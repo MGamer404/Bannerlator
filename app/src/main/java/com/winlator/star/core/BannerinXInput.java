@@ -29,13 +29,16 @@ import java.util.Set;
  *
  * <p><b>The bundle.</b> CI builds the DLLs from {@code app/src/main/cpp/bannerin/xinput} (one source,
  * one DLL per XInput name: xinput1_1, 1_2, 1_3, 1_4, 9_1_0 and xinputuap, each with its own export
- * table) for x86_64, i386 and arm64ec into the assets folder {@code bannerin-xinput/}, with a
+ * table) for x86_64, i386 and ARM64X into the assets folder {@code bannerin-xinput/}, with a
  * manifest.json of their sha256s. Nothing binary is committed; a build without that step carries no
  * bundle and the setting does nothing.
  *
  * <p><b>The prefix.</b> While the setting is on, every launch makes sure system32 holds the 64-bit
- * build (arm64ec in an arm64ec prefix, where x64 games call it through the EC thunks;
- * {@code BANNERIN_XINPUT_ARCH=x86_64} picks the x64 build there instead) and syswow64 the i386 build,
+ * build and syswow64 the i386 build. In an x86_64 prefix (box64) that is the x86_64 build. In an
+ * arm64ec prefix it is the ARM64X build: one image with an ARM64EC view, which x64 games load, and a
+ * native ARM64 view, which Wine's own ARM64 programs load (control.exe with joy.cpl, explorer, ...);
+ * an x64 or ARM64EC-only image there fails to load in every native ARM64 process (c000007b), so
+ * {@code BANNERIN_XINPUT_ARCH=x86_64} (the x64 build there instead) is for diagnosis only,
  * and the session gets {@code WINEDLLOVERRIDES} xinput1_1,...,xinputuap=n,b. Whatever was in a slot
  * before (Wine's placeholder dlls) is moved to {@code <prefix>/bannerlator-bxinput/backup/} once,
  * every copy goes through a temporary file and a rename, and what was installed is recorded in
@@ -190,8 +193,9 @@ public final class BannerinXInput {
     private static Result install(Context context, File windows, File state, File marker, boolean arm64ec, String archOverride) throws Exception {
         Bundle b = bundle(context);
         if (b == null) return new Result(true, false, "not in this build (no bundled BANNERIN-XInput), nothing installed");
-        String sys64 = "x86_64";
-        if (arm64ec && b.has("arm64ec") && !"x86_64".equalsIgnoreCase(archOverride != null ? archOverride.trim() : "")) sys64 = "arm64ec";
+        // x86_64 prefix: x86_64. arm64ec prefix: ARM64X (see the class comment), unless forced to x86_64.
+        boolean forceX64 = "x86_64".equalsIgnoreCase(archOverride != null ? archOverride.trim() : "");
+        String sys64 = arm64ec && !forceX64 ? "arm64x" : "x86_64";
         if (!b.has(sys64)) return new Result(true, false, "the bundle has no " + sys64 + " build, nothing installed");
         Properties m = load(marker);
         List<String> did = new ArrayList<>();

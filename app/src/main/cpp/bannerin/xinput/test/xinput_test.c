@@ -486,6 +486,37 @@ int main(int argc, char **argv) {
         CHECK(t >= 0, "%s.dll does not read slot 0", SPECS[i].name);
     }
 
+    printf("== GUI child processes (detached, no std handles), one per log channel\n");
+    {
+        WCHAR dir[MAX_PATH], gui[MAX_PATH], dllp[MAX_PATH];
+        DWORD n = GetModuleFileNameW(NULL, dir, MAX_PATH);
+        while (n > 0 && dir[n - 1] != '\\') n--;
+        dir[n] = 0;
+        _snwprintf(gui, MAX_PATH, L"%lsxinput_gui.exe", dir);
+        gui[MAX_PATH - 1] = 0;
+        _snwprintf(dllp, MAX_PATH, L"%lsxinput1_4.dll", dir);
+        dllp[MAX_PATH - 1] = 0;
+        SetEnvironmentVariableW(L"BXI_TEST_DLL", dllp);
+        static const WCHAR *const vias[] = {L"auto", L"stderr", L"ods"};
+        for (int i = 0; i < 3; i++) {
+            SetEnvironmentVariableW(L"BANNERIN_XINPUT_LOGVIA", vias[i]);
+            STARTUPINFOW si;
+            PROCESS_INFORMATION pi;
+            memset(&si, 0, sizeof si);
+            si.cb = sizeof si;
+            BOOL ok = CreateProcessW(gui, NULL, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi);
+            CHECK(ok, "cannot start xinput_gui.exe (%lu)", GetLastError());
+            if (!ok) continue;
+            DWORD w = WaitForSingleObject(pi.hProcess, 15000), code = 99;
+            GetExitCodeProcess(pi.hProcess, &code);
+            CHECK(w == WAIT_OBJECT_0 && code == 0, "xinput_gui.exe (log via %ls): wait %lu, exit %lu", vias[i], w, code);
+            printf("    xinput_gui.exe, log via %ls: exit %lu (0 = it read slot 0)\n", vias[i], code);
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+        SetEnvironmentVariableW(L"BANNERIN_XINPUT_LOGVIA", NULL);
+    }
+
     step(999);
     printf("== %d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

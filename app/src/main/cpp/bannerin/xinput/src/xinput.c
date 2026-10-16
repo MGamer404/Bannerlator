@@ -30,8 +30,22 @@
  *   of 3 s: if the game dies mid-rumble, the motor stops by itself. Winsock is loaded on the first
  *   rumble only; a game that never rumbles never touches it.
  *
+ * DIAGNOSTICS
+ *   One line when a process loads the DLL (DllMain: process image, DLL name, which build, version),
+ *   one per slot attach / loss. Under Wine they go through ntdll's __wine_dbg_output, which writes to
+ *   the process's unix stderr whatever WINEDEBUG says and whether or not the process has Windows std
+ *   handles (a GUI game started by explorer has none), so they land in the app's Wine log. Elsewhere,
+ *   or when asked: the Windows stderr handle, or OutputDebugStringA (Wine: WINEDEBUG=+debugstr).
+ *
+ * BUILDS
+ *   x86_64 and i386 for x86_64 Wine (system32 / syswow64). In an arm64ec Wine, system32 holds an
+ *   ARM64X image: the same source compiled for ARM64 and for ARM64EC and linked into one file, so
+ *   Wine's own native ARM64 programs (control.exe/joy.cpl, ...) load its ARM64 half and x64 games
+ *   its ARM64EC half; an ARM64EC-only image fails to load in an ARM64 process (c000007b).
+ *
  * ENVIRONMENT
- *   BANNERIN_XINPUT_LOG=0         no diagnostics on stderr (default: one line per attach/loss)
+ *   BANNERIN_XINPUT_LOG=0         no diagnostics (default: one line per load, attach and loss)
+ *   BANNERIN_XINPUT_LOGVIA        auto (default) | wine | stderr | ods: where diagnostics go
  *   BANNERIN_XINPUT_PATHMODE      auto (default) | wine | unix | z: which DOS path form to use
  *   BANNERIN_XINPUT_RUMBLE_PORT   UDP port of the rumble listener (default 7947)
  */
@@ -46,7 +60,7 @@
 #include "bxi_core.h"
 
 #ifndef BXI_VERSION
-#define BXI_VERSION "1.0"
+#define BXI_VERSION "1.1"
 #endif
 
 #if defined(__arm64ec__) || defined(_M_ARM64EC)
@@ -59,6 +73,12 @@
 #define BXI_ARCH "aarch64"
 #else
 #define BXI_ARCH "unknown"
+#endif
+/* -DBXI_HYBRID=1: this object is one half of the ARM64X image (build.sh). */
+#if defined(BXI_HYBRID) && BXI_HYBRID
+#define BXI_BUILD BXI_ARCH " half of ARM64X"
+#else
+#define BXI_BUILD BXI_ARCH
 #endif
 
 /* The public XInput types, laid out as the API documents them. */
@@ -186,7 +206,6 @@ static bxi_slot g_slots[BXI_SLOTS];
 static INIT_ONCE g_init = INIT_ONCE_STATIC_INIT;
 static HMODULE g_module;
 static volatile LONG g_enabled = 1;
-static int g_log = 1;
 static int g_pathmode = PATH_AUTO;
 static unsigned g_rumble_port = BXI_RUMBLE_PORT;
 static uint32_t g_mask;
@@ -194,25 +213,77 @@ typedef WCHAR *(CDECL *wine_dos_fn)(const char *);
 static wine_dos_fn g_wine_dos;
 
 /* ---------------------------------------------------------------------------------------------- */
-/* diagnostics: stderr (Wine hands a GUI game the unix stderr, which the app's Wine log captures) */
+/* diagnostics */
+
+enum { LOG_OFF, LOG_WINE, LOG_STDERR, LOG_ODS };
+static const char *const LOG_NAMES[] = {"off", "wine_dbg", "stderr", "ods"};
+static INIT_ONCE g_log_init = INIT_ONCE_STATIC_INIT;
+static int g_logvia = LOG_OFF;
+typedef int(CDECL *wine_dbg_output_fn)(const char *);
+static wine_dbg_output_fn g_wine_dbg_output;
+
+static int env_is(const WCHAR *name, const WCHAR *value);
+
+/* Safe in DllMain: environment reads, GetModuleHandle and GetProcAddress of an already loaded DLL. */
+static BOOL CALLBACK log_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
+    (void)once; (void)param; (void)ctx;
+    HMODULE nt = GetModuleHandleW(L"ntdll.dll");
+    if (nt) g_wine_dbg_output = (wine_dbg_output_fn)(void (*)(void))GetProcAddress(nt, "__wine_dbg_output");
+    if (env_is(L"BANNERIN_XINPUT_LOG", L"0")) g_logvia = LOG_OFF;
+    else if (env_is(L"BANNERIN_XINPUT_LOGVIA", L"stderr")) g_logvia = LOG_STDERR;
+    else if (env_is(L"BANNERIN_XINPUT_LOGVIA", L"ods")) g_logvia = LOG_ODS;
+    else if (g_wine_dbg_output) g_logvia = LOG_WINE;
+    else g_logvia = LOG_STDERR;
+    return TRUE;
+}
 
 static void bxi_log(const char *fmt, ...) {
-    if (!g_log) return;
-    char buf[640];
+    InitOnceExecuteOnce(&g_log_init, log_once, NULL, NULL);
+    if (g_logvia == LOG_OFF) return;
+    char buf[1400];
     int n = snprintf(buf, sizeof buf, "BANNERIN-XInput: ");
     va_list ap;
     va_start(ap, fmt);
-    int m = vsnprintf(buf + n, sizeof buf - (size_t)n - 1, fmt, ap);
+    int m = vsnprintf(buf + n, sizeof buf - (size_t)n - 2, fmt, ap);
     va_end(ap);
     if (m < 0) return;
     n += m;
     if (n > (int)sizeof buf - 2) n = (int)sizeof buf - 2;
     buf[n++] = '\n';
-    HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
-    if (h && h != INVALID_HANDLE_VALUE) {
-        DWORD w;
-        WriteFile(h, buf, (DWORD)n, &w, NULL);
+    buf[n] = 0;
+    switch (g_logvia) {
+    case LOG_WINE:
+        g_wine_dbg_output(buf);
+        break;
+    case LOG_ODS:
+        OutputDebugStringA(buf);
+        break;
+    default: {
+        HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
+        if (h && h != INVALID_HANDLE_VALUE) {
+            DWORD w;
+            WriteFile(h, buf, (DWORD)n, &w, NULL);
+        }
     }
+    }
+}
+
+/* The line every process that loads the DLL writes once (DllMain, PROCESS_ATTACH). */
+static void log_attach(HMODULE self) {
+    WCHAR w[MAX_PATH];
+    char image[MAX_PATH * 3] = "?", dll[MAX_PATH] = "?";
+    DWORD n = GetModuleFileNameW(NULL, w, MAX_PATH);
+    if (n && n < MAX_PATH) WideCharToMultiByte(CP_UTF8, 0, w, -1, image, (int)sizeof image, NULL, NULL);
+    n = GetModuleFileNameW(self, w, MAX_PATH);
+    if (n && n < MAX_PATH) {
+        const WCHAR *b = w + n;
+        while (b > w && b[-1] != '\\' && b[-1] != '/') b--;
+        WideCharToMultiByte(CP_UTF8, 0, b, -1, dll, (int)sizeof dll, NULL, NULL);
+    }
+    image[sizeof image - 1] = 0;
+    dll[sizeof dll - 1] = 0;
+    bxi_log("%s %s (%s) loaded into %s (pid %lu) [log via %s]", BXI_VERSION, dll, BXI_BUILD, image,
+            (unsigned long)GetCurrentProcessId(), LOG_NAMES[g_logvia]);
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -257,7 +328,6 @@ static void take_path(void *ctx, uint32_t slot, const WCHAR *p, size_t len) {
 static BOOL CALLBACK init_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
     (void)once; (void)param; (void)ctx;
     for (uint32_t i = 0; i < BXI_SLOTS; i++) g_slots[i].index = i;
-    if (env_is(L"BANNERIN_XINPUT_LOG", L"0")) g_log = 0;
     if (env_is(L"BANNERIN_XINPUT_PATHMODE", L"wine")) g_pathmode = PATH_WINE;
     else if (env_is(L"BANNERIN_XINPUT_PATHMODE", L"unix")) g_pathmode = PATH_UNIX;
     else if (env_is(L"BANNERIN_XINPUT_PATHMODE", L"z")) g_pathmode = PATH_Z;
@@ -288,7 +358,7 @@ static BOOL CALLBACK init_once(PINIT_ONCE once, PVOID param, PVOID *ctx) {
     }
     static const char *const modes[] = {"auto", "wine", "unix", "z"};
     bxi_log("%s %s (%s) slots 0x%x from FAKE_EVDEV_MEMFD_PATHS, paths %s%s, rumble udp %u",
-            BXI_VERSION, dll, BXI_ARCH, (unsigned)g_mask, modes[g_pathmode],
+            BXI_VERSION, dll, BXI_BUILD, (unsigned)g_mask, modes[g_pathmode],
             g_wine_dos ? "" : " (no wine_get_dos_file_name)", g_rumble_port);
     return TRUE;
 }
@@ -834,6 +904,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
     if (reason == DLL_PROCESS_ATTACH) {
         g_module = instance;
         DisableThreadLibraryCalls(instance);
+        log_attach(instance);
     }
     return TRUE;
 }

@@ -3,15 +3,22 @@
 # .github/workflows/_build.yml (DLLs into the APK assets) and .github/workflows/bannerin-xinput.yml.
 #
 #   build.sh toolchain        fetch the pinned llvm-mingw into $LLVM_MINGW (default ~/.cache/...)
-#   build.sh dlls <outdir>    <outdir>/{x86_64,i386,arm64ec}/<dll>.dll for every XInput DLL name, each
-#                             export table and import list checked, plus <outdir>/manifest.json
-#   build.sh tests <outdir>   <outdir>/{x86_64,i386}/xinput_test.exe (the Wine end-to-end test)
+#   build.sh dlls <outdir>    <outdir>/{x86_64,i386,arm64x}/<dll>.dll for every XInput DLL name, each
+#                             export table (both views of an ARM64X image), import list and machine
+#                             type checked, plus <outdir>/manifest.json
+#   build.sh tests <outdir>   <outdir>/{x86_64,i386,aarch64}/xinput_test.exe + xinput_gui.exe (Wine tests)
 #   build.sh host <outdir>    <outdir>/host_test (native, cc) and the feeder (cargo, release)
 #
 # The PE side uses bylaws/llvm-mingw (its arm64ec target does not predefine __x86_64__, unlike
 # upstream's). One C source (src/xinput.c) is linked once per DLL name with that name's .def file
 # (def/), so each DLL has exactly the exports and ordinals of the Windows DLL it stands in for.
 # i386 .def files get stdcall decorations here and the link strips them (--kill-at).
+#
+# arm64x (system32 of an arm64ec Wine): the source is compiled for ARM64EC and for native ARM64 and
+# both objects are linked into one ARM64X image (lld: -m arm64xpe = -machine:arm64x, the .def for the
+# EC view, -defarm64native for the native view; each view gets its own CRT, the native one taken from
+# the toolchain's own aarch64 link line). An x64 game loads the EC view, a native ARM64 process (Wine's
+# own control.exe, explorer, ...) the ARM64 view; an ARM64EC-only image fails there with c000007b.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -22,7 +29,7 @@ LLVM_MINGW_SHA256=8dd8c34fc051a50c2fae86015f35057f8aae93fe1e19b34537ef1269a8b4c7
 LLVM_MINGW="${LLVM_MINGW:-$HOME/.cache/llvm-mingw-bylaws-${LLVM_MINGW_VER}}"
 
 DLLS="xinput1_1 xinput1_2 xinput1_3 xinput1_4 xinput9_1_0 xinputuap"
-ARCHES="x86_64 i386 arm64ec"
+ARCHES="x86_64 i386 arm64x"
 
 say() { printf '== bannerin-xinput: %s\n' "$*"; }
 die() { printf '::error::bannerin-xinput: %s\n' "$*" >&2; exit 1; }
@@ -38,7 +45,7 @@ toolchain() {
     rm -rf "$tmp"
   fi
   export PATH="$LLVM_MINGW/bin:$PATH"
-  for t in x86_64 i686 arm64ec; do
+  for t in x86_64 i686 arm64ec aarch64; do
     command -v "$t-w64-mingw32-clang" >/dev/null || die "llvm-mingw has no $t-w64-mingw32-clang"
   done
   say "llvm-mingw $LLVM_MINGW_VER: $(x86_64-w64-mingw32-clang --version | head -1)"
@@ -49,6 +56,7 @@ cc_for() {
     x86_64) echo x86_64-w64-mingw32-clang ;;
     i386) echo i686-w64-mingw32-clang ;;
     arm64ec) echo arm64ec-w64-mingw32-clang ;;
+    aarch64) echo aarch64-w64-mingw32-clang ;;
     *) die "unknown arch $1" ;;
   esac
 }
@@ -81,9 +89,12 @@ def_exports() {
 }
 
 # actual "<ordinal> <name|->" lines of a DLL (the export address table also lists the unused
-# ordinals between the numbered ones, with RVA 0: those are skipped)
+# ordinals between the numbered ones, with RVA 0: those are skipped). dll_exports <file> [main|hybrid]:
+# llvm-readobj prints an ARM64X image's native view first, then its EC view inside "HybridObject {".
 dll_exports() {
-  llvm-readobj --coff-exports "$1" | awk '
+  llvm-readobj --coff-exports "$1" | awk -v view="${2:-main}" '
+    /HybridObject \{/ { h = 1; next }
+    (view == "main" && h) || (view == "hybrid" && !h) { next }
     /^ *Export \{/ { o = ""; n = "-"; r = "" }
     /^ *Ordinal:/ { o = $2 }
     /^ *Name:/ { if (NF >= 2) n = $2 }
@@ -91,33 +102,77 @@ dll_exports() {
     /^ *\}/ { if (o != "" && r != "" && r != "0x0") print o, n; o = "" }' | sort
 }
 
-check_dll() { # check_dll <arch> <dll name> <file> <def>
-  local arch="$1" name="$2" f="$3" def="$4" want got fmt imports bad
-  fmt="$(llvm-readobj --file-headers "$f" | sed -n 's/^Format: //p' | head -1)"
-  case "$arch" in
-    x86_64) [ "$fmt" = "COFF-x86-64" ] || die "$f is $fmt, want COFF-x86-64" ;;
-    i386) [ "$fmt" = "COFF-i386" ] || die "$f is $fmt, want COFF-i386" ;;
-    arm64ec) # an ARM64EC image may carry the AMD64 machine type; its CHPE metadata is what makes it EC
-      if ! grep -qiE 'arm64ec|arm64x' <<<"$fmt"; then
-        llvm-readobj --coff-load-config "$f" | grep -qi 'CHPE' || die "$f is $fmt without CHPE metadata, not ARM64EC"
-        fmt="$fmt+CHPE"
-      fi ;;
-  esac
-  want="$(def_exports "$HERE/def/$name.def")"
-  got="$(dll_exports "$f")"
-  # lld numbers exports the .def leaves unnumbered (xinputuap); compare names only for those
-  if grep -q '^? ' <<<"$want"; then
-    want="$(awk '{print $2}' <<<"$want" | sort)"; got="$(awk '{print $2}' <<<"$got" | sort)"
-  fi
+compare_exports() { # compare_exports <label> <file> <def> <view>
+  local want got
+  want="$(def_exports "$HERE/def/$3.def")"
+  got="$(dll_exports "$2" "$4")"
   if [ "$want" != "$got" ]; then
     printf 'want:\n%s\ngot:\n%s\n' "$want" "$got"
-    die "$arch/$name.dll exports differ from def/$name.def"
+    die "$1 exports differ from def/$3.def"
   fi
+}
+
+check_dll() { # check_dll <arch> <dll name> <file> <def>
+  local arch="$1" name="$2" f="$3" def="$4" fmts fmt hyb machine lc imports bad
+  fmts="$(llvm-readobj --file-headers "$f" | sed -n 's/^ *Format: //p')"
+  fmt="$(sed -n 1p <<<"$fmts")"
+  hyb="$(sed -n 2p <<<"$fmts")"
+  case "$arch" in
+    x86_64) [ "$fmt" = "COFF-x86-64" ] && [ -z "$hyb" ] || die "$f is $fmt${hyb:+ + $hyb}, want COFF-x86-64" ;;
+    i386) [ "$fmt" = "COFF-i386" ] && [ -z "$hyb" ] || die "$f is $fmt${hyb:+ + $hyb}, want COFF-i386" ;;
+    arm64x)
+      # Native view: an ARM64 PE (what an ARM64 process maps). EC view: ARM64EC (what an x64 process
+      # sees through the ARM64X dynamic relocations). Both need the CHPE metadata.
+      machine="$(python3 -c 'import struct,sys; d=open(sys.argv[1],"rb").read(4096); o=struct.unpack_from("<I",d,0x3c)[0]; print(hex(struct.unpack_from("<H",d,o+4)[0]) if d[o:o+4]==b"PE\0\0" else "?")' "$f")"
+      [ "$machine" = 0xaa64 ] || die "$f PE header machine is $machine, want 0xaa64 (ARM64)"
+      [ "$hyb" = "COFF-ARM64EC" ] || die "$f has no ARM64EC hybrid view (formats: $(echo $fmts))"
+      lc="$(llvm-readobj --coff-load-config "$f")"
+      grep -q 'CHPEMetadata' <<<"$lc" || die "$f has no CHPE metadata"
+      grep -q 'Arm64X' <<<"$lc" || die "$f has no ARM64X dynamic relocations"
+      fmt="$fmt/$hyb/$machine"
+      ;;
+  esac
+  compare_exports "$arch/$name.dll" "$f" "$name" main
+  [ "$arch" != arm64x ] || compare_exports "$arch/$name.dll (EC view)" "$f" "$name" hybrid
   imports="$(llvm-readobj --coff-imports "$f" | sed -n 's/^ *Name: //p' | tr 'A-Z' 'a-z' | sort -u)"
   bad="$(grep -vxE 'kernel32\.dll|ucrtbase\.dll|msvcrt\.dll|api-ms-win-crt-[a-z0-9-]+\.dll' <<<"$imports" || true)"
   [ -z "$bad" ] || die "$arch/$name.dll imports $(echo $bad) (only kernel32 and the C runtime are allowed)"
   grep -aq 'BANNERIN-XInput' "$f" || die "$arch/$name.dll lacks its BANNERIN-XInput marker"
-  printf '     %-8s %-12s %6d bytes  %-14s imports: %s\n' "$arch" "$name.dll" "$(stat -c %s "$f")" "$fmt" "$(echo $imports)"
+  printf '     %-7s %-15s %6d bytes  %-24s imports: %s\n' "$arch" "$name.dll" "$(stat -c %s "$f")" "$fmt" "$(echo $imports)"
+}
+
+# The objects and archives the toolchain links into an aarch64 DLL (CRT start-up, mingw/ucrt/kernel32
+# import libraries, compiler-rt), as absolute paths: the native view of an ARM64X image needs its own.
+native_link_inputs() { # native_link_inputs <tmpdir>
+  printf 'int x;\n' > "$1/empty.c"
+  aarch64-w64-mingw32-clang -shared -o "$1/empty.dll" "$1/empty.c" -### 2>&1 | python3 -c '
+import os, shlex, sys
+line = [l for l in sys.stdin.read().splitlines() if "ld.lld" in l or "lld-link" in l]
+if not line:
+    sys.exit("no link line in the -### output")
+toks = shlex.split(line[-1])
+dirs = [t[2:] for t in toks if t.startswith("-L")]
+out = []
+for t in toks[1:]:
+    if t.startswith("-l"):
+        name = t[2:]
+        hit = next((os.path.join(d, c) for d in dirs for c in ("lib%s.a" % name, "lib%s.dll.a" % name, "%s.lib" % name)
+                    if os.path.isfile(os.path.join(d, c))), None)
+        if not hit:
+            sys.exit("cannot resolve -l%s in %s" % (name, dirs))
+        out.append(hit)
+    elif t.endswith((".o", ".a", ".obj", ".lib")) and os.path.isabs(t) and os.path.isfile(t):
+        out.append(t)
+seen = set()
+print("\n".join(p for p in out if not (p in seen or seen.add(p))))
+'
+}
+
+link_arm64x() { # link_arm64x <out> <def> <ec obj> <native obj> <native inputs file>
+  local nat=()
+  mapfile -t nat <"$5"
+  arm64ec-w64-mingw32-clang -shared -s -Wl,--no-insert-timestamp -Wl,-marm64xpe "-Wl,--Xlink=-defarm64native:$2" \
+    -o "$1" "$3" "$4" "$2" "${nat[@]}" -lkernel32
 }
 
 CFLAGS_COMMON="-std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -I$HERE/src"
@@ -128,8 +183,19 @@ dlls() {
   mkdir -p "$out"; out="$(cd "$out" && pwd)"
   tmp="$(mktemp -d)"
   for arch in $ARCHES; do
-    cc="$(cc_for "$arch")"
     mkdir -p "$out/$arch"
+    if [ "$arch" = arm64x ]; then
+      arm64ec-w64-mingw32-clang $CFLAGS_COMMON -DBXI_HYBRID=1 -c "$HERE/src/xinput.c" -o "$tmp/xinput-arm64ec.o"
+      aarch64-w64-mingw32-clang $CFLAGS_COMMON -DBXI_HYBRID=1 -c "$HERE/src/xinput.c" -o "$tmp/xinput-aarch64.o"
+      native_link_inputs "$tmp" >"$tmp/native-inputs"
+      say "native view links with: $(xargs -n1 basename <"$tmp/native-inputs" | tr '\n' ' ')"
+      for name in $DLLS; do
+        link_arm64x "$out/$arch/$name.dll" "$HERE/def/$name.def" "$tmp/xinput-arm64ec.o" "$tmp/xinput-aarch64.o" "$tmp/native-inputs"
+        check_dll "$arch" "$name" "$out/$arch/$name.dll" "$HERE/def/$name.def"
+      done
+      continue
+    fi
+    cc="$(cc_for "$arch")"
     # shellcheck disable=SC2046
     "$cc" $CFLAGS_COMMON $(arch_flags "$arch") -c "$HERE/src/xinput.c" -o "$tmp/xinput-$arch.o"
     for name in $DLLS; do
@@ -150,9 +216,9 @@ for arch in arches:
         files.append({"arch": arch, "name": name + ".dll", "asset": f"{arch}/{name}.dll",
                       "sha256": hashlib.sha256(open(p, "rb").read()).hexdigest()})
 tag = hashlib.sha256("".join(f["sha256"] for f in files).encode()).hexdigest()[:12]
-json.dump({"name": "BANNERIN-XInput", "version": "1.0+" + tag, "dlls": dlls, "arches": arches, "files": files},
+json.dump({"name": "BANNERIN-XInput", "version": "1.1+" + tag, "dlls": dlls, "arches": arches, "files": files},
           open(os.path.join(out, "manifest.json"), "w"), indent=1)
-print(f"== bannerin-xinput: manifest.json: {len(files)} dlls, version 1.0+{tag}")
+print(f"== bannerin-xinput: manifest.json: {len(files)} dlls, version 1.1+{tag}")
 PY
 }
 
@@ -160,12 +226,16 @@ tests() {
   local out="${1:?usage: build.sh tests <outdir>}" arch cc
   toolchain
   mkdir -p "$out"
-  for arch in x86_64 i386; do
+  for arch in x86_64 i386 aarch64; do
     cc="$(cc_for "$arch")"
     mkdir -p "$out/$arch"
     # shellcheck disable=SC2046
     "$cc" $CFLAGS_COMMON $(arch_flags "$arch") -o "$out/$arch/xinput_test.exe" "$HERE/test/xinput_test.c"
-    say "$arch/xinput_test.exe: $(llvm-readobj --file-headers "$out/$arch/xinput_test.exe" | sed -n 's/^Format: //p' | head -1)"
+    # a GUI-subsystem child the test starts without std handles, like a game started by explorer
+    # shellcheck disable=SC2046
+    "$cc" $CFLAGS_COMMON $(arch_flags "$arch") -mwindows -o "$out/$arch/xinput_gui.exe" "$HERE/test/xinput_gui.c"
+    say "$arch: xinput_test.exe $(llvm-readobj --file-headers "$out/$arch/xinput_test.exe" | sed -n 's/^Format: //p' | head -1)," \
+        "xinput_gui.exe $(llvm-readobj --file-headers "$out/$arch/xinput_gui.exe" | sed -n 's/^ *Subsystem: //p' | head -1)"
   done
 }
 
