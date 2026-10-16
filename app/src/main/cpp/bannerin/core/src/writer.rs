@@ -44,6 +44,8 @@ pub const STAT_READER_REMOVALS: u32 = 12;
 pub const STAT_INSTANCE: u32 = 13;
 pub const STAT_FAILED_PUBLISHES: u32 = 14;
 pub const STAT_HAS_BACKING: u32 = 15;
+pub const STAT_READER_PACED_FRAMES: u32 = 16;
+pub const STAT_READER_MERGED_AXIS: u32 = 17;
 
 struct Backing {
     ptr: *mut u8,
@@ -484,6 +486,8 @@ impl SlotWriter {
             STAT_READER_FRAMES => &h.r_frames,
             STAT_READER_EVENTS => &h.r_events,
             STAT_READER_REMOVALS => &h.r_removals,
+            STAT_READER_PACED_FRAMES => &h.r_paced_frames,
+            STAT_READER_MERGED_AXIS => &h.r_merged_axis,
             _ => return 0,
         };
         v.load(Relaxed)

@@ -53,7 +53,11 @@ public final class BannerinWriter {
     public static final int STAT_INSTANCE = 13;
     public static final int STAT_FAILED_PUBLISHES = 14;
     public static final int STAT_HAS_BACKING = 15;
-    private static final int STAT_COUNT = 16;
+    /** Stick-only frames readers held back (paced to BANNERIN_AXIS_HZ) before delivering them. */
+    public static final int STAT_READER_PACED_FRAMES = 16;
+    /** Publishes readers merged into a later frame instead of delivering one each. */
+    public static final int STAT_READER_MERGED_AXIS = 17;
+    private static final int STAT_COUNT = 18;
 
     // Each slot's counters as they stood when releaseAllRingSlots() retired its file, for the
     // session-end diagnostics that may run after the release.

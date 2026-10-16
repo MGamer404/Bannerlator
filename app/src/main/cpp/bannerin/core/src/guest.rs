@@ -35,7 +35,7 @@ use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
 use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize};
 
 use crate::abi::*;
-use crate::frame::{Cursor, Ev, Frame, FrameStats, Journal, NoJournal};
+use crate::frame::{Cursor, Due, Ev, Frame, FrameStats, Journal, NoJournal};
 use crate::layout::{Shared, Snapshot, FILE_SIZE};
 use crate::msg::Msg;
 use crate::sys;
@@ -44,6 +44,11 @@ pub const MAX_HANDLES: usize = 128;
 pub const MAX_SLOTS: usize = 4;
 pub const PATH_CAP: usize = 1024;
 pub const ENV_PATHS: &[u8] = b"FAKE_EVDEV_MEMFD_PATHS\0";
+pub const ENV_AXIS_HZ: &[u8] = b"BANNERIN_AXIS_HZ\0";
+/// Axis-only frame rate per handle when BANNERIN_AXIS_HZ is unset (T = 8 ms).
+pub const AXIS_HZ_DEFAULT: u32 = 125;
+pub const AXIS_HZ_MIN: u32 = 30;
+pub const AXIS_HZ_MAX: u32 = 1000;
 pub const API_VERSION: u32 = 1;
 
 /// Upper bound on how long a missed wake could delay input (the fallback re-check).
@@ -119,6 +124,9 @@ pub fn init() -> u32 {
                         None => 0,
                     };
                     CONFIG.mask.store(mask, Relaxed);
+                    let hz = parse_axis_hz(sys::env(ENV_AXIS_HZ));
+                    AXIS_HZ.store(hz, Relaxed);
+                    AXIS_NS.store(if hz == 0 { 0 } else { 1_000_000_000 / hz as u64 }, Relaxed);
                     CONFIG.state.store(2, Release);
                     return mask;
                 }
@@ -136,6 +144,62 @@ pub fn init() -> u32 {
             }
         }
     }
+}
+
+/// `BANNERIN_AXIS_HZ`: unset or unparsable = the default, 0 = unpaced, otherwise clamped to
+/// AXIS_HZ_MIN..=AXIS_HZ_MAX.
+pub fn parse_axis_hz(v: Option<&[u8]>) -> u32 {
+    let v = match v {
+        Some(v) => trim(v),
+        None => return AXIS_HZ_DEFAULT,
+    };
+    if v.is_empty() || v.len() > 9 || !v.iter().all(|c| c.is_ascii_digit()) {
+        return AXIS_HZ_DEFAULT;
+    }
+    let n = v.iter().fold(0u32, |n, c| n * 10 + (c - b'0') as u32);
+    if n == 0 {
+        0
+    } else {
+        n.clamp(AXIS_HZ_MIN, AXIS_HZ_MAX)
+    }
+}
+
+static AXIS_HZ: AtomicU32 = AtomicU32::new(AXIS_HZ_DEFAULT);
+static AXIS_NS: AtomicU64 = AtomicU64::new(1_000_000_000 / AXIS_HZ_DEFAULT as u64);
+static CONFIG_LOGGED: AtomicU32 = AtomicU32::new(0);
+
+/// The pacing interval T for axis-only frames (0 = unpaced).
+#[inline]
+fn axis_ns() -> u64 {
+    AXIS_NS.load(Relaxed)
+}
+
+/// The effective BANNERIN_AXIS_HZ (0 = unpaced).
+pub fn axis_hz() -> u32 {
+    init();
+    AXIS_HZ.load(Relaxed)
+}
+
+/// Log the effective pacing once, the first time a logger is there to hear it.
+fn log_config_once() {
+    if LOGGER.load(Acquire) == 0 || CONFIG.state.load(Acquire) != 2 {
+        return;
+    }
+    if CONFIG_LOGGED.compare_exchange(0, 1, AcqRel, Relaxed).is_err() {
+        return;
+    }
+    let hz = AXIS_HZ.load(Relaxed);
+    let mut m = Msg::new();
+    if hz == 0 {
+        m.s(b"bannerin: axis-only frames unpaced (BANNERIN_AXIS_HZ=0)");
+    } else {
+        m.s(b"bannerin: axis-only frames paced to ")
+            .u(hz as u64)
+            .s(b" Hz per handle (T = ")
+            .u(AXIS_NS.load(Relaxed) / 1000)
+            .s(b" us); button and full-state frames are never delayed");
+    }
+    log(0, &mut m);
 }
 
 fn slot_path(slot: usize) -> *const c_char {
@@ -165,6 +229,8 @@ pub struct Stats {
     pub ready_signals: AtomicU64,
     pub snapshot_busy: AtomicU64,
     pub fork_rebinds: AtomicU64,
+    pub paced_frames: AtomicU64,
+    pub merged_axis_publishes: AtomicU64,
 }
 
 const Z: AtomicU64 = AtomicU64::new(0);
@@ -188,6 +254,8 @@ pub static STATS: Stats = Stats {
     ready_signals: Z,
     snapshot_busy: Z,
     fork_rebinds: Z,
+    paced_frames: Z,
+    merged_axis_publishes: Z,
 };
 
 /// Process-wide reader statistics (`struct bannerin_stats`).
@@ -213,6 +281,10 @@ pub struct StatsView {
     pub ready_signals: u64,
     pub snapshot_busy: u64,
     pub fork_rebinds: u64,
+    /// Axis-only frames held back by pacing before being delivered.
+    pub paced_frames: u64,
+    /// Publishes merged into a later frame instead of delivered one each.
+    pub merged_axis_publishes: u64,
 }
 
 pub fn stats() -> StatsView {
@@ -237,6 +309,8 @@ pub fn stats() -> StatsView {
         ready_signals: s.ready_signals.load(Relaxed),
         snapshot_busy: s.snapshot_busy.load(Relaxed),
         fork_rebinds: s.fork_rebinds.load(Relaxed),
+        paced_frames: s.paced_frames.load(Relaxed),
+        merged_axis_publishes: s.merged_axis_publishes.load(Relaxed),
     }
 }
 
@@ -260,6 +334,8 @@ pub struct SlotStatsView {
     pub reader_removals: u64,
     pub writer_pid: u32,
     pub retired: u32,
+    pub reader_paced_frames: u64,
+    pub reader_merged_axis_publishes: u64,
 }
 
 pub type LogFn = unsafe extern "C" fn(level: c_int, line: *const c_char);
@@ -267,6 +343,7 @@ static LOGGER: AtomicUsize = AtomicUsize::new(0);
 
 pub fn set_logger(f: Option<LogFn>) {
     LOGGER.store(f.map_or(0, |f| f as usize), Release);
+    log_config_once();
 }
 
 fn log(level: c_int, m: &mut Msg) {
@@ -680,12 +757,34 @@ fn observe(d: &mut Data, notes: &mut Notes) -> Snapshot {
     d.cursor.as_snapshot() // the writer kept lapping us: deliver nothing new this time
 }
 
-fn pending(d: &Data, snap: &Snapshot) -> bool {
-    d.fpos < d.frame.len || d.cursor.pending(snap)
+/// When this handle's next events are due at `now` (a partly delivered frame is due at once).
+fn due(d: &mut Data, snap: &Snapshot, now: u64) -> Due {
+    if d.fpos < d.frame.len {
+        Due::Now
+    } else {
+        d.cursor.due(snap, now, axis_ns())
+    }
 }
 
-/// Keep exactly one readiness byte queued while events are pending; close the peer on removal.
-fn sync_ready(d: &mut Data, snap: &Snapshot) {
+fn earlier(a: Option<u64>, b: Option<u64>) -> Option<u64> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x.min(y)),
+        (x, None) => x,
+        (None, y) => y,
+    }
+}
+
+/// How long to sleep: the fallback re-check, or less if a held frame falls due sooner.
+fn wait_ns(base: u64, deadline: Option<u64>) -> u64 {
+    match deadline {
+        Some(t) => base.min(t.saturating_sub(sys::mono_ns()).max(1_000)),
+        None => base,
+    }
+}
+
+/// Keep exactly one readiness byte queued while events are due; close the peer on removal.
+/// Returns when a held (paced) frame becomes due, if one is held.
+fn sync_ready(d: &mut Data, snap: &Snapshot, now: u64) -> Option<u64> {
     if d.removed {
         if d.wake_fd >= 0 {
             if !d.ready {
@@ -695,12 +794,17 @@ fn sync_ready(d: &mut Data, snap: &Snapshot) {
             sys::close(d.wake_fd);
             d.wake_fd = -1;
         }
-        return;
+        return None;
     }
+    let due = due(d, snap, now);
+    let held = match due {
+        Due::At(t) => Some(t),
+        _ => None,
+    };
     if d.wake_fd < 0 {
-        return;
+        return held;
     }
-    let want = pending(d, snap);
+    let want = due == Due::Now;
     if want && !d.ready {
         match sys::send_byte(d.wake_fd) {
             Ok(_) | Err(sys::EAGAIN) => {
@@ -713,6 +817,7 @@ fn sync_ready(d: &mut Data, snap: &Snapshot) {
         sys::drain(d.drain_fd);
         d.ready = false;
     }
+    held
 }
 
 #[repr(C)]
@@ -726,16 +831,17 @@ struct InputEvent {
 }
 const _: () = assert!(core::mem::size_of::<InputEvent>() == EVENT_SIZE);
 
-unsafe fn deliver(d: &mut Data, snap: &Snapshot, out: *mut u8, max: usize, fs: &mut FrameStats) -> usize {
+unsafe fn deliver(d: &mut Data, snap: &Snapshot, out: *mut u8, max: usize, fs: &mut FrameStats, now: u64) -> usize {
+    let t = axis_ns();
     let mut n = 0usize;
     while n < max {
         if d.fpos >= d.frame.len {
-            let made = match shared(d) {
-                Some(sh) if !d.dead => d.cursor.next_frame(snap, &ShJournal(sh), &mut d.frame, fs),
-                _ => d.cursor.next_frame(snap, &NoJournal, &mut d.frame, fs),
+            let r = match shared(d) {
+                Some(sh) if !d.dead => d.cursor.next_frame_at(snap, &ShJournal(sh), &mut d.frame, fs, now, t),
+                _ => d.cursor.next_frame_at(snap, &NoJournal, &mut d.frame, fs, now, t),
             };
             d.fpos = 0;
-            if !made {
+            if r != Due::Now {
                 d.frame.len = 0;
                 break;
             }
@@ -767,6 +873,8 @@ fn account(d: &Data, fs: &FrameStats, notes: &mut Notes) {
     s.counter_frames.fetch_add(fs.counter_frames, Relaxed);
     s.coalesced_taps.fetch_add(fs.coalesced_taps, Relaxed);
     s.resyncs.fetch_add(fs.resyncs, Relaxed);
+    s.paced_frames.fetch_add(fs.paced_frames, Relaxed);
+    s.merged_axis_publishes.fetch_add(fs.merged_axis_publishes, Relaxed);
     if d.writable && !d.dead {
         if let Some(sh) = shared(d) {
             let h = &sh.header;
@@ -775,6 +883,8 @@ fn account(d: &Data, fs: &FrameStats, notes: &mut Notes) {
             h.r_taps.fetch_add(fs.taps, Relaxed);
             h.r_coalesced.fetch_add(fs.coalesced_taps, Relaxed);
             h.r_resyncs.fetch_add(fs.resyncs, Relaxed);
+            h.r_paced_frames.fetch_add(fs.paced_frames, Relaxed);
+            h.r_merged_axis.fetch_add(fs.merged_axis_publishes, Relaxed);
         }
     }
 }
@@ -896,7 +1006,8 @@ fn slow_check(slot: usize, rt: &SlotRt) {
 }
 
 /// Re-level every handle of `slot`.
-fn service(slot: usize, now: u64, verify: bool) {
+fn service(slot: usize, now: u64, verify: bool) -> Option<u64> {
+    let mut earliest = None;
     for e in TABLE.e.iter() {
         if e.state.load(Acquire) != ACTIVE {
             continue;
@@ -918,7 +1029,7 @@ fn service(slot: usize, now: u64, verify: bool) {
             if verify && d.ready && d.wake_fd >= 0 && matches!(sys::fionread(d.drain_fd), Ok(0)) {
                 d.ready = false;
             }
-            sync_ready(d, &snap);
+            earliest = earlier(earliest, sync_ready(d, &snap, sys::mono_ns()));
         }
         unlock(e);
         release(e);
@@ -926,6 +1037,7 @@ fn service(slot: usize, now: u64, verify: bool) {
             emit_notes(slot, fd, &notes);
         }
     }
+    earliest
 }
 
 extern "C" fn helper_main(arg: *mut c_void) -> *mut c_void {
@@ -951,12 +1063,13 @@ extern "C" fn helper_main(arg: *mut c_void) -> *mut c_void {
         }
         let target = unsafe { (*rt.hm.get()).shared() }
             .map(|sh| (&sh.header.bell as *const AtomicU32, sh.header.bell.load(Acquire)));
-        service(slot, now, slow);
+        // Wake on the bell, at the earliest paced frame falling due, or after the fallback.
+        let earliest = service(slot, now, slow);
         let r = match target {
-            Some((w, v)) => sys::futex_wait(w, v, Some(FALLBACK_NS), true),
+            Some((w, v)) => sys::futex_wait(w, v, Some(wait_ns(FALLBACK_NS, earliest)), true),
             None => {
                 let k = rt.kick.load(Acquire);
-                sys::futex_wait(&rt.kick, k, Some(SLOW_NS / 2), false)
+                sys::futex_wait(&rt.kick, k, Some(wait_ns(SLOW_NS / 2, earliest)), false)
             }
         };
         match r {
@@ -1119,6 +1232,7 @@ pub fn attach(slot: i32, open_flags: i32) -> Result<(i32, u32), i32> {
     sys::futex_wake(&rt.kick, 1, false);
     ensure_helper(slot);
     STATS.attaches.fetch_add(1, Relaxed);
+    log_config_once();
     if LOGGER.load(Relaxed) != 0 {
         let mut m = Msg::new();
         m.s(b"bannerin: slot ").u(slot as u64).s(b" fd ").i(guest as i64);
@@ -1180,7 +1294,7 @@ pub fn slot(h: u32) -> Result<i32, i32> {
 pub fn is_removed(h: u32) -> Result<bool, i32> {
     with_handle(h, |d, notes| {
         let snap = observe(d, notes);
-        sync_ready(d, &snap);
+        sync_ready(d, &snap, sys::mono_ns());
         d.removed
     })
 }
@@ -1188,11 +1302,13 @@ pub fn is_removed(h: u32) -> Result<bool, i32> {
 pub fn has_pending(h: u32) -> Result<bool, i32> {
     with_handle(h, |d, notes| {
         let snap = observe(d, notes);
-        sync_ready(d, &snap);
+        let now = sys::mono_ns();
+        sync_ready(d, &snap, now);
         if d.removed {
             Err(sys::ENODEV)
         } else {
-            Ok(pending(d, &snap))
+            // A stick change held by pacing is not pending yet.
+            Ok(due(d, &snap, now) == Due::Now)
         }
     })?
 }
@@ -1235,14 +1351,15 @@ pub unsafe fn read(h: u32, buf: *mut u8, len: usize, nonblocking: bool) -> Resul
         refresh(d, sys::mono_ns(), &mut notes);
         let (word, val, shared_word) = wait_target(d);
         let snap = observe(d, &mut notes);
+        let now = sys::mono_ns();
         let outcome = if d.removed {
             Err(sys::ENODEV)
         } else {
-            let n = deliver(d, &snap, buf, max, &mut fs);
+            let n = deliver(d, &snap, buf, max, &mut fs, now);
             account(d, &fs, &mut notes);
             Ok(n)
         };
-        sync_ready(d, &snap);
+        let held = sync_ready(d, &snap, now);
         unlock(e);
         ensure_helper(slot);
         emit_notes(slot, fd, &notes);
@@ -1254,7 +1371,8 @@ pub unsafe fn read(h: u32, buf: *mut u8, len: usize, nonblocking: bool) -> Resul
         if nonblocking {
             break Err(sys::EAGAIN);
         }
-        if let Err(sys::EINTR) = sys::futex_wait(word, val, Some(FALLBACK_NS), shared_word) {
+        // Sleep until a publish, the moment a held stick frame falls due, or the fallback.
+        if let Err(sys::EINTR) = sys::futex_wait(word, val, Some(wait_ns(FALLBACK_NS, held)), shared_word) {
             break Err(sys::EINTR);
         }
     };
@@ -1266,7 +1384,7 @@ pub unsafe fn read(h: u32, buf: *mut u8, len: usize, nonblocking: bool) -> Resul
 pub fn current_state(h: u32, buttons: &mut [i32; BUTTONS], axes: &mut [i32; AXES]) -> Result<(), i32> {
     with_handle(h, |d, notes| {
         let s = observe(d, notes);
-        sync_ready(d, &s);
+        sync_ready(d, &s, sys::mono_ns());
         if d.removed {
             return Err(sys::ENODEV);
         }
@@ -1306,6 +1424,8 @@ pub fn slot_stats(slot: i32) -> Result<SlotStatsView, i32> {
         v.reader_removals = h.r_removals.load(Relaxed);
         v.writer_pid = h.writer_pid.load(Relaxed);
         v.retired = h.retired.load(Relaxed);
+        v.reader_paced_frames = h.r_paced_frames.load(Relaxed);
+        v.reader_merged_axis_publishes = h.r_merged_axis.load(Relaxed);
     }
     m.release();
     Ok(v)
@@ -1327,6 +1447,20 @@ mod tests {
         assert_eq!(parse_paths(b"", &mut q), 0);
         assert_eq!(parse_paths(b";;;", &mut q), 0);
         assert_eq!(parse_paths(b"2=/only", &mut q), 0b100);
+    }
+
+    #[test]
+    fn axis_hz_parsing() {
+        assert_eq!(parse_axis_hz(None), 125);
+        assert_eq!(parse_axis_hz(Some(b"")), 125);
+        assert_eq!(parse_axis_hz(Some(b"abc")), 125);
+        assert_eq!(parse_axis_hz(Some(b"-5")), 125);
+        assert_eq!(parse_axis_hz(Some(b"0")), 0);
+        assert_eq!(parse_axis_hz(Some(b" 60 ")), 60);
+        assert_eq!(parse_axis_hz(Some(b"250")), 250);
+        assert_eq!(parse_axis_hz(Some(b"10")), 30);
+        assert_eq!(parse_axis_hz(Some(b"5000")), 1000);
+        assert_eq!(parse_axis_hz(Some(b"99999999999")), 125);
     }
 
     #[test]

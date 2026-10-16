@@ -667,16 +667,28 @@ fn stick_spam_never_starves_buttons_and_catches_up_at_once() {
             }
             shm.set(2, t.releases);
         }
-        // The writer is done: whatever is left is at most the one latest stick frame.
-        let frames = r.drain()?;
-        ensure!(frames.len() <= 1, "catch-up took {} frames", frames.len());
-        for f in &frames {
-            absorb(f, &mut t, &mut axes, &mut axis_only)?;
+        // The writer is done: whatever is left is at most the one latest stick frame, delivered
+        // within the pacing interval.
+        const FINAL: [i32; AXES] = [111, -222, 333, -444, 55, 66, 1, -1];
+        let tail_end = Instant::now() + Duration::from_millis(200);
+        let mut tail = 0usize;
+        while axes != FINAL && Instant::now() < tail_end {
+            r.poll(20);
+            match r.read_nb() {
+                Ok(_) | Err(sys::EAGAIN) => {}
+                Err(e) => return Err(format!("read errno {}", e)),
+            }
+            while let Some(f) = r.take_frame() {
+                tail += 1;
+                absorb(&f, &mut t, &mut axes, &mut axis_only)?;
+            }
         }
+        ensure!(tail <= 1, "catch-up took {} frames", tail);
+        ensure!(r.drain()?.is_empty(), "nothing after the final state");
         shm.set(4, 1);
         say(&format!("[spam] {} reads, {} stick-only frames for {} publishes\n", reads, axis_only, PUBLISHES));
         ensure!(axis_only <= reads + 2, "sticks were not coalesced: {} frames over {} reads", axis_only, reads);
-        ensure!(axes == [111, -222, 333, -444, 55, 66, 1, -1], "final axes {:?}", axes);
+        ensure!(axes == FINAL, "final axes {:?}", axes);
         ensure!(t.presses == TAPS && t.releases == TAPS, "B taps {} / {} of {}", t.presses, t.releases, TAPS);
         ensure!(stats().coalesced_taps == 0, "no tap may be coalesced");
         Ok(())
@@ -1054,6 +1066,288 @@ fn idle_pad_sleeps_and_a_raw_read_cannot_wedge_readiness() {
         say(&format!("[idle] helper wake-ups in 400 ms: {}\n", wakes));
         ensure!(wakes <= 400 / 4 + 40, "idle helper woke {} times in 400 ms", wakes);
         ensure!(s1.frames == s0.frames && r.poll(0) == 0, "idle pad delivered something");
+        Ok(())
+    });
+}
+
+// ---------------------------------------------------------------------------------------------
+// axis pacing (BANNERIN_AXIS_HZ)
+
+const T_DEFAULT: Duration = Duration::from_millis(8); // 125 Hz
+
+fn sleep_until(t: Instant) {
+    let now = Instant::now();
+    if t > now {
+        std::thread::sleep(t - now);
+    }
+}
+
+fn stick(i: u32) -> [i32; AXES] {
+    let v = 1 + ((i as i32) * 37) % 30000;
+    [v, -v, v / 2, 0, (i % 255) as i32 + 1, 0, 0, 0]
+}
+
+fn is_axis_only(f: &[E]) -> bool {
+    !is_full(f) && !f.iter().any(|e| e.t == EV_KEY) && f.iter().any(|e| e.t == EV_ABS)
+}
+
+fn pct(v: &mut [u64], p: usize) -> u64 {
+    v.sort_unstable();
+    v[((v.len() - 1) * p) / 100]
+}
+
+#[test]
+fn stick_only_frames_are_paced_to_axis_hz() {
+    let sc = Scene::new("pace");
+    let shm = Shm::new();
+    // shm: 0 writer ready, 1 reader ready, 2 writer done, 3 spam start (mono ns), 4 spam end, 5 reader done
+    let wpid = spawn("pace-writer", || {
+        let mut w = sc.writer(0);
+        w.open();
+        shm.set(0, 1);
+        shm.wait(1, 1, 30)?;
+        let start = Instant::now();
+        shm.set(3, sys::mono_ns());
+        for i in 0..1000u32 {
+            sleep_until(start + Duration::from_micros(2000 * i as u64)); // 500 Hz for 2 s
+            w.set_pad(pad_axes(0, stick(i)));
+        }
+        shm.set(4, sys::mono_ns());
+        shm.set(2, 1);
+        shm.wait(5, 1, 30)?;
+        Ok(())
+    });
+    let rpid = spawn("pace-reader", || {
+        shm.wait(0, 1, 30)?;
+        sc.enter(); // BANNERIN_AXIS_HZ unset: the default
+        ensure!(bannerin_axis_hz() == 125, "default rate {}", bannerin_axis_hz());
+        let mut r = Rd::attach(0, sys::O_NONBLOCK)?;
+        ensure!(is_full(&r.frame(1000)?), "full first");
+        shm.set(1, 1);
+        let mut stamps = Vec::new();
+        let mut quiet_since: Option<Instant> = None;
+        let end = Instant::now() + Duration::from_secs(30);
+        loop {
+            ensure!(Instant::now() < end, "writer never finished");
+            r.poll(20);
+            match r.read_nb() {
+                Ok(_) => quiet_since = None,
+                Err(sys::EAGAIN) => {}
+                Err(e) => return Err(format!("read errno {}", e)),
+            }
+            while let Some(f) = r.take_frame() {
+                ensure!(is_axis_only(&f), "only stick frames expected: {:?}", f);
+                stamps.push(sys::mono_ns());
+            }
+            if shm.get(2) == 1 {
+                let q = *quiet_since.get_or_insert_with(Instant::now);
+                if q.elapsed() > Duration::from_millis(60) {
+                    break;
+                }
+            }
+        }
+        shm.set(5, 1);
+        let (t0, t1) = (shm.get(3), shm.get(4));
+        let inside = stamps.iter().filter(|t| **t >= t0 && **t <= t1).count();
+        let secs = (t1 - t0) as f64 / 1e9;
+        let rate = inside as f64 / secs;
+        let s = stats();
+        let mut st = SlotStatsView::default();
+        unsafe { bannerin_slot_stats(0, &mut st, core::mem::size_of::<SlotStatsView>()) };
+        say(&format!(
+            "[pace] 1000 publishes in {:.3} s -> {} stick frames ({:.1}/s); paced {} merged {}; file: paced {} merged {}\n",
+            secs, inside, rate, s.paced_frames, s.merged_axis_publishes, st.reader_paced_frames, st.reader_merged_axis_publishes
+        ));
+        ensure!(rate <= 125.0 * 1.1, "{:.1} stick frames/s exceeds 125 Hz + 10 %", rate);
+        ensure!(rate >= 125.0 * 0.75, "{:.1} stick frames/s: pacing starved the reader", rate);
+        ensure!(s.paced_frames > 0 && s.merged_axis_publishes > 0, "pacing counters {:?}", s);
+        ensure!(st.reader_paced_frames > 0 && st.reader_merged_axis_publishes > 0, "file counters {:?}", st);
+        Ok(())
+    });
+    assert_eq!((wait_pid(wpid), wait_pid(rpid)), (0, 0));
+}
+
+#[test]
+fn rest_value_reaches_a_reader_blocked_in_poll_within_t() {
+    let sc = Scene::new("rest");
+    run("rest", || {
+        sc.enter();
+        let mut w = sc.writer(0);
+        w.open();
+        let mut r = Rd::attach(0, sys::O_NONBLOCK)?;
+        ensure!(is_full(&r.frame(1000)?), "full first");
+        let (h, fd) = (r.h, r.fd);
+        let rest_at = std::sync::Arc::new(AtomicU64::new(0));
+        let ra = rest_at.clone();
+        // The reader only ever sleeps in a plain poll(-1): nothing but the fd's own readiness can
+        // wake it, so a held stick frame must be signalled by the library at its deadline.
+        let reader = std::thread::spawn(move || -> Result<(), String> {
+            let mut x = 0i32;
+            let mut buf = [0u8; EVENT_SIZE * 64];
+            loop {
+                let mut p = PollFd { fd, events: POLLIN, revents: 0 };
+                sys::poll(&mut p, 1, -1).map_err(|e| format!("poll errno {}", e))?;
+                let n = unsafe { bannerin_read(h, buf.as_mut_ptr() as *mut c_void, buf.len(), 1) };
+                if n == -(sys::EAGAIN as isize) {
+                    continue;
+                }
+                ensure!(n > 0, "read {}", n);
+                for e in parse(&buf[..n as usize]) {
+                    if e.t == EV_KEY && e.c == BTN_START && e.v == 1 {
+                        return Ok(());
+                    }
+                    if e.t == EV_ABS && e.c == ABS_X {
+                        if e.v == 0 && x != 0 {
+                            ra.store(sys::mono_ns(), SeqCst);
+                        }
+                        x = e.v;
+                    }
+                }
+            }
+        });
+        let mut lat = Vec::new();
+        for trial in 0..20u32 {
+            rest_at.store(0, SeqCst);
+            let start = Instant::now();
+            for k in 0..25u32 {
+                sleep_until(start + Duration::from_micros(2000 * k as u64)); // 500 Hz, 50 ms
+                w.set_pad(pad_axes(0, stick(trial * 100 + k)));
+            }
+            sleep_until(start + Duration::from_micros(2000 * 25 + 700 * (trial % 4) as u64));
+            let t_last = sys::mono_ns();
+            w.set_pad(pad(0)); // let go: the rest position, then silence
+            let end = Instant::now() + Duration::from_millis(500);
+            while rest_at.load(SeqCst) == 0 {
+                ensure!(Instant::now() < end, "trial {}: the rest value never arrived", trial);
+                std::thread::sleep(Duration::from_micros(200));
+            }
+            lat.push(rest_at.load(SeqCst) - t_last);
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        w.set_pad(pad(1 << B_START));
+        reader.join().map_err(|_| "reader panicked".to_string())??;
+        let worst = *lat.iter().max().unwrap();
+        let p95 = pct(&mut lat, 95);
+        let p50 = pct(&mut lat, 50);
+        say(&format!("[rest] last publish -> rest value in a poll(-1) reader: p50 {} us p95 {} us max {} us (T = 8 ms)\n", p50 / 1000, p95 / 1000, worst / 1000));
+        let bound = (T_DEFAULT + Duration::from_millis(2)).as_nanos() as u64;
+        ensure!(p95 <= bound, "p95 {} us exceeds T + 2 ms", p95 / 1000);
+        ensure!(worst <= bound + 8_000_000, "worst {} us", worst / 1000);
+        Ok(())
+    });
+}
+
+#[test]
+fn taps_go_out_at_once_and_in_order_during_paced_stick_spam() {
+    let sc = Scene::new("tapspam");
+    run("tapspam", || {
+        sc.enter();
+        let mut w = sc.writer(0);
+        w.open();
+        let mut r = Rd::attach(0, sys::O_NONBLOCK)?;
+        ensure!(is_full(&r.frame(1000)?), "full first");
+        let edges = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(u64, i32)>::new()));
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (we, wd) = (edges.clone(), done.clone());
+        let writer = std::thread::spawn(move || {
+            let start = Instant::now();
+            let mut down = false;
+            for i in 0..750u32 {
+                sleep_until(start + Duration::from_micros(2000 * i as u64)); // 500 Hz, 1.5 s
+                let press = match i % 25 {
+                    0 => true,
+                    12 => false,
+                    _ => down,
+                };
+                if press != down {
+                    we.lock().unwrap().push((sys::mono_ns(), press as i32));
+                    down = press;
+                }
+                w.set_pad(pad_axes(if down { 1 << B_A } else { 0 }, stick(i)));
+            }
+            if down {
+                we.lock().unwrap().push((sys::mono_ns(), 0));
+                w.set_pad(pad_axes(0, stick(9999)));
+            }
+            wd.store(true, SeqCst);
+        });
+        let mut got: Vec<(u64, i32)> = Vec::new();
+        let mut t = Taps::new(BTN_A);
+        let end = Instant::now() + Duration::from_secs(30);
+        loop {
+            ensure!(Instant::now() < end, "stuck");
+            r.poll(20);
+            match r.read_nb() {
+                Ok(_) | Err(sys::EAGAIN) => {}
+                Err(e) => return Err(format!("read errno {}", e)),
+            }
+            let now = sys::mono_ns();
+            while let Some(f) = r.take_frame() {
+                t.feed(&f)?;
+                if let Some(v) = key(&f, BTN_A) {
+                    got.push((now, v));
+                }
+            }
+            if done.load(SeqCst) && got.len() >= edges.lock().unwrap().len() {
+                break;
+            }
+        }
+        writer.join().unwrap();
+        let sent = edges.lock().unwrap().clone();
+        ensure!(got.len() == sent.len(), "{} edges sent, {} received", sent.len(), got.len());
+        ensure!(got.iter().map(|g| g.1).eq(sent.iter().map(|s| s.1)), "edges out of order");
+        let mut lat: Vec<u64> = got.iter().zip(&sent).map(|(g, s)| g.0.saturating_sub(s.0)).collect();
+        let worst = *lat.iter().max().unwrap();
+        let p95 = pct(&mut lat, 95);
+        let p50 = pct(&mut lat, 50);
+        say(&format!("[tapspam] {} button edges under 500 Hz stick spam: p50 {} us p95 {} us max {} us\n", sent.len(), p50 / 1000, p95 / 1000, worst / 1000));
+        ensure!(p95 <= 1_000_000, "button edge p95 {} us exceeds 1 ms", p95 / 1000);
+        ensure!(worst <= 10_000_000, "button edge worst {} us", worst / 1000);
+        Ok(())
+    });
+}
+
+#[test]
+fn axis_hz_zero_restores_unpaced_stick_frames() {
+    let sc = Scene::new("unpaced");
+    run("unpaced", || {
+        sc.enter();
+        std::env::set_var("BANNERIN_AXIS_HZ", "0");
+        ensure!(bannerin_axis_hz() == 0, "rate {}", bannerin_axis_hz());
+        let mut w = sc.writer(0);
+        w.open();
+        let mut r = Rd::attach(0, sys::O_NONBLOCK)?;
+        ensure!(is_full(&r.frame(1000)?), "full first");
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let wd = done.clone();
+        let writer = std::thread::spawn(move || {
+            let start = Instant::now();
+            for i in 0..500u32 {
+                sleep_until(start + Duration::from_micros(2000 * i as u64)); // 500 Hz, 1 s
+                w.set_pad(pad_axes(0, stick(i)));
+            }
+            wd.store(true, SeqCst);
+        });
+        let mut frames = 0u64;
+        let end = Instant::now() + Duration::from_secs(30);
+        while !done.load(SeqCst) {
+            ensure!(Instant::now() < end, "stuck");
+            r.poll(20);
+            match r.read_nb() {
+                Ok(_) | Err(sys::EAGAIN) => {}
+                Err(e) => return Err(format!("read errno {}", e)),
+            }
+            while let Some(f) = r.take_frame() {
+                ensure!(is_axis_only(&f), "{:?}", f);
+                frames += 1;
+            }
+        }
+        writer.join().unwrap();
+        frames += r.drain()?.len() as u64;
+        let s = stats();
+        say(&format!("[unpaced] 500 publishes at 500 Hz -> {} stick frames, paced {}\n", frames, s.paced_frames));
+        ensure!(frames >= 350, "only {} frames: BANNERIN_AXIS_HZ=0 must not pace", frames);
+        ensure!(s.paced_frames == 0, "paced {}", s.paced_frames);
         Ok(())
     });
 }

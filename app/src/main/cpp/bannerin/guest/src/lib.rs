@@ -145,6 +145,11 @@ pub extern "C" fn bannerin_api_version() -> u32 {
     guest::API_VERSION
 }
 
+#[no_mangle]
+pub extern "C" fn bannerin_axis_hz() -> u32 {
+    guest::axis_hz()
+}
+
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

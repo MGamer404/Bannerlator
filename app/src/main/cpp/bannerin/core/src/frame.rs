@@ -16,6 +16,13 @@
 //!    behind keeps the newest edges (parity preserved) and the dropped pairs are counted.
 //! 4. **Axis changes** otherwise. Axes are coalesced: the latest value is delivered, intermediate
 //!    positions may be skipped. Axis changes ride on the last frame of a replay.
+//!
+//! **Pacing.** With [`Cursor::next_frame_at`] a frame that carries only axis changes is emitted
+//! at most once per interval T: if one is due less than T after the last frame this cursor
+//! emitted, it is held ([`Due::At`] names when it becomes due) and later delivered with the
+//! latest values. Full-state and button frames are never held; they carry the current axes and
+//! restart the interval. (A guest HID stack that queues every report, Wine's among them, is fed
+//! at most 1/T stick-only reports per second instead of one per pad report.)
 
 use crate::abi::*;
 use crate::layout::{Snapshot, JOURNAL_LEN, J_BUTTON_MASK, J_GROUP, J_PRESS};
@@ -84,6 +91,11 @@ pub struct FrameStats {
     pub coalesced_taps: u64,
     /// Full-state frames forced by an inconsistent snapshot.
     pub resyncs: u64,
+    /// Axis-only frames that were held back by pacing before being delivered.
+    pub paced_frames: u64,
+    /// Publishes whose state reached the reader merged into a later frame instead of a frame of
+    /// their own (stick coalescing, with or without pacing).
+    pub merged_axis_publishes: u64,
 }
 
 impl FrameStats {
@@ -96,7 +108,21 @@ impl FrameStats {
         self.counter_frames += o.counter_frames;
         self.coalesced_taps += o.coalesced_taps;
         self.resyncs += o.resyncs;
+        self.paced_frames += o.paced_frames;
+        self.merged_axis_publishes += o.merged_axis_publishes;
     }
+}
+
+/// When a cursor's next frame is due.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Due {
+    /// Nothing new to deliver.
+    Nothing,
+    /// A frame is due now.
+    Now,
+    /// Only axis changes are pending and pacing holds them until this time (ns, the caller's
+    /// clock).
+    At(u64),
 }
 
 /// Source of journal entries (the mapped file, or nothing).
@@ -127,6 +153,13 @@ pub struct Cursor {
     pub buttons: u16,
     pub axes: [i32; AXES],
     plan: Option<Plan>,
+    /// When this cursor last emitted a frame (the caller's clock; pacing only).
+    last_emit: u64,
+    /// pub_seq of the snapshot the cursor last caught up with, and frames emitted since.
+    last_pub: u32,
+    frames_since: u32,
+    /// An axis-only frame was held by pacing since the axes were last current.
+    hold_seen: bool,
 }
 
 impl Default for Cursor {
@@ -145,6 +178,10 @@ impl Cursor {
             buttons: 0,
             axes: [0; AXES],
             plan: None,
+            last_emit: 0,
+            last_pub: 0,
+            frames_since: 0,
+            hold_seen: false,
         }
     }
 
@@ -183,8 +220,33 @@ impl Cursor {
         (0..AXES).any(|i| clamp_axis(i, s.axes[i]) != self.axes[i])
     }
 
-    /// Build the next frame into `f`. Returns false (and leaves `f` empty) if there is nothing
-    /// new to deliver.
+    fn axes_differ(&self, s: &Snapshot) -> bool {
+        (0..AXES).any(|i| clamp_axis(i, s.axes[i]) != self.axes[i])
+    }
+
+    /// Only axis changes separate this cursor from `s`.
+    fn axis_only(&self, s: &Snapshot) -> bool {
+        !(self.need_full || self.plan.is_some() || s.edges != self.edges || s.counts != self.counts)
+    }
+
+    /// When is the next frame for `s` due, at time `now`, with axis-only frames paced to one per
+    /// `interval` (0 = unpaced)? Consumes nothing.
+    pub fn due(&mut self, s: &Snapshot, now: u64, interval: u64) -> Due {
+        if !self.axis_only(s) {
+            return Due::Now;
+        }
+        if !self.axes_differ(s) {
+            return Due::Nothing;
+        }
+        if interval == 0 || now.wrapping_sub(self.last_emit) >= interval {
+            return Due::Now;
+        }
+        self.hold_seen = true;
+        Due::At(self.last_emit.wrapping_add(interval))
+    }
+
+    /// Unpaced: build the next frame into `f`. Returns false (and leaves `f` empty) if there is
+    /// nothing new to deliver.
     pub fn next_frame<J: Journal>(
         &mut self,
         s: &Snapshot,
@@ -192,15 +254,49 @@ impl Cursor {
         f: &mut Frame,
         st: &mut FrameStats,
     ) -> bool {
+        self.next_frame_at(s, j, f, st, 0, 0) == Due::Now
+    }
+
+    /// Paced: build the next frame into `f` if one is due at `now` (returns `Due::Now`);
+    /// otherwise leave `f` empty and return why not (`Nothing`, or `At(t)` for a held axis-only
+    /// frame).
+    pub fn next_frame_at<J: Journal>(
+        &mut self,
+        s: &Snapshot,
+        j: &J,
+        f: &mut Frame,
+        st: &mut FrameStats,
+        now: u64,
+        interval: u64,
+    ) -> Due {
         f.len = 0;
-        let made = self.build(s, j, f, st);
-        if made {
-            st.frames += 1;
-            st.events += f.len as u64;
-        } else {
-            f.len = 0;
+        match self.due(s, now, interval) {
+            Due::Now => {}
+            other => return other,
         }
-        made
+        let axis_only = self.axis_only(s);
+        if !self.build(s, j, f, st) {
+            f.len = 0;
+            return Due::Nothing;
+        }
+        st.frames += 1;
+        st.events += f.len as u64;
+        self.last_emit = now;
+        self.frames_since = self.frames_since.saturating_add(1);
+        let caught_up = self.axis_only(s) && !self.axes_differ(s);
+        if caught_up {
+            if axis_only && self.hold_seen {
+                st.paced_frames += 1;
+            }
+            self.hold_seen = false;
+            let covered = s.pub_seq.wrapping_sub(self.last_pub);
+            if covered < SANE {
+                st.merged_axis_publishes += covered.saturating_sub(self.frames_since) as u64;
+            }
+            self.last_pub = s.pub_seq;
+            self.frames_since = 0;
+        }
+        Due::Now
     }
 
     fn build<J: Journal>(&mut self, s: &Snapshot, j: &J, f: &mut Frame, st: &mut FrameStats) -> bool {
@@ -255,6 +351,9 @@ impl Cursor {
         self.buttons = buttons;
         self.need_full = false;
         self.plan = None;
+        // A rebase: nothing before this snapshot counts as merged.
+        self.last_pub = s.pub_seq;
+        self.frames_since = 0;
         st.full_frames += 1;
     }
 
@@ -683,5 +782,78 @@ mod tests {
         let frames = drain(&mut c, &m, &mut st);
         assert_eq!(frames.len(), 8);
         assert_eq!(st.resyncs, 0);
+    }
+
+    const T: u64 = 8_000_000;
+    const MS: u64 = 1_000_000;
+
+    fn step(c: &mut Cursor, m: &Model, st: &mut FrameStats, now: u64) -> (Due, Vec<Ev>) {
+        let mut f = Frame::new();
+        let d = c.next_frame_at(&m.snap, m, &mut f, st, now, T);
+        (d, f.events().to_vec())
+    }
+
+    #[test]
+    fn axis_only_frames_are_paced_buttons_and_full_state_are_not() {
+        let t0 = 100 * MS;
+        let mut m = Model::new();
+        let mut c = Cursor::new();
+        let mut st = FrameStats::default();
+        let (d, f) = step(&mut c, &m, &mut st, t0);
+        assert_eq!(d, Due::Now);
+        assert_eq!(f.len(), 20, "full state is never held");
+        // a stick change 1 ms after the last frame is held until t0 + T, readiness not set
+        m.set(0, [100, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(c.due(&m.snap, t0 + MS, T), Due::At(t0 + T));
+        assert_eq!(step(&mut c, &m, &mut st, t0 + MS).0, Due::At(t0 + T));
+        m.set(0, [200, 0, 0, 0, 0, 0, 0, 0]);
+        m.set(0, [300, 0, 0, 0, 0, 0, 0, 0]);
+        // at the deadline the latest value goes out, the intermediate ones merged
+        let (d, f) = step(&mut c, &m, &mut st, t0 + T);
+        assert_eq!(d, Due::Now);
+        assert_eq!(f, vec![Ev { kind: EV_ABS, code: ABS_X, value: 300 }, Ev { kind: EV_SYN, code: SYN_REPORT, value: 0 }]);
+        assert_eq!(st.paced_frames, 1);
+        assert_eq!(st.merged_axis_publishes, 2, "three publishes, one frame");
+        assert_eq!(step(&mut c, &m, &mut st, t0 + T).0, Due::Nothing);
+        // a stick change, then a button 1 ms later: the button frame goes out at once, carries
+        // the current stick value and restarts the interval
+        m.set(0, [400, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(c.due(&m.snap, t0 + T + MS, T), Due::At(t0 + 2 * T));
+        m.set(1 << B_A, [500, 0, 0, 0, 0, 0, 0, 0]);
+        let tb = t0 + T + 2 * MS;
+        let (d, f) = step(&mut c, &m, &mut st, tb);
+        assert_eq!(d, Due::Now);
+        assert_eq!(keys(&f), vec![(BTN_A, 1)]);
+        assert!(f.contains(&Ev { kind: EV_ABS, code: ABS_X, value: 500 }));
+        assert_eq!(st.paced_frames, 1, "a held stick change delivered by a button frame is not a paced frame");
+        m.set(1 << B_A, [600, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(c.due(&m.snap, tb + MS, T), Due::At(tb + T), "the button frame restarted the interval");
+        // a release is never held either
+        m.set(0, [600, 0, 0, 0, 0, 0, 0, 0]);
+        let (d, f) = step(&mut c, &m, &mut st, tb + MS);
+        assert_eq!(d, Due::Now);
+        assert_eq!(keys(&f), vec![(BTN_A, 0)]);
+        // the first change after a quiet period is not delayed
+        m.set(0, [700, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(step(&mut c, &m, &mut st, tb + 50 * MS).0, Due::Now);
+        // resync / re-attach is immediate even inside the interval
+        m.set(0, [800, 0, 0, 0, 0, 0, 0, 0]);
+        c.force_full();
+        let (d, f) = step(&mut c, &m, &mut st, tb + 50 * MS + 1);
+        assert_eq!((d, f.len()), (Due::Now, 20));
+    }
+
+    #[test]
+    fn zero_interval_is_unpaced() {
+        let mut m = Model::new();
+        let mut c = Cursor::new();
+        let mut st = FrameStats::default();
+        let mut f = Frame::new();
+        assert_eq!(c.next_frame_at(&m.snap, &m, &mut f, &mut st, 1, 0), Due::Now);
+        for v in 1..50 {
+            m.set(0, [v, 0, 0, 0, 0, 0, 0, 0]);
+            assert_eq!(c.next_frame_at(&m.snap, &m, &mut f, &mut st, 1 + v as u64, 0), Due::Now);
+        }
+        assert_eq!((st.paced_frames, st.merged_axis_publishes), (0, 0));
     }
 }

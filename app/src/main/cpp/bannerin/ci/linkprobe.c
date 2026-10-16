@@ -42,6 +42,7 @@ long bannerin_linkprobe_entry(int slot)
     acc += bannerin_get_stats(&gs, sizeof gs);
     acc += bannerin_slot_stats(slot, &ss, sizeof ss);
     acc += (long)bannerin_api_version();
+    acc += (long)bannerin_axis_hz();
     bannerin_set_logger(0);
     return acc;
 }

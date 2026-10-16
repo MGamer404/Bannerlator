@@ -23,6 +23,16 @@
  *   per-button order and the final state stay exact). Axes are coalesced to the latest value.
  *   Every handle is an independent consumer: readers never affect each other.
  *
+ * AXIS PACING (BANNERIN_AXIS_HZ, read once by bannerin_init)
+ *   A frame that carries only axis changes is emitted at most once per T = 1 / BANNERIN_AXIS_HZ
+ *   per handle. A stick change less than T after the handle's last frame is held (the fd does not
+ *   become readable) and delivered with the latest values when T has passed, so the rest position
+ *   after a release reaches the guest within T. Button frames and full-state frames are never
+ *   held: they go out at once, carry the current axis values and restart the interval. Unset =
+ *   125 Hz (T = 8 ms); 0 = unpaced (one frame per stick update); otherwise clamped to 30..1000.
+ *   This keeps a guest HID stack that queues every report (Wine's queues 32 per handle and drops
+ *   the oldest) from being fed a 500 Hz pad's reports faster than the game drains them.
+ *
  *   Canonical codes are delivered (triggers as ABS_BRAKE / ABS_GAS); any re-presentation (e.g. the
  *   Steam-virtual ABS_Z / ABS_RZ identity) is the evdev layer's job. Values are always inside the
  *   advertised ranges: sticks -32768..32767, triggers 0..255, hats -1..1.
@@ -33,7 +43,8 @@
  *   reports POLLHUP once the controller is unplugged. Plain poll/select/ppoll/epoll on it work
  *   with no interposer help, so mixed waits with other fds need no emulation; a helper thread per
  *   slot (lazily started, all signals blocked) keeps the flag current within about a millisecond
- *   of each publish, with a 4 ms fallback re-check. Do NOT read() it directly: deliver events with
+ *   of each publish, with a 4 ms fallback re-check, and also wakes at the moment a held (paced)
+ *   stick frame falls due, so a reader blocked in poll(-1) still gets it on time. Do NOT read() it directly: deliver events with
  *   bannerin_read(). A raw read of it (e.g. after exec without O_CLOEXEC) yields at most a single
  *   byte, never anything shaped like an input_event.
  *
@@ -111,6 +122,8 @@ struct bannerin_stats {
     uint64_t ready_signals;
     uint64_t snapshot_busy;
     uint64_t fork_rebinds;
+    uint64_t paced_frames;           /* axis-only frames held back by pacing, then delivered */
+    uint64_t merged_axis_publishes;  /* publishes merged into a later frame instead of their own */
 };
 
 /* Counters stored in a slot file: its writer's and the sum over all of its readers. */
@@ -124,19 +137,21 @@ struct bannerin_slot_stats {
     uint64_t reader_attaches;
     uint64_t reader_reattaches;
     uint64_t reader_taps;
-    uint64_t reader_coalesced;
+    uint64_t reader_coalesced;        /* taps dropped (one button > 64 taps behind) */
     uint64_t reader_resyncs;
     uint64_t reader_frames;
     uint64_t reader_events;
     uint64_t reader_removals;
     uint32_t writer_pid;
     uint32_t retired;
+    uint64_t reader_paced_frames;           /* zero in files written before format 1.1 */
+    uint64_t reader_merged_axis_publishes;
 };
 
 /* level 0 = info, 1 = warning; line is NUL-terminated, valid only during the call. */
 typedef void (*bannerin_log_fn)(int level, const char *line);
 
-/* Parse FAKE_EVDEV_MEMFD_PATHS (once; later calls return the cached result). Returns the mask of
+/* Parse FAKE_EVDEV_MEMFD_PATHS and BANNERIN_AXIS_HZ (once; later calls return the cached result). Returns the mask of
  * configured slots (bit N = slot N), 0 if none. Lazy and idempotent; the other functions call it
  * themselves, so calling it is optional. */
 int bannerin_init(void);
@@ -203,6 +218,9 @@ void bannerin_set_logger(bannerin_log_fn fn);
 
 /* BANNERIN_API_VERSION of the linked library. */
 uint32_t bannerin_api_version(void);
+
+/* The effective BANNERIN_AXIS_HZ (0 = unpaced). */
+uint32_t bannerin_axis_hz(void);
 
 #ifdef __cplusplus
 }

@@ -5,7 +5,7 @@
 //!          0x00  magic "BANNERIN" (u64), format major/minor, sizes, slot, instance id,
 //!                retired flag, writer pid, creation time
 //!          0x40  bell (futex word, bumped on every publish and on retirement), published index
-//!          0x80  writer statistics
+//!          0x80  writer statistics (+ two reader pacing counters at 0xa8, 0xb0 since minor 1)
 //!          0xc0  reader statistics (readers add to these)
 //! 0x100  4 state copies x 128 bytes (sequence word + 31 data words, see W_*)
 //! 0x300  journal: 256 x u64 button-edge entries
@@ -25,7 +25,8 @@ use crate::proto::{self, StateCopy};
 
 pub const MAGIC: u64 = u64::from_le_bytes(*b"BANNERIN");
 pub const FORMAT_MAJOR: u32 = 1;
-pub const FORMAT_MINOR: u32 = 0;
+/// Minor 1 added the pacing counters `r_paced_frames` / `r_merged_axis` (formerly padding).
+pub const FORMAT_MINOR: u32 = 1;
 
 pub const HEADER_SIZE: usize = 256;
 pub const COPY_WORDS: usize = 31;
@@ -84,7 +85,12 @@ pub struct Header {
     pub w_woken: AtomicU64,
     pub w_unplugs: AtomicU64,
     pub w_edges: AtomicU64,
-    pub _pad2: [AtomicU64; 3],
+    // Reader counters that did not fit the reader line (minor 1; zero in minor-0 files):
+    /// Axis-only frames readers held back by pacing before delivering them.
+    pub r_paced_frames: AtomicU64,
+    /// Publishes readers merged into a later frame instead of delivering one each.
+    pub r_merged_axis: AtomicU64,
+    pub _pad2: [AtomicU64; 1],
     // 0xc0: reader statistics, summed over every reader of this file
     pub r_attaches: AtomicU64,
     pub r_reattaches: AtomicU64,
@@ -111,6 +117,8 @@ const _: () = {
     assert!(offset_of!(Header, bell) == 64);
     assert!(offset_of!(Header, published) == 68);
     assert!(offset_of!(Header, w_publishes) == 128);
+    assert!(offset_of!(Header, r_paced_frames) == 168);
+    assert!(offset_of!(Header, r_merged_axis) == 176);
     assert!(offset_of!(Header, r_attaches) == 192);
     assert!(size_of::<CopyBlock>() == COPY_SIZE);
     assert!(offset_of!(Shared, copies) == COPIES_OFF);
