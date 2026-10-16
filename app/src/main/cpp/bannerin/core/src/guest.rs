@@ -77,6 +77,8 @@ const IDLE_AFTER_NS: u64 = 250_000_000;
 /// not needed for input; it only paces the writer-liveness / file-replacement check (a crashed
 /// writer cannot ring), which runs on those wakes.
 const IDLE_SLEEP_NS: u64 = 1_000_000_000;
+/// See deliver(): how late a ceiling-paced stick frame may be and still keep the grid.
+const CEILING_SLACK_NS: u64 = 1_000_000;
 /// Cadence of path / writer-liveness checks and of re-attach attempts for orphaned handles.
 const SLOW_NS: u64 = 500_000_000;
 const SNAP_ATTEMPTS: u32 = 64;
@@ -1074,7 +1076,7 @@ unsafe fn deliver(d: &mut Data, snap: &Snapshot, out: *mut u8, max: usize, fs: &
                     if credit_due(d, count, stall, min, now) != Due::Now {
                         break;
                     }
-                    (0, Some(count))
+                    (0, Some((count, min)))
                 }
                 Pace::Credit { .. } => (0, None),
             };
@@ -1087,9 +1089,18 @@ unsafe fn deliver(d: &mut Data, snap: &Snapshot, out: *mut u8, max: usize, fs: &
                 d.frame.len = 0;
                 break;
             }
-            if let Some(count) = credit {
+            if let Some((count, min)) = credit {
                 d.credit_count = count; // spent; a button frame never spends it
-                d.last_axis_emit = now;
+                // Keep the ceiling on its own grid: a frame sent a wake latency after its slot
+                // starts the next interval from the slot, not from now, or the cadence would drift
+                // behind the game's frames (at 60 fps under a 60/s ceiling it lost a credit every
+                // few dozen frames). Only within 1 ms, so the spacing never shrinks by more.
+                let slot = d.last_axis_emit.wrapping_add(min);
+                d.last_axis_emit = if d.last_axis_emit != 0 && now >= slot && now - slot < CEILING_SLACK_NS {
+                    slot
+                } else {
+                    now
+                };
                 if d.hold_since != 0 {
                     fs.paced_frames += 1;
                 }
