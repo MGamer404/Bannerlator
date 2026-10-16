@@ -1382,7 +1382,7 @@ fn axis_hz_zero_restores_unpaced_stick_frames() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// auto pacing: stick frames follow the game's frame rate (BANNERIN_AXIS_HZ unset)
+// auto pacing: frame credits, one stick-only frame per game frame (BANNERIN_AXIS_HZ unset)
 
 /// What an auto-paced reader saw (all CLOCK_MONOTONIC ns, shared by both processes).
 struct AutoRun {
@@ -1390,6 +1390,8 @@ struct AutoRun {
     sticks: Vec<u64>,
     edges: Vec<(u64, i32)>,
     sent_edges: Vec<(u64, i32)>,
+    frames: Vec<u64>,
+    first_publish: u64,
     rest_sent: u64,
     rest_seen: u64,
     stats: StatsView,
@@ -1399,29 +1401,49 @@ struct AutoRun {
 const MS_NS: u64 = 1_000_000;
 
 impl AutoRun {
+    fn window(&self, from_ms: u64, to_ms: u64) -> (u64, u64) {
+        (self.start + from_ms * MS_NS, self.start + to_ms * MS_NS)
+    }
     /// Stick-only frames per second that arrived in [start + from_ms, start + to_ms).
     fn rate(&self, from_ms: u64, to_ms: u64) -> f64 {
-        let (a, b) = (self.start + from_ms * MS_NS, self.start + to_ms * MS_NS);
+        let (a, b) = self.window(from_ms, to_ms);
         let n = self.sticks.iter().filter(|t| **t >= a && **t < b).count();
         n as f64 * 1000.0 / (to_ms - from_ms) as f64
     }
+    fn sticks_in(&self, from_ms: u64, to_ms: u64) -> usize {
+        let (a, b) = self.window(from_ms, to_ms);
+        self.sticks.iter().filter(|t| **t >= a && **t < b).count()
+    }
+    fn frames_in(&self, from_ms: u64, to_ms: u64) -> usize {
+        let (a, b) = self.window(from_ms, to_ms);
+        self.frames.iter().filter(|t| **t >= a && **t < b).count()
+    }
     /// Smallest gap between consecutive stick frames inside the window.
     fn min_gap_ms(&self, from_ms: u64, to_ms: u64) -> f64 {
-        let (a, b) = (self.start + from_ms * MS_NS, self.start + to_ms * MS_NS);
+        let (a, b) = self.window(from_ms, to_ms);
         let w: Vec<u64> = self.sticks.iter().copied().filter(|t| *t >= a && *t < b).collect();
         w.windows(2).map(|p| (p[1] - p[0]) as f64 / 1e6).fold(f64::MAX, f64::min)
     }
 }
 
-/// Writer process: the game "presents" at each phase's fps (0 = no frames) through the real frame
-/// feed (`writer::game_frame`) while the pad publishes stick motion at 500 Hz, with a tap of A
-/// every 100 ms if `taps`; then the rest position. Reader process (auto mode): records arrivals,
-/// then runs `check` on them.
-fn auto_run<C: FnOnce(&AutoRun) -> Result<(), String>>(tag: &'static str, phases: &'static [(u32, u64)], taps: bool, check: C) {
+/// One auto-pacing scenario: the game "presents" at each phase's fps (0 = frozen / no feed)
+/// through the real frame feed (`writer::game_frame`); the pad publishes stick motion at 500 Hz
+/// during `moving` (ms from the start), with a tap of A every 100 ms if `taps`; then the rest
+/// position (at `rest_ms`, or as the last publish).
+struct Script {
+    phases: &'static [(u32, u64)],
+    moving: (u64, u64),
+    taps: bool,
+    rest_ms: Option<u64>,
+}
+
+/// Writer process plays `script`; reader process (auto mode) records arrivals, then runs `check`.
+fn auto_run<C: FnOnce(&AutoRun) -> Result<(), String>>(tag: &'static str, script: Script, check: C) {
     let sc = Scene::new(tag);
     let shm = Shm::new();
     // shm: 0 writer ready, 1 reader ready, 2 writer done, 3 start, 4 rest sent, 5 reader done,
-    //      6 edges sent, 100 + 2k / 101 + 2k edge k (time, value)
+    //      6 edges sent, 7 first stick publish, 8 frames fed, 100 + 2k / 101 + 2k edge k,
+    //      290 + k game frame k
     let wpid = spawn("auto-writer", || {
         let mut w = sc.writer(0);
         w.open();
@@ -1429,9 +1451,11 @@ fn auto_run<C: FnOnce(&AutoRun) -> Result<(), String>>(tag: &'static str, phases
         shm.wait(1, 1, 30)?;
         let start = Instant::now();
         shm.set(3, sys::mono_ns());
-        let total_ms: u64 = phases.iter().map(|p| p.1).sum();
+        let phases = script.phases;
+        let fshm = Shm(shm.0);
         let feeder = std::thread::spawn(move || {
             let mut t0 = start;
+            let mut k = 0usize;
             for &(fps, ms) in phases {
                 let end = t0 + Duration::from_millis(ms);
                 if fps > 0 {
@@ -1439,7 +1463,13 @@ fn auto_run<C: FnOnce(&AutoRun) -> Result<(), String>>(tag: &'static str, phases
                     let mut next = t0;
                     while next < end {
                         sleep_until(next);
-                        bannerin_core::writer::game_frame(sys::mono_ns());
+                        let now = sys::mono_ns();
+                        bannerin_core::writer::game_frame(now);
+                        if k < 220 {
+                            fshm.set(290 + k, now);
+                        }
+                        k += 1;
+                        fshm.set(8, k.min(220) as u64);
                         next += step;
                     }
                 }
@@ -1447,31 +1477,39 @@ fn auto_run<C: FnOnce(&AutoRun) -> Result<(), String>>(tag: &'static str, phases
                 t0 = end;
             }
         });
-        let mut down = false;
-        let mut nedges = 0usize;
         let edge = |v: bool, nedges: &mut usize| {
-            if *nedges < 200 {
+            if *nedges < 90 {
                 shm.set(100 + 2 * *nedges, sys::mono_ns());
                 shm.set(101 + 2 * *nedges, v as u64);
                 *nedges += 1;
                 shm.set(6, *nedges as u64);
             }
         };
-        let n = (total_ms / 2) as u32;
-        for i in 0..n {
+        let (from, to) = script.moving;
+        let mut down = false;
+        let mut nedges = 0usize;
+        let mut i = (from / 2) as u32;
+        while (i as u64) * 2 < to {
             sleep_until(start + Duration::from_micros(2000 * i as u64));
-            if taps {
+            if script.taps {
                 let want = i % 50 < 10;
                 if want != down {
                     edge(want, &mut nedges);
                     down = want;
                 }
             }
+            if shm.get(7) == 0 {
+                shm.set(7, sys::mono_ns());
+            }
             w.set_pad(pad_axes(if down { 1 << B_A } else { 0 }, stick(i)));
+            i += 1;
         }
         if down {
             edge(false, &mut nedges);
-            w.set_pad(pad_axes(0, stick(n)));
+            w.set_pad(pad_axes(0, stick(i)));
+        }
+        if let Some(ms) = script.rest_ms {
+            sleep_until(start + Duration::from_millis(ms));
         }
         shm.set(4, sys::mono_ns());
         w.set_pad(pad(0)); // let go
@@ -1482,8 +1520,8 @@ fn auto_run<C: FnOnce(&AutoRun) -> Result<(), String>>(tag: &'static str, phases
     });
     let rpid = spawn("auto-reader", || {
         shm.wait(0, 1, 30)?;
-        sc.enter(); // BANNERIN_AXIS_HZ unset: auto
-        ensure!(bannerin_axis_auto() == 1, "auto mode is the default");
+        sc.enter(); // BANNERIN_AXIS_HZ unset: frame credits
+        ensure!(bannerin_axis_auto() == 1, "frame credits are the default");
         let mut r = Rd::attach(0, sys::O_NONBLOCK)?;
         ensure!(is_full(&r.frame(1000)?), "full first");
         shm.set(1, 1);
@@ -1492,6 +1530,8 @@ fn auto_run<C: FnOnce(&AutoRun) -> Result<(), String>>(tag: &'static str, phases
             sticks: Vec::new(),
             edges: Vec::new(),
             sent_edges: Vec::new(),
+            frames: Vec::new(),
+            first_publish: 0,
             rest_sent: 0,
             rest_seen: 0,
             stats: StatsView::default(),
@@ -1522,12 +1562,16 @@ fn auto_run<C: FnOnce(&AutoRun) -> Result<(), String>>(tag: &'static str, phases
             }
         }
         unsafe { bannerin_slot_stats(0, &mut run.slot, core::mem::size_of::<SlotStatsView>()) };
+        run.stats = stats();
         shm.set(5, 1);
         run.start = shm.get(3);
+        run.first_publish = shm.get(7);
         run.rest_sent = shm.get(4);
-        run.stats = stats();
         for k in 0..shm.get(6) as usize {
             run.sent_edges.push((shm.get(100 + 2 * k), shm.get(101 + 2 * k) as i32));
+        }
+        for k in 0..shm.get(8) as usize {
+            run.frames.push(shm.get(290 + k));
         }
         check(&run)
     });
@@ -1535,88 +1579,159 @@ fn auto_run<C: FnOnce(&AutoRun) -> Result<(), String>>(tag: &'static str, phases
 }
 
 #[test]
-fn auto_pacing_follows_a_60_fps_game() {
-    auto_run("auto60", &[(60, 2200)], false, |r| {
+fn credits_send_one_stick_frame_per_game_frame_at_60_fps() {
+    let s = Script { phases: &[(60, 2200)], moving: (0, 2200), taps: false, rest_ms: None };
+    auto_run("cred60", s, |r| {
         let rate = r.rate(400, 2200);
+        let (sticks, frames) = (r.sticks_in(400, 2200), r.frames_in(400, 2200));
         let rest = (r.rest_seen - r.rest_sent) as f64 / 1e6;
         say(&format!(
-            "[auto60] {:.1} stick frames/s (target 54), reader rate {} Hz, feed interval {:.2} ms, rest after {:.1} ms\n",
-            rate, r.stats.axis_hz, r.slot.frame_interval_ns as f64 / 1e6, rest
+            "[cred60] {:.1} stick frames/s; {} stick frames for {} game frames; mode {} at {} Hz; frame count {}, last interval {:.2} ms; rest after {:.1} ms\n",
+            rate, sticks, frames, r.slot.reader_axis_mode, r.stats.axis_hz, r.slot.frame_count,
+            r.slot.frame_interval_ns as f64 / 1e6, rest
         ));
-        ensure!((47.0..=60.0).contains(&rate), "{:.1}/s at 60 fps, want about 54", rate);
-        ensure!((50..=56).contains(&r.stats.axis_hz), "derived {} Hz", r.stats.axis_hz);
-        ensure!((50..=56).contains(&r.slot.reader_axis_hz), "file says {} Hz", r.slot.reader_axis_hz);
-        ensure!(rest <= 25.0, "rest position {:.1} ms after the last publish (T is about 19 ms)", rest);
-        ensure!(r.stats.auto_fallbacks == 0, "fell back {} times with a live feed", r.stats.auto_fallbacks);
+        ensure!(sticks <= frames + 1, "{} stick frames for {} game frames", sticks, frames);
+        ensure!((52.0..=62.0).contains(&rate), "{:.1}/s at 60 fps, want about 60", rate);
+        ensure!(r.stats.axis_mode == 1 && r.slot.reader_axis_mode == 1, "mode {} / {}", r.stats.axis_mode, r.slot.reader_axis_mode);
+        ensure!(r.slot.frame_count >= 100, "frame count {}", r.slot.frame_count);
+        ensure!(rest <= 25.0, "rest position {:.1} ms after the last publish", rest);
         Ok(())
     });
 }
 
 #[test]
-fn auto_pacing_follows_a_120_fps_game() {
-    auto_run("auto120", &[(120, 2200)], false, |r| {
-        let rate = r.rate(400, 2200);
-        say(&format!("[auto120] {:.1} stick frames/s (target 108), reader rate {} Hz\n", rate, r.stats.axis_hz));
-        ensure!((95.0..=120.0).contains(&rate), "{:.1}/s at 120 fps, want about 108", rate);
-        ensure!((100..=112).contains(&r.stats.axis_hz), "derived {} Hz", r.stats.axis_hz);
+fn credits_have_no_ramp_after_an_idle_app_speeds_up() {
+    // The app idles at 5 fps (it redraws on change), then the stick moves and it speeds to 100 fps.
+    let s = Script { phases: &[(5, 1000), (100, 1200)], moving: (1000, 2200), taps: false, rest_ms: None };
+    auto_run("credramp", s, |r| {
+        let first = r.sticks.iter().copied().find(|t| *t >= r.first_publish).unwrap_or(0);
+        let lat = first.saturating_sub(r.first_publish) as f64 / 1e6;
+        let second = r.sticks.iter().copied().find(|t| *t > first).unwrap_or(0);
+        let gap2 = second.saturating_sub(first) as f64 / 1e6;
+        let early = r.rate(1050, 1250);
+        let later = r.rate(1050, 2200);
+        say(&format!("[credramp] first stick frame {:.3} ms after the first publish, next {:.1} ms later; first 200 ms {:.1}/s, then {:.1}/s (game 100 fps)\n", lat, gap2, early, later));
+        ensure!(first != 0 && lat <= 1.0, "first stick frame {:.3} ms after the first publish", lat);
+        ensure!(gap2 <= 12.0, "the second stick frame came {:.1} ms later (a game frame is 10 ms)", gap2);
+        ensure!(early >= 85.0, "a ramp: {:.1}/s in the first 200 ms", early);
+        ensure!((85.0..=102.0).contains(&later), "{:.1}/s at 100 fps", later);
         Ok(())
     });
 }
 
 #[test]
-fn auto_pacing_takes_a_frame_rate_dip_within_three_frames() {
-    auto_run("autodip", &[(60, 1000), (30, 1400)], false, |r| {
-        let before = r.rate(400, 1000);
-        // three frames at 30 fps = 100 ms after the dip
-        let after = r.rate(1100, 2400);
-        let gap = r.min_gap_ms(1100, 2400);
-        say(&format!("[autodip] 60 fps: {:.1}/s; from 3 frames after the dip to 30 fps: {:.1}/s (target 27), min gap {:.1} ms\n", before, after, gap));
-        ensure!(before >= 45.0, "before the dip {:.1}/s", before);
-        ensure!(after <= 30.0 && after >= 20.0, "after the dip {:.1}/s, want about 27", after);
-        ensure!(gap >= 30.0, "stick frames {:.1} ms apart after the dip (T is about 37 ms)", gap);
+fn credits_follow_a_dip_to_30_fps_immediately() {
+    let s = Script { phases: &[(100, 1000), (30, 1200)], moving: (0, 2200), taps: false, rest_ms: None };
+    auto_run("creddip", s, |r| {
+        let before = r.rate(300, 1000);
+        let after = r.rate(1005, 2200);
+        let gap = r.min_gap_ms(1005, 2200);
+        let (sticks, frames) = (r.sticks_in(1005, 2200), r.frames_in(1005, 2200));
+        say(&format!("[creddip] 100 fps: {:.1}/s; after the dip to 30 fps: {:.1}/s, min gap {:.1} ms, {} stick frames for {} game frames\n", before, after, gap, sticks, frames));
+        ensure!(before >= 85.0, "before the dip {:.1}/s", before);
+        ensure!(sticks <= frames + 1, "{} stick frames for {} game frames", sticks, frames);
+        ensure!((26.0..=32.0).contains(&after), "after the dip {:.1}/s, want about 30", after);
+        ensure!(gap >= 28.0, "stick frames {:.1} ms apart after the dip (a game frame is 33 ms)", gap);
         Ok(())
     });
 }
 
 #[test]
-fn auto_pacing_recovers_within_half_a_second() {
-    auto_run("autorec", &[(30, 1200), (60, 1500)], false, |r| {
-        let low = r.rate(400, 1200);
-        let recovered = r.rate(1700, 2700);
-        say(&format!("[autorec] 30 fps: {:.1}/s; from 0.5 s after recovery to 60 fps: {:.1}/s (target 54)\n", low, recovered));
-        ensure!(low <= 30.0, "at 30 fps {:.1}/s", low);
-        ensure!((46.0..=60.0).contains(&recovered), "0.5 s after recovering {:.1}/s, want about 54", recovered);
+fn credits_still_deliver_to_a_frozen_game_within_55_ms() {
+    // The game stops presenting at 1 s (frozen, not yet stale) while the stick is let go.
+    let s = Script { phases: &[(60, 1000), (0, 700)], moving: (0, 1000), taps: false, rest_ms: Some(1000) };
+    auto_run("credfrozen", s, |r| {
+        let rest = (r.rest_seen - r.rest_sent) as f64 / 1e6;
+        say(&format!("[credfrozen] game frozen: rest position delivered {:.1} ms after the last publish, mode {}\n", rest, r.stats.axis_mode));
+        ensure!(rest <= 55.0, "a held change waited {:.1} ms for a frozen game", rest);
         Ok(())
     });
 }
 
 #[test]
-fn auto_pacing_falls_back_to_60_hz_without_a_fresh_feed() {
-    auto_run("autostale", &[(120, 800), (0, 1600)], false, |r| {
+fn credits_fall_back_to_60_hz_without_a_fresh_feed() {
+    let s = Script { phases: &[(120, 800), (0, 1600)], moving: (0, 2400), taps: false, rest_ms: None };
+    auto_run("credstale", s, |r| {
         let fed = r.rate(300, 800);
-        // the feed goes stale 250 ms after the last frame
         let stale = r.rate(1150, 2400);
-        say(&format!("[autostale] fed 120 fps: {:.1}/s; feed stopped: {:.1}/s (target 60); fallbacks {}\n", fed, stale, r.stats.auto_fallbacks));
-        ensure!(fed >= 90.0, "with the feed {:.1}/s", fed);
+        say(&format!("[credstale] fed 120 fps: {:.1}/s; feed stopped: {:.1}/s (want 60); fallbacks {}, mode {}\n", fed, stale, r.stats.auto_fallbacks, r.stats.axis_mode));
+        ensure!(fed >= 100.0, "with the feed {:.1}/s", fed);
         ensure!((54.0..=66.0).contains(&stale), "without a fresh feed {:.1}/s, want 60", stale);
-        ensure!(r.stats.auto_fallbacks >= 1, "no auto->fallback transition counted");
-        ensure!(r.slot.reader_auto_fallbacks >= 1, "file counts {} fallbacks", r.slot.reader_auto_fallbacks);
+        ensure!(r.stats.auto_fallbacks >= 1 && r.slot.reader_auto_fallbacks >= 1, "fallbacks {} / {}", r.stats.auto_fallbacks, r.slot.reader_auto_fallbacks);
+        ensure!(r.stats.axis_mode == 2 && r.slot.reader_axis_mode == 2, "mode {} / {}", r.stats.axis_mode, r.slot.reader_axis_mode);
         Ok(())
     });
 }
 
 #[test]
-fn auto_pacing_keeps_button_edges_immediate() {
-    auto_run("autotaps", &[(30, 1000), (0, 600), (120, 600)], true, |r| {
+fn credits_keep_button_edges_immediate_and_in_order() {
+    let s = Script { phases: &[(30, 1000), (0, 600), (120, 600)], moving: (0, 2200), taps: true, rest_ms: None };
+    auto_run("credtaps", s, |r| {
         ensure!(!r.sent_edges.is_empty(), "no taps sent");
         ensure!(r.edges.len() == r.sent_edges.len(), "{} edges sent, {} received", r.sent_edges.len(), r.edges.len());
         ensure!(r.edges.iter().map(|e| e.1).eq(r.sent_edges.iter().map(|e| e.1)), "edges out of order");
         let mut lat: Vec<u64> = r.edges.iter().zip(&r.sent_edges).map(|(g, s)| g.0.saturating_sub(s.0)).collect();
         let worst = *lat.iter().max().unwrap();
         let p95 = pct(&mut lat, 95);
-        say(&format!("[autotaps] {} edges at 30 fps / no feed / 120 fps: p95 {} us max {} us\n", r.edges.len(), p95 / 1000, worst / 1000));
+        say(&format!("[credtaps] {} edges at 30 fps / no feed / 120 fps: p95 {} us max {} us\n", r.edges.len(), p95 / 1000, worst / 1000));
         ensure!(p95 <= 1_000_000, "button edge p95 {} us", p95 / 1000);
         ensure!(worst <= 10_000_000, "button edge worst {} us", worst / 1000);
         Ok(())
     });
+}
+
+#[test]
+fn the_frame_feed_rings_only_while_a_reader_waits_for_a_frame() {
+    let sc = Scene::new("credwake");
+    let shm = Shm::new();
+    // shm: 0 writer ready, 1 reader ready, 2 wakes after the idle second, 3 wakes after the
+    //      moving second, 4 frames, 5 reader done
+    let wpid = spawn("wake-writer", || {
+        let mut w = sc.writer(0);
+        w.open();
+        shm.set(0, 1);
+        shm.wait(1, 1, 30)?;
+        let start = Instant::now();
+        let feeder = std::thread::spawn(move || {
+            for k in 0..200u64 {
+                sleep_until(start + Duration::from_millis(10 * k)); // 100 fps for 2 s
+                bannerin_core::writer::game_frame(sys::mono_ns());
+            }
+        });
+        // first second: the game runs, the pad is idle
+        sleep_until(start + Duration::from_millis(1000));
+        shm.set(2, bannerin_core::writer::frame_wakes() + 1);
+        // second second: the stick moves at 500 Hz, so readers wait for frame credits
+        for i in 0..500u32 {
+            sleep_until(start + Duration::from_millis(1000) + Duration::from_micros(2000 * i as u64));
+            w.set_pad(pad_axes(0, stick(i)));
+        }
+        feeder.join().map_err(|_| "feeder panicked".to_string())?;
+        shm.set(3, bannerin_core::writer::frame_wakes() + 1);
+        shm.set(4, w.stat(bannerin_core::writer::STAT_GAME_FRAMES));
+        w.set_pad(pad(0));
+        shm.wait(5, 1, 30)?;
+        Ok(())
+    });
+    let rpid = spawn("wake-reader", || {
+        shm.wait(0, 1, 30)?;
+        sc.enter();
+        let mut r = Rd::attach(0, sys::O_NONBLOCK)?;
+        r.frame(1000)?;
+        shm.set(1, 1);
+        let end = Instant::now() + Duration::from_secs(30);
+        while shm.get(3) == 0 {
+            ensure!(Instant::now() < end, "writer never finished");
+            r.poll(20);
+            let _ = r.drain()?;
+        }
+        shm.set(5, 1);
+        let (idle, moving, frames) = (shm.get(2) - 1, shm.get(3) - 1, shm.get(4));
+        say(&format!("[credwake] {} game frames; frame wakes: {} while the pad was idle, {} more while the stick moved\n", frames, idle, moving - idle));
+        ensure!(idle == 0, "{} futex wakes for frames while no reader waited", idle);
+        ensure!(moving > idle, "no frame ever woke a waiting reader");
+        ensure!(moving - idle <= 100, "{} wakes for 100 frames", moving - idle);
+        Ok(())
+    });
+    assert_eq!((wait_pid(wpid), wait_pid(rpid)), (0, 0));
 }

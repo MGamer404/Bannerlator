@@ -123,6 +123,10 @@ pub enum Due {
     /// Only axis changes are pending and pacing holds them until this time (ns, the caller's
     /// clock).
     At(u64),
+    /// Only axis changes are pending and they wait for the game's next frame, or this time (the
+    /// stall bound), whichever comes first. Produced by the guest's frame-credit pacing, never by
+    /// the cursor itself.
+    Frame(u64),
 }
 
 /// Source of journal entries (the mapped file, or nothing).
@@ -227,6 +231,11 @@ impl Cursor {
     /// Only axis changes separate this cursor from `s`.
     fn axis_only(&self, s: &Snapshot) -> bool {
         !(self.need_full || self.plan.is_some() || s.edges != self.edges || s.counts != self.counts)
+    }
+
+    /// Only axis changes separate this cursor from `s` (the next frame would be axis-only).
+    pub fn only_axes_pending(&self, s: &Snapshot) -> bool {
+        self.axis_only(s) && self.axes_differ(s)
     }
 
     /// When is the next frame for `s` due, at time `now`, with axis-only frames paced to one per

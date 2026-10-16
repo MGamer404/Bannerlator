@@ -28,8 +28,20 @@ pub const MAGIC: u64 = u64::from_le_bytes(*b"BANNERIN");
 pub const FORMAT_MAJOR: u32 = 1;
 /// Minor 1 added the pacing counters `r_paced_frames` / `r_merged_axis` (formerly padding);
 /// minor 2 the game frame feed (`frame_interval_ns`, `frame_time_ns`) and `r_axis_hz` /
-/// `r_auto_fallbacks`. All zero in older files, which readers treat as "no frame feed".
-pub const FORMAT_MINOR: u32 = 2;
+/// `r_auto_fallbacks`; minor 3 the frame credits (`frame_count`, `frame_waiters`, `r_axis_mode`).
+/// All zero in older files, which readers treat as "no frame feed".
+pub const FORMAT_MINOR: u32 = 3;
+
+/// `r_axis_mode` values: how a reader last paced stick-only frames.
+pub const AXIS_MODE_UNKNOWN: u32 = 0;
+/// One stick-only frame per new game frame (auto, fresh feed).
+pub const AXIS_MODE_CREDITS: u32 = 1;
+/// Auto, but no fresh frame feed: a fixed 60 Hz.
+pub const AXIS_MODE_FALLBACK: u32 = 2;
+/// BANNERIN_AXIS_HZ = N.
+pub const AXIS_MODE_FIXED: u32 = 3;
+/// BANNERIN_AXIS_HZ = 0.
+pub const AXIS_MODE_UNPACED: u32 = 4;
 
 pub const HEADER_SIZE: usize = 256;
 pub const COPY_WORDS: usize = 31;
@@ -81,13 +93,20 @@ pub struct Header {
     // 0x40: the wake line
     pub bell: AtomicU32,
     pub published: AtomicU32,
-    /// The game's estimated frame interval (ns, 0 = unknown or stale), written by the app's frame
-    /// feed (minor 2), and when the game last presented a frame (CLOCK_MONOTONIC ns).
+    /// The game's last observed frame interval (ns, 0 = unknown, or a gap over 1 s), written by
+    /// the app's frame feed (minor 2), and when the game last presented a frame (CLOCK_MONOTONIC).
     pub frame_interval_ns: AtomicU64,
     pub frame_time_ns: AtomicU64,
-    /// The stick-frame rate a reader last derived from them (minor 2).
+    /// The stick-frame rate a reader last paced to (Hz; in credit mode the game's frame rate).
     pub r_axis_hz: AtomicU32,
-    pub _pad1: [AtomicU32; 9],
+    /// How that reader paced (AXIS_MODE_*, minor 3).
+    pub r_axis_mode: AtomicU32,
+    /// Game frames presented so far (+1 per real game frame; the stick-frame credits, minor 3).
+    pub frame_count: AtomicU64,
+    /// Reader wake threads currently waiting for the next game frame: the feed wakes the bell for
+    /// a frame only while this is non-zero (minor 3).
+    pub frame_waiters: AtomicU32,
+    pub _pad1: [AtomicU32; 5],
     // 0x80: writer statistics
     pub w_publishes: AtomicU64,
     pub w_wake_calls: AtomicU64,
@@ -129,6 +148,9 @@ const _: () = {
     assert!(offset_of!(Header, frame_interval_ns) == 72);
     assert!(offset_of!(Header, frame_time_ns) == 80);
     assert!(offset_of!(Header, r_axis_hz) == 88);
+    assert!(offset_of!(Header, r_axis_mode) == 92);
+    assert!(offset_of!(Header, frame_count) == 96);
+    assert!(offset_of!(Header, frame_waiters) == 104);
     assert!(offset_of!(Header, r_auto_fallbacks) == 184);
     assert!(offset_of!(Header, w_publishes) == 128);
     assert!(offset_of!(Header, r_paced_frames) == 168);

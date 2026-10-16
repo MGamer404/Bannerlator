@@ -31,11 +31,15 @@
  *   go out at once, carry the current axis values and restart the interval. This keeps a guest HID
  *   stack that queues every report (Wine's queues 32 per handle and drops the oldest, and a game
  *   may take one per rendered frame) from being fed reports faster than the game drains them.
- *     unset or "auto"  T follows the game: the app reports every frame the game presents and
- *                      writes the estimated frame interval into the slot file; stick frames go at
- *                      90 % of the game's frame rate, 20..240 Hz, and at a fixed 60 Hz while no
- *                      fresh frame (< 250 ms old) has been reported (menus, client UI, desktop).
- *     N (30..1000)     a fixed N Hz.
+ *     unset or "auto"  frame credits: the app counts every frame the game itself presents (never
+ *                      generated or HUD frames) into the slot file, and a handle may send ONE
+ *                      stick-only frame per new game frame. Credits do not accumulate past one, so
+ *                      the first movement after an idle spell goes out at once; a change waiting
+ *                      for a credit is woken by the next frame (the app rings the bell only while a
+ *                      wake thread waits), or delivered anyway after max(2 frame intervals, 50 ms)
+ *                      if the game stalls. Without a fresh frame (< 250 ms old: menus, a GDI app,
+ *                      a client UI, an older app) a fixed 60 Hz applies.
+ *     N (30..1000)     a fixed N Hz (T = 1/N between stick-only frames).
  *     0                unpaced: one frame per stick update.
  *
  *   Canonical codes are delivered (triggers as ABS_BRAKE / ABS_GAS); any re-presentation (e.g. the
@@ -97,6 +101,12 @@ extern "C" {
 #define BANNERIN_AXIS_MIN { -32768, -32768, -32768, -32768, 0, 0, -1, -1 }
 #define BANNERIN_AXIS_MAX { 32767, 32767, 32767, 32767, 255, 255, 1, 1 }
 
+/* How a reader last paced stick-only frames (bannerin_stats.axis_mode, slot file r_axis_mode). */
+#define BANNERIN_AXIS_MODE_CREDITS  1   /* one per new game frame (auto, fresh frame feed) */
+#define BANNERIN_AXIS_MODE_FALLBACK 2   /* auto without a fresh frame feed: fixed 60 Hz */
+#define BANNERIN_AXIS_MODE_FIXED    3   /* BANNERIN_AXIS_HZ = N */
+#define BANNERIN_AXIS_MODE_UNPACED  4   /* BANNERIN_AXIS_HZ = 0 */
+
 /* Opaque, never 0. A stale handle (after detach) is always refused with -EBADF. */
 typedef uint32_t bannerin_handle;
 
@@ -129,8 +139,9 @@ struct bannerin_stats {
     uint64_t fork_rebinds;
     uint64_t paced_frames;           /* axis-only frames held back by pacing, then delivered */
     uint64_t merged_axis_publishes;  /* publishes merged into a later frame instead of their own */
-    uint64_t axis_hz;                /* auto mode: the stick-frame rate last derived (0 = none yet) */
+    uint64_t axis_hz;                /* the rate last paced to (credits: the game's frame rate) */
     uint64_t auto_fallbacks;         /* auto mode: times the frame feed went stale (fixed 60 Hz) */
+    uint64_t axis_mode;              /* BANNERIN_AXIS_MODE_* last in force (0 = none yet) */
 };
 
 /* Counters stored in a slot file: its writer's and the sum over all of its readers. */
@@ -153,10 +164,13 @@ struct bannerin_slot_stats {
     uint32_t retired;
     uint64_t reader_paced_frames;           /* zero in files written before format 1.1 */
     uint64_t reader_merged_axis_publishes;
-    uint64_t reader_axis_hz;                /* format 1.2: rate a reader last derived (auto mode) */
+    uint64_t reader_axis_hz;                /* format 1.2: rate a reader last paced to */
     uint64_t reader_auto_fallbacks;
-    uint64_t frame_interval_ns;             /* the app's game frame interval estimate (0 = none) */
-    uint64_t frame_time_ns;                 /* CLOCK_MONOTONIC of the game's last reported frame */
+    uint64_t frame_interval_ns;             /* the game's last observed frame interval (0 = none) */
+    uint64_t frame_time_ns;                 /* CLOCK_MONOTONIC of the game's last frame */
+    uint64_t frame_count;                   /* format 1.3: game frames counted (the credits) */
+    uint64_t reader_axis_mode;              /* BANNERIN_AXIS_MODE_* a reader last paced in */
+    uint64_t frame_waiters;                 /* wake threads waiting for the next game frame */
 };
 
 /* level 0 = info, 1 = warning; line is NUL-terminated, valid only during the call. */
@@ -231,10 +245,11 @@ void bannerin_set_logger(bannerin_log_fn fn);
 uint32_t bannerin_api_version(void);
 
 /* The stick-frame rate in force: the fixed BANNERIN_AXIS_HZ, 0 when unpaced, or in auto mode the
- * rate a reader in this process last derived from the game's frame rate (60 before any). */
+ * rate a reader in this process last paced to (the game's frame rate under credits; 60 before any
+ * or without a fresh frame feed). */
 uint32_t bannerin_axis_hz(void);
 
-/* 1 if stick frames follow the game's frame rate (BANNERIN_AXIS_HZ unset or "auto"), else 0. */
+/* 1 if stick frames are paced by game frame credits (BANNERIN_AXIS_HZ unset or "auto"), else 0. */
 int bannerin_axis_auto(void);
 
 #ifdef __cplusplus

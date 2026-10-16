@@ -31,12 +31,12 @@
 use core::cell::UnsafeCell;
 use core::ffi::{c_char, c_int, c_void};
 use core::ptr;
-use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
+use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
 use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize};
 
 use crate::abi::*;
 use crate::frame::{Cursor, Due, Ev, Frame, FrameStats, Journal, NoJournal};
-use crate::layout::{Shared, Snapshot, FILE_SIZE};
+use crate::layout::{self, Shared, Snapshot, FILE_SIZE};
 use crate::msg::Msg;
 use crate::sys;
 
@@ -49,16 +49,15 @@ pub const ENV_AXIS_HZ: &[u8] = b"BANNERIN_AXIS_HZ\0";
 pub const AXIS_AUTO: u32 = u32::MAX;
 pub const AXIS_HZ_MIN: u32 = 30;
 pub const AXIS_HZ_MAX: u32 = 1000;
-/// Auto pacing: stick frames at this share of the game's frame rate...
-pub const AUTO_HEADROOM_PCT: u64 = 90;
-/// ...within these bounds...
-pub const AUTO_MIN_HZ: u64 = 20;
-pub const AUTO_MAX_HZ: u64 = 240;
-/// ...and at this fixed rate while there is no fresh frame feed (menus, a client UI, a session
-/// without the feed, an older app).
+/// Auto pacing sends one stick-only frame per new game frame (a frame credit), and at this fixed
+/// rate while there is no fresh frame feed (menus, a client UI, a GDI app, a session without the
+/// feed, an older app).
 pub const AUTO_FALLBACK_HZ: u64 = 60;
 /// A last frame older than this means the feed is not fresh.
 pub const AUTO_STALE_NS: u64 = 250_000_000;
+/// A change held for a frame credit goes out anyway after max(2 frame intervals, this): a game
+/// that freezes still gets the rest position.
+pub const AUTO_STALL_MIN_NS: u64 = 50_000_000;
 pub const API_VERSION: u32 = 1;
 
 /// Upper bound on how long a missed wake could delay input (the fallback re-check).
@@ -175,14 +174,13 @@ pub fn parse_axis_hz(v: Option<&[u8]>) -> u32 {
     }
 }
 
-/// Auto pacing: T for a game frame interval `est` whose last frame was at `frame_time`, at `now`;
-/// None when the feed is not fresh (the caller falls back).
-pub fn auto_interval(est: u64, frame_time: u64, now: u64) -> Option<u64> {
-    if est == 0 || frame_time == 0 || now.saturating_sub(frame_time) > AUTO_STALE_NS {
+/// Auto pacing at `now`, from a slot file's frame feed: Some((frame count, stall bound)) while the
+/// feed is fresh, None when it is not (the caller falls back to AUTO_FALLBACK_HZ).
+pub fn credit_feed(count: u64, frame_time: u64, interval: u64, now: u64) -> Option<(u64, u64)> {
+    if count == 0 || frame_time == 0 || now.saturating_sub(frame_time) > AUTO_STALE_NS {
         return None;
     }
-    let t = est.saturating_mul(100) / AUTO_HEADROOM_PCT;
-    Some(t.clamp(1_000_000_000 / AUTO_MAX_HZ, 1_000_000_000 / AUTO_MIN_HZ))
+    Some((count, interval.saturating_mul(2).max(AUTO_STALL_MIN_NS)))
 }
 
 static AXIS_HZ: AtomicU32 = AtomicU32::new(AXIS_AUTO);
@@ -207,28 +205,19 @@ pub fn axis_hz() -> u32 {
     }
 }
 
-const PACE_UNKNOWN: u8 = 0;
-const PACE_AUTO: u8 = 1;
-const PACE_FALLBACK: u8 = 2;
+/// How a handle paces its stick-only frames right now.
+#[derive(Clone, Copy)]
+enum Pace {
+    /// At most one per interval (fixed N Hz, the 60 Hz fallback, or 0 = unpaced).
+    Interval(u64),
+    /// One per new game frame: `count` is the slot file's frame counter, `stall` how long a held
+    /// change may wait for the next one.
+    Credit { count: u64, stall: u64 },
+}
 
-/// The pacing interval T for this handle's axis-only frames at `now` (0 = unpaced). In auto
-/// mode it follows the frame feed in the handle's slot file; also keeps the pacing counters.
-fn axis_interval(d: &mut Data, now: u64) -> u64 {
-    if AXIS_HZ.load(Relaxed) != AXIS_AUTO {
-        return AXIS_NS.load(Relaxed);
-    }
-    let sh = match shared(d) {
-        Some(sh) if !d.dead => Some(sh),
-        _ => None,
-    };
-    let fed = sh.and_then(|sh| {
-        let h = &sh.header;
-        let ft = h.frame_time_ns.load(Acquire);
-        auto_interval(h.frame_interval_ns.load(Relaxed), ft, now)
-    });
-    let t = fed.unwrap_or(1_000_000_000 / AUTO_FALLBACK_HZ);
-    let state = if fed.is_some() { PACE_AUTO } else { PACE_FALLBACK };
-    if d.pace_state == PACE_AUTO && state == PACE_FALLBACK {
+/// Record how this handle paces (r_axis_mode / r_axis_hz, process stats) when that changes.
+fn note_mode(d: &mut Data, sh: Option<&Shared>, mode: u32, hz: u32) {
+    if d.pace_mode == layout::AXIS_MODE_CREDITS && mode == layout::AXIS_MODE_FALLBACK {
         STATS.auto_fallbacks.fetch_add(1, Relaxed);
         if d.writable {
             if let Some(sh) = sh {
@@ -236,18 +225,70 @@ fn axis_interval(d: &mut Data, now: u64) -> u64 {
             }
         }
     }
-    d.pace_state = state;
-    let hz = (1_000_000_000 / t) as u32;
-    if hz != d.pace_hz {
-        d.pace_hz = hz;
-        STATS.axis_hz.store(hz as u64, Relaxed);
-        if d.writable {
-            if let Some(sh) = sh {
-                sh.header.r_axis_hz.store(hz, Relaxed);
-            }
+    // The frame rate jitters by a hertz or so; do not rewrite the shared line for that.
+    if mode == d.pace_mode && hz.abs_diff(d.pace_hz) <= 1 {
+        return;
+    }
+    d.pace_mode = mode;
+    d.pace_hz = hz;
+    STATS.axis_mode.store(mode as u64, Relaxed);
+    STATS.axis_hz.store(hz as u64, Relaxed);
+    if d.writable {
+        if let Some(sh) = sh {
+            sh.header.r_axis_mode.store(mode, Relaxed);
+            sh.header.r_axis_hz.store(hz, Relaxed);
         }
     }
-    t
+}
+
+/// This handle's pacing at `now`: the configured fixed rate, or in auto mode frame credits from
+/// the slot file's feed while it is fresh, else the fixed fallback.
+fn pacing(d: &mut Data, now: u64) -> Pace {
+    let cfg = AXIS_HZ.load(Relaxed);
+    let sh = match shared(d) {
+        Some(sh) if !d.dead => Some(sh),
+        _ => None,
+    };
+    if cfg != AXIS_AUTO {
+        let mode = if cfg == 0 { layout::AXIS_MODE_UNPACED } else { layout::AXIS_MODE_FIXED };
+        note_mode(d, sh, mode, cfg);
+        return Pace::Interval(AXIS_NS.load(Relaxed));
+    }
+    let feed = sh.and_then(|sh| {
+        let h = &sh.header;
+        let count = h.frame_count.load(Acquire);
+        credit_feed(count, h.frame_time_ns.load(Relaxed), h.frame_interval_ns.load(Relaxed), now)
+            .map(|c| (c, h.frame_interval_ns.load(Relaxed)))
+    });
+    match feed {
+        Some(((count, stall), interval)) => {
+            let hz = if interval == 0 { 0 } else { (1_000_000_000 / interval) as u32 };
+            note_mode(d, sh, layout::AXIS_MODE_CREDITS, hz);
+            Pace::Credit { count, stall }
+        }
+        None => {
+            note_mode(d, sh, layout::AXIS_MODE_FALLBACK, AUTO_FALLBACK_HZ as u32);
+            Pace::Interval(1_000_000_000 / AUTO_FALLBACK_HZ)
+        }
+    }
+}
+
+/// A pending stick-only frame under frame credits: due now if a game frame arrived since this
+/// handle's last stick-only frame (credits never accumulate past one), or once it has waited
+/// `stall`; otherwise held until the next frame or that bound.
+fn credit_due(d: &mut Data, count: u64, stall: u64, now: u64) -> Due {
+    if count != d.credit_count {
+        return Due::Now; // a new frame (or the counter restarted with a new app process)
+    }
+    if d.hold_since == 0 {
+        d.hold_since = now;
+    }
+    let deadline = d.hold_since.wrapping_add(stall);
+    if now >= deadline {
+        Due::Now
+    } else {
+        Due::Frame(deadline)
+    }
 }
 
 /// Log the effective pacing once, the first time a logger is there to hear it.
@@ -263,13 +304,7 @@ fn log_config_once() {
     if hz == 0 {
         m.s(b"bannerin: stick-only frames unpaced (BANNERIN_AXIS_HZ=0)");
     } else if hz == AXIS_AUTO {
-        m.s(b"bannerin: stick-only frames paced to ")
-            .u(AUTO_HEADROOM_PCT)
-            .s(b"% of the game's frame rate (")
-            .u(AUTO_MIN_HZ)
-            .s(b"..")
-            .u(AUTO_MAX_HZ)
-            .s(b" Hz; ")
+        m.s(b"bannerin: stick-only frames paced by frame credits (one per game frame; ")
             .u(AUTO_FALLBACK_HZ)
             .s(b" Hz without a fresh frame feed); button and full-state frames are never delayed");
     } else {
@@ -313,6 +348,7 @@ pub struct Stats {
     pub merged_axis_publishes: AtomicU64,
     pub axis_hz: AtomicU64,
     pub auto_fallbacks: AtomicU64,
+    pub axis_mode: AtomicU64,
 }
 
 const Z: AtomicU64 = AtomicU64::new(0);
@@ -340,6 +376,7 @@ pub static STATS: Stats = Stats {
     merged_axis_publishes: Z,
     axis_hz: Z,
     auto_fallbacks: Z,
+    axis_mode: Z,
 };
 
 /// Process-wide reader statistics (`struct bannerin_stats`).
@@ -369,10 +406,13 @@ pub struct StatsView {
     pub paced_frames: u64,
     /// Publishes merged into a later frame instead of delivered one each.
     pub merged_axis_publishes: u64,
-    /// The stick-frame rate a reader in this process last derived (auto mode; 0 = none yet).
+    /// The stick-frame rate a reader in this process last paced to (in credit mode the game's
+    /// frame rate; 0 = none yet).
     pub axis_hz: u64,
     /// Times a reader in auto mode lost a fresh frame feed and fell back to the fixed rate.
     pub auto_fallbacks: u64,
+    /// How a reader last paced (AXIS_MODE_*: 1 credits, 2 fallback, 3 fixed, 4 unpaced).
+    pub axis_mode: u64,
 }
 
 pub fn stats() -> StatsView {
@@ -401,6 +441,7 @@ pub fn stats() -> StatsView {
         merged_axis_publishes: s.merged_axis_publishes.load(Relaxed),
         axis_hz: s.axis_hz.load(Relaxed),
         auto_fallbacks: s.auto_fallbacks.load(Relaxed),
+        axis_mode: s.axis_mode.load(Relaxed),
     }
 }
 
@@ -430,6 +471,9 @@ pub struct SlotStatsView {
     pub reader_auto_fallbacks: u64,
     pub frame_interval_ns: u64,
     pub frame_time_ns: u64,
+    pub frame_count: u64,
+    pub reader_axis_mode: u64,
+    pub frame_waiters: u64,
 }
 
 pub type LogFn = unsafe extern "C" fn(level: c_int, line: *const c_char);
@@ -535,6 +579,8 @@ struct SlotRt {
     kick: AtomicU32,
     /// Consecutive slow checks that found the writer's lock free (helper-owned).
     dead_votes: AtomicU32,
+    /// This process's helper counts itself in hm's frame_waiters (helper-owned).
+    frame_reg: AtomicU32,
     hm: UnsafeCell<Mapped>, // owned by the slot's helper thread
 }
 
@@ -552,6 +598,7 @@ const SLOT_RT: SlotRt = SlotRt {
     handles: AtomicU32::new(0),
     kick: AtomicU32::new(0),
     dead_votes: AtomicU32::new(0),
+    frame_reg: AtomicU32::new(0),
     hm: UnsafeCell::new(Mapped::NONE),
 };
 static SLOTS: SlotTable = SlotTable { s: [SLOT_RT; MAX_SLOTS] };
@@ -588,8 +635,12 @@ struct Data {
     fpos: usize,
     ftime: (i64, i64),
     ready: bool,
-    pace_state: u8,
+    pace_mode: u32,
     pace_hz: u32,
+    /// Frame counter value when this handle last sent a stick-only frame under frame credits.
+    credit_count: u64,
+    /// When the pending stick change started waiting for a credit (0 = not waiting).
+    hold_since: u64,
 }
 
 impl Data {
@@ -612,8 +663,10 @@ impl Data {
         fpos: 0,
         ftime: (0, 0),
         ready: false,
-        pace_state: PACE_UNKNOWN,
+        pace_mode: layout::AXIS_MODE_UNKNOWN,
         pace_hz: 0,
+        credit_count: 0,
+        hold_since: 0,
     };
 }
 
@@ -861,10 +914,18 @@ fn observe(d: &mut Data, notes: &mut Notes) -> Snapshot {
 /// When this handle's next events are due at `now` (a partly delivered frame is due at once).
 fn due(d: &mut Data, snap: &Snapshot, now: u64) -> Due {
     if d.fpos < d.frame.len {
-        Due::Now
-    } else {
-        let t = axis_interval(d, now);
-        d.cursor.due(snap, now, t)
+        return Due::Now;
+    }
+    match pacing(d, now) {
+        Pace::Credit { count, stall } if d.cursor.only_axes_pending(snap) => credit_due(d, count, stall, now),
+        Pace::Credit { .. } => {
+            d.hold_since = 0;
+            d.cursor.due(snap, now, 0)
+        }
+        Pace::Interval(t) => {
+            d.hold_since = 0;
+            d.cursor.due(snap, now, t)
+        }
     }
 }
 
@@ -884,9 +945,16 @@ fn wait_ns(base: u64, deadline: Option<u64>) -> u64 {
     }
 }
 
+/// What a handle is waiting for after sync_ready: the time its held frame falls due, and whether
+/// it waits for the game's next frame (frame credits).
+#[derive(Clone, Copy, Default)]
+struct Hold {
+    deadline: Option<u64>,
+    frame: bool,
+}
+
 /// Keep exactly one readiness byte queued while events are due; close the peer on removal.
-/// Returns when a held (paced) frame becomes due, if one is held.
-fn sync_ready(d: &mut Data, snap: &Snapshot, now: u64) -> Option<u64> {
+fn sync_ready(d: &mut Data, snap: &Snapshot, now: u64) -> Hold {
     if d.removed {
         if d.wake_fd >= 0 {
             if !d.ready {
@@ -896,12 +964,13 @@ fn sync_ready(d: &mut Data, snap: &Snapshot, now: u64) -> Option<u64> {
             sys::close(d.wake_fd);
             d.wake_fd = -1;
         }
-        return None;
+        return Hold::default();
     }
     let due = due(d, snap, now);
     let held = match due {
-        Due::At(t) => Some(t),
-        _ => None,
+        Due::At(t) => Hold { deadline: Some(t), frame: false },
+        Due::Frame(t) => Hold { deadline: Some(t), frame: true },
+        _ => Hold::default(),
     };
     if d.wake_fd < 0 {
         return held;
@@ -934,10 +1003,21 @@ struct InputEvent {
 const _: () = assert!(core::mem::size_of::<InputEvent>() == EVENT_SIZE);
 
 unsafe fn deliver(d: &mut Data, snap: &Snapshot, out: *mut u8, max: usize, fs: &mut FrameStats, now: u64) -> usize {
-    let t = axis_interval(d, now);
+    let pace = pacing(d, now);
     let mut n = 0usize;
     while n < max {
         if d.fpos >= d.frame.len {
+            // Under frame credits a stick-only frame needs one; anything else goes at once.
+            let (t, credit) = match pace {
+                Pace::Interval(t) => (t, None),
+                Pace::Credit { count, stall } if d.cursor.only_axes_pending(snap) => {
+                    if credit_due(d, count, stall, now) != Due::Now {
+                        break;
+                    }
+                    (0, Some(count))
+                }
+                Pace::Credit { .. } => (0, None),
+            };
             let r = match shared(d) {
                 Some(sh) if !d.dead => d.cursor.next_frame_at(snap, &ShJournal(sh), &mut d.frame, fs, now, t),
                 _ => d.cursor.next_frame_at(snap, &NoJournal, &mut d.frame, fs, now, t),
@@ -946,6 +1026,13 @@ unsafe fn deliver(d: &mut Data, snap: &Snapshot, out: *mut u8, max: usize, fs: &
             if r != Due::Now {
                 d.frame.len = 0;
                 break;
+            }
+            if let Some(count) = credit {
+                d.credit_count = count; // spent; a button frame never spends it
+                if d.hold_since != 0 {
+                    fs.paced_frames += 1;
+                }
+                d.hold_since = 0;
             }
             d.ftime = sys::realtime_us();
         }
@@ -1058,6 +1145,37 @@ fn ensure_helper(slot: usize) {
     }
 }
 
+/// Give up the helper's mapping, first taking this process out of its frame waiters.
+fn release_hm(rt: &SlotRt, hm: &mut Mapped) {
+    if rt.frame_reg.swap(0, Relaxed) != 0 && hm.writable {
+        if let Some(sh) = hm.shared() {
+            sh.header.frame_waiters.fetch_sub(1, SeqCst);
+        }
+    }
+    hm.release();
+}
+
+/// Count this process in (or out of) the frame waiters of the helper's file, so the app's frame
+/// feed rings the bell for a game frame only while some reader waits for one. Returns true if a
+/// frame arrived since `count_before` (the caller then services again instead of sleeping).
+fn frame_register(rt: &SlotRt, wants: bool, count_before: u64) -> bool {
+    let hm = unsafe { &*rt.hm.get() };
+    let sh = match hm.shared() {
+        Some(sh) if hm.writable => sh,
+        _ => return false,
+    };
+    let registered = rt.frame_reg.load(Relaxed) != 0;
+    if wants && !registered {
+        sh.header.frame_waiters.fetch_add(1, SeqCst);
+        rt.frame_reg.store(1, Relaxed);
+    } else if !wants && registered {
+        sh.header.frame_waiters.fetch_sub(1, SeqCst);
+        rt.frame_reg.store(0, Relaxed);
+    }
+    // SeqCst against the feed's count store: a frame that missed our registration is seen here.
+    wants && sh.header.frame_count.load(SeqCst) != count_before
+}
+
 /// Every 500 ms: does the path still name the file we know, and is its writer alive?
 fn slow_check(slot: usize, rt: &SlotRt) {
     let hm = unsafe { &mut *rt.hm.get() };
@@ -1066,7 +1184,7 @@ fn slow_check(slot: usize, rt: &SlotRt) {
         (Ok(s), Some(sh)) => s.dev != hm.dev || s.ino != hm.ino || sh.is_retired(),
         (Ok(_), None) => true,
         (Err(_), Some(_)) => {
-            hm.release();
+            release_hm(rt, hm);
             rt.instance.store(0, Release);
             rt.file_gen.fetch_add(1, Release);
             false
@@ -1076,7 +1194,7 @@ fn slow_check(slot: usize, rt: &SlotRt) {
     if remap {
         match map_slot(slot, true) {
             Ok(m) => {
-                hm.release();
+                release_hm(rt, hm);
                 *hm = m;
                 rt.dead_votes.store(0, Relaxed);
                 rt.instance.store(m.instance, Release);
@@ -1084,7 +1202,7 @@ fn slow_check(slot: usize, rt: &SlotRt) {
             }
             Err(_) => {
                 if hm.shared().is_some() {
-                    hm.release();
+                    release_hm(rt, hm);
                     rt.instance.store(0, Release);
                     rt.file_gen.fetch_add(1, Release);
                 }
@@ -1103,7 +1221,7 @@ fn slow_check(slot: usize, rt: &SlotRt) {
         let ours = !free || matches!(sys::fstat(hm.fd), Ok(st) if st.dev == hm.dev && st.ino == hm.ino);
         if free && !ours {
             // Not the file we think it is: forget it, the next check maps the path again.
-            hm.release();
+            release_hm(rt, hm);
             rt.dead_votes.store(0, Relaxed);
             return;
         }
@@ -1123,8 +1241,8 @@ fn slow_check(slot: usize, rt: &SlotRt) {
 }
 
 /// Re-level every handle of `slot`.
-fn service(slot: usize, now: u64, verify: bool) -> Option<u64> {
-    let mut earliest = None;
+fn service(slot: usize, now: u64, verify: bool) -> Hold {
+    let mut all = Hold::default();
     for e in TABLE.e.iter() {
         if e.state.load(Acquire) != ACTIVE {
             continue;
@@ -1146,7 +1264,9 @@ fn service(slot: usize, now: u64, verify: bool) -> Option<u64> {
             if verify && d.ready && d.wake_fd >= 0 && matches!(sys::fionread(d.drain_fd), Ok(0)) {
                 d.ready = false;
             }
-            earliest = earlier(earliest, sync_ready(d, &snap, sys::mono_ns()));
+            let h = sync_ready(d, &snap, sys::mono_ns());
+            all.deadline = earlier(all.deadline, h.deadline);
+            all.frame |= h.frame;
         }
         unlock(e);
         release(e);
@@ -1154,7 +1274,7 @@ fn service(slot: usize, now: u64, verify: bool) -> Option<u64> {
             emit_notes(slot, fd, &notes);
         }
     }
-    earliest
+    all
 }
 
 extern "C" fn helper_main(arg: *mut c_void) -> *mut c_void {
@@ -1178,15 +1298,21 @@ extern "C" fn helper_main(arg: *mut c_void) -> *mut c_void {
             }
             continue;
         }
-        let target = unsafe { (*rt.hm.get()).shared() }
-            .map(|sh| (&sh.header.bell as *const AtomicU32, sh.header.bell.load(Acquire)));
-        // Wake on the bell, at the earliest paced frame falling due, or after the fallback.
-        let earliest = service(slot, now, slow);
+        let target = unsafe { (*rt.hm.get()).shared() }.map(|sh| {
+            let h = &sh.header;
+            (&h.bell as *const AtomicU32, h.bell.load(Acquire), h.frame_count.load(SeqCst))
+        });
+        // Wake on the bell (a publish, or a game frame while some handle here waits for one), at
+        // the earliest held frame falling due, or after the fallback.
+        let hold = service(slot, now, slow);
+        if frame_register(rt, hold.frame, target.map_or(0, |t| t.2)) {
+            continue; // a game frame landed while we were looking: hand out its credit now
+        }
         let r = match target {
-            Some((w, v)) => sys::futex_wait(w, v, Some(wait_ns(FALLBACK_NS, earliest)), true),
+            Some((w, v, _)) => sys::futex_wait(w, v, Some(wait_ns(FALLBACK_NS, hold.deadline)), true),
             None => {
                 let k = rt.kick.load(Acquire);
-                sys::futex_wait(&rt.kick, k, Some(wait_ns(SLOW_NS / 2, earliest)), false)
+                sys::futex_wait(&rt.kick, k, Some(wait_ns(SLOW_NS / 2, hold.deadline)), false)
             }
         };
         match r {
@@ -1248,6 +1374,8 @@ unsafe extern "C" fn atfork_child() {
         // The helper's mapping and fd belonged to the parent's helper thread, which may have been
         // in the middle of replacing them; the child's helper opens its own on its first check.
         // (Its fd shares the parent's open file description, which must not be probed from here.)
+        // Any frame-waiter registration on it is the parent helper's, not ours to undo.
+        rt.frame_reg.store(0, Relaxed);
         let hm = &mut *rt.hm.get();
         hm.release();
     }
@@ -1495,7 +1623,9 @@ pub unsafe fn read(h: u32, buf: *mut u8, len: usize, nonblocking: bool) -> Resul
             break Err(sys::EAGAIN);
         }
         // Sleep until a publish, the moment a held stick frame falls due, or the fallback.
-        if let Err(sys::EINTR) = sys::futex_wait(word, val, Some(wait_ns(FALLBACK_NS, held)), shared_word) {
+        // (A wait for a game frame is announced by the slot's wake thread, which services this
+        // handle too; the frame rings the same bell.)
+        if let Err(sys::EINTR) = sys::futex_wait(word, val, Some(wait_ns(FALLBACK_NS, held.deadline)), shared_word) {
             break Err(sys::EINTR);
         }
     };
@@ -1553,6 +1683,9 @@ pub fn slot_stats(slot: i32) -> Result<SlotStatsView, i32> {
         v.reader_auto_fallbacks = h.r_auto_fallbacks.load(Relaxed);
         v.frame_interval_ns = h.frame_interval_ns.load(Relaxed);
         v.frame_time_ns = h.frame_time_ns.load(Relaxed);
+        v.frame_count = h.frame_count.load(Relaxed);
+        v.reader_axis_mode = h.r_axis_mode.load(Relaxed) as u64;
+        v.frame_waiters = h.frame_waiters.load(Relaxed) as u64;
     }
     m.release();
     Ok(v)
@@ -1593,24 +1726,20 @@ mod tests {
     }
 
     #[test]
-    fn auto_interval_follows_the_game_with_headroom_and_bounds() {
+    fn credit_feed_freshness_and_stall_bound() {
         const MS: u64 = 1_000_000;
         let now = 10_000 * MS;
-        let f60 = 16_666_667;
-        // 60 fps -> 54 Hz, 120 fps -> 108 Hz
-        assert_eq!(1_000_000_000 / auto_interval(f60, now - MS, now).unwrap(), 54);
-        assert_eq!(1_000_000_000 / auto_interval(f60 / 2, now, now).unwrap(), 108);
-        // 30 fps -> 27 Hz; bounds 20..240 Hz
-        assert_eq!(1_000_000_000 / auto_interval(2 * f60, now, now).unwrap(), 27);
-        assert_eq!(auto_interval(500 * MS, now, now), Some(50 * MS));
-        assert_eq!(auto_interval(MS, now, now), Some(1_000_000_000 / 240));
-        // not fresh: never set, unknown interval, or the last frame 250+ ms ago
-        assert_eq!(auto_interval(0, now, now), None);
-        assert_eq!(auto_interval(f60, 0, now), None);
-        assert_eq!(auto_interval(f60, now - 251 * MS, now), None);
-        assert!(auto_interval(f60, now - 249 * MS, now).is_some());
+        // fresh: the counter, and a stall bound of two frame intervals but at least 50 ms
+        assert_eq!(credit_feed(7, now - MS, 16 * MS, now), Some((7, 50 * MS)));
+        assert_eq!(credit_feed(7, now, 40 * MS, now), Some((7, 80 * MS)));
+        assert_eq!(credit_feed(7, now, 0, now), Some((7, 50 * MS)));
+        // not fresh: no frames yet, never stamped, or the last frame 250+ ms ago
+        assert_eq!(credit_feed(0, now, 16 * MS, now), None);
+        assert_eq!(credit_feed(7, 0, 16 * MS, now), None);
+        assert_eq!(credit_feed(7, now - 251 * MS, 16 * MS, now), None);
+        assert!(credit_feed(7, now - 249 * MS, 16 * MS, now).is_some());
         // a frame stamped a moment after the reader's clock read is fresh
-        assert!(auto_interval(f60, now + MS, now).is_some());
+        assert!(credit_feed(7, now + MS, 16 * MS, now).is_some());
     }
 
     #[test]

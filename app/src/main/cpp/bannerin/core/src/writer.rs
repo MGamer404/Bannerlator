@@ -52,40 +52,29 @@ pub const STAT_READER_AUTO_FALLBACKS: u32 = 19;
 pub const STAT_FRAME_INTERVAL_NS: u32 = 20;
 pub const STAT_GAME_FRAMES: u32 = 21;
 
+pub const STAT_READER_AXIS_MODE: u32 = 22;
+pub const STAT_FRAME_WAKES: u32 = 23;
+
 // ---------------------------------------------------------------------------------------------
-// Game frame feed: the app's present threads report every frame the game shows; the estimated
-// frame interval goes into the header of every live slot file, where readers in auto pacing
-// derive their stick-frame rate from it.
+// Game frame feed: the app's present threads report every frame the game presents. Each one is
+// counted into the header of every live slot file; readers in auto pacing may send one stick-only
+// frame per new count (a frame credit), so a game that takes one input report per rendered frame
+// is never fed more than it drains.
 
-/// A gap this long (pause, alt-tab, loading) is not a frame interval: the estimate goes stale.
+/// A gap this long (pause, alt-tab, loading) is not reported as a frame interval.
 pub const FRAME_STALE_GAP_NS: u64 = 1_000_000_000;
-/// Presents closer than this are taken as the same frame presented twice.
-pub const FRAME_MIN_INTERVAL_NS: u64 = 500_000;
-/// Time constant of the release (a frame rate recovering): about 1 - 1/e per 150 ms.
-pub const FRAME_RELEASE_TAU_NS: u64 = 150_000_000;
-/// The header fields are stored at most this often (1 kHz).
-pub const FRAME_STORE_MIN_NS: u64 = 1_000_000;
-
-/// Fast attack, slow release: a longer interval (a dip) is taken at once
-/// (max(new, (est + new) / 2) is `new` when new > est); a shorter one (recovery) is approached
-/// exponentially with time constant FRAME_RELEASE_TAU_NS, step by step at the frame rate.
-pub fn estimate_interval(est: u64, new: u64) -> u64 {
-    if est == 0 || new >= est {
-        return new;
-    }
-    let alpha = ((new as u128 * 65536) / FRAME_RELEASE_TAU_NS as u128).min(65536) as u64;
-    est - (((est - new) as u128 * alpha as u128) >> 16) as u64
-}
+/// Presents closer than this are one frame presented twice (and credits never exceed 1 kHz).
+pub const FRAME_MIN_INTERVAL_NS: u64 = 1_000_000;
 
 struct FrameFeed {
     last: AtomicU64,
-    est: AtomicU64,
-    stored: AtomicU64,
-    frames: AtomicU64,
+    gap: AtomicU64,
+    count: AtomicU64,
+    wakes: AtomicU64,
 }
 
 static FRAME_FEED: FrameFeed =
-    FrameFeed { last: AtomicU64::new(0), est: AtomicU64::new(0), stored: AtomicU64::new(0), frames: AtomicU64::new(0) };
+    FrameFeed { last: AtomicU64::new(0), gap: AtomicU64::new(0), count: AtomicU64::new(0), wakes: AtomicU64::new(0) };
 
 /// A slot file the feed writes into. `users` lets the owner wait out a frame thread that is
 /// storing into the mapping before it unmaps it; the frame thread itself never waits.
@@ -120,41 +109,47 @@ fn target_clear(slot: u32, p: *mut u8) {
     }
 }
 
-/// One frame presented by the game, at `now` (CLOCK_MONOTONIC ns). Cheap and wait-free: the
-/// estimator, then (at most once per millisecond) two stores into each live slot header.
+/// One frame presented by the game, at `now` (CLOCK_MONOTONIC ns). Wait-free: a few atomic stores
+/// into each live slot header, plus a futex wake only for a file a reader is waiting on.
 pub fn game_frame(now: u64) {
     let f = &FRAME_FEED;
-    f.frames.fetch_add(1, Relaxed);
     let last = f.last.load(Relaxed);
-    if last != 0 {
-        let gap = now.wrapping_sub(last);
-        if gap < FRAME_MIN_INTERVAL_NS {
-            return;
-        }
-        let est = if gap > FRAME_STALE_GAP_NS { 0 } else { estimate_interval(f.est.load(Relaxed), gap) };
-        f.est.store(est, Relaxed);
-    }
-    f.last.store(now, Relaxed);
-    if now.wrapping_sub(f.stored.load(Relaxed)) < FRAME_STORE_MIN_NS {
+    let gap = if last == 0 { 0 } else { now.wrapping_sub(last) };
+    if last != 0 && gap < FRAME_MIN_INTERVAL_NS {
         return;
     }
-    f.stored.store(now, Relaxed);
-    let est = f.est.load(Relaxed);
+    let gap = if gap > FRAME_STALE_GAP_NS { 0 } else { gap };
+    f.gap.store(gap, Relaxed);
+    f.last.store(now, Relaxed);
+    let count = f.count.fetch_add(1, Relaxed).wrapping_add(1);
     for t in TARGETS.iter() {
         t.users.fetch_add(1, SeqCst);
         let p = t.ptr.load(SeqCst);
         if !p.is_null() {
             let h = &unsafe { Shared::at(p) }.header;
-            h.frame_interval_ns.store(est, Relaxed);
-            h.frame_time_ns.store(now, Release);
+            h.frame_interval_ns.store(gap, Relaxed);
+            h.frame_time_ns.store(now, Relaxed);
+            // SeqCst against the readers' frame_waiters registration: either they see this
+            // count when they re-check after registering, or this sees them and rings.
+            h.frame_count.store(count, SeqCst);
+            if h.frame_waiters.load(SeqCst) != 0 {
+                h.bell.fetch_add(1, Release);
+                sys::futex_wake(&h.bell, i32::MAX, true);
+                f.wakes.fetch_add(1, Relaxed);
+            }
         }
         t.users.fetch_sub(1, Release);
     }
 }
 
-/// The feed's current (interval estimate, last frame time); zeros before the first frames.
-pub fn frame_info() -> (u64, u64) {
-    (FRAME_FEED.est.load(Relaxed), FRAME_FEED.last.load(Relaxed))
+/// The feed's (last frame interval, last frame time, frame count); zeros before any frame.
+pub fn frame_info() -> (u64, u64, u64) {
+    (FRAME_FEED.gap.load(Relaxed), FRAME_FEED.last.load(Relaxed), FRAME_FEED.count.load(Relaxed))
+}
+
+/// Futex wakes the feed has issued for frames (only while some reader waited for one).
+pub fn frame_wakes() -> u64 {
+    FRAME_FEED.wakes.load(Relaxed)
 }
 
 struct Backing {
@@ -385,9 +380,10 @@ impl SlotWriter {
         let sh = unsafe { Shared::at(p) };
         let instance = make_instance(self.slot, self.nonce);
         init_header(sh, self.slot, instance);
-        let (iv, ft) = frame_info();
+        let (iv, ft, fc) = frame_info();
         sh.header.frame_interval_ns.store(iv, Relaxed);
         sh.header.frame_time_ns.store(ft, Relaxed);
+        sh.header.frame_count.store(fc, Relaxed);
         // A new file starts from the complete logical state; its journal starts empty (readers
         // re-attaching to it begin with a full-state frame anyway).
         self.pub_seq = 0;
@@ -582,8 +578,9 @@ impl SlotWriter {
             STAT_FAILED_PUBLISHES => return self.failures,
             STAT_HAS_BACKING => return self.backing.is_some() as u64,
             STAT_INSTANCE => return self.instance(),
-            STAT_FRAME_INTERVAL_NS => return FRAME_FEED.est.load(Relaxed),
-            STAT_GAME_FRAMES => return FRAME_FEED.frames.load(Relaxed),
+            STAT_FRAME_INTERVAL_NS => return FRAME_FEED.gap.load(Relaxed),
+            STAT_GAME_FRAMES => return FRAME_FEED.count.load(Relaxed),
+            STAT_FRAME_WAKES => return FRAME_FEED.wakes.load(Relaxed),
             _ => {}
         }
         let h = match &self.backing {
@@ -607,6 +604,7 @@ impl SlotWriter {
             STAT_READER_MERGED_AXIS => &h.r_merged_axis,
             STAT_READER_AUTO_FALLBACKS => &h.r_auto_fallbacks,
             STAT_READER_AXIS_HZ => return h.r_axis_hz.load(Relaxed) as u64,
+            STAT_READER_AXIS_MODE => return h.r_axis_mode.load(Relaxed) as u64,
             _ => return 0,
         };
         v.load(Relaxed)
@@ -784,33 +782,6 @@ mod tests {
         let second = Map::open(&d.join("pad0"));
         assert!(!second.sh().is_retired());
         assert_ne!(second.sh().header.instance.load(Acquire), first.sh().header.instance.load(Acquire));
-    }
-
-    #[test]
-    fn frame_estimator_attacks_fast_and_releases_slowly() {
-        const MS: u64 = 1_000_000;
-        let f60 = 16_666_667u64;
-        let f30 = 33_333_333u64;
-        // a dip is taken at once
-        assert_eq!(estimate_interval(f60, f30), f30);
-        assert_eq!(estimate_interval(0, f60), f60);
-        // recovery 30 -> 60 fps eases in over a few hundred ms
-        let (mut est, mut t) = (f30, 0u64);
-        let mut at_250 = 0;
-        while t < 500 * MS {
-            est = estimate_interval(est, f60);
-            t += f60;
-            if at_250 == 0 && t >= 250 * MS {
-                at_250 = est;
-            }
-        }
-        assert!(at_250 > f60 + MS && at_250 < f30 - 5 * MS, "halfway {} ns", at_250);
-        assert!(est < f60 + 2 * MS / 3, "after 0.5 s still {} ns", est);
-        // and settles
-        for _ in 0..200 {
-            est = estimate_interval(est, f60);
-        }
-        assert!(est >= f60 && est - f60 < 50_000, "{} ns", est);
     }
 
     #[test]

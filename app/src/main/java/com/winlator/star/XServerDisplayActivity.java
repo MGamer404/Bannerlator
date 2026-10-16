@@ -1296,6 +1296,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private final java.util.LinkedHashSet<Integer> padFeedMesaDrvIds = new java.util.LinkedHashSet<>();
     private long padFeedBindTryNs;                  // present threads; a lost race only delays a bind
     private volatile boolean padFeedWaylandGame;    // Wayland: the compositor names a game surface
+    // The guest-side win-fg layer (X11 when Win-FG Native cannot run, or for training capture)
+    // presents its generated frames to the X server like real ones: while its multiplier is N >= 2,
+    // only one present in N is a real game frame. Set from writeWinFgConfig, that layer's only
+    // config writer. LSFG Native and Win-FG Native generate inside our own renderer/compositor and
+    // never reach these present callbacks, so they need nothing here.
+    private volatile int padFeedPresentsPerFrame = 1;
+    private int padFeedPresentPhase;                // present threads; a lost race shifts the phase only
 
     /** WM thread: keep the pad frame feed bound to the game's presenting window (see the fields). */
     private void trackPadFeedWindow(Window window, Property property) {
@@ -1352,6 +1359,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
             padFeedHealedWindowId = wid;
         }
+        int perFrame = padFeedPresentsPerFrame;
+        if (perFrame > 1 && (++padFeedPresentPhase % perFrame) != 0) return;   // a generated frame
         com.winlator.star.inputcontrols.BannerinWriter.onGameFrame();
     }
 
@@ -3719,6 +3728,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             configDir.mkdirs();
             File confFile = new File(configDir, "conf.toml");
             boolean on = multiplier >= 2;
+            // The layer will now present `multiplier` frames per game frame: the pad frame feed
+            // counts one of them (see padFeedPresentsPerFrame).
+            padFeedPresentsPerFrame = on ? Math.max(2, Math.min(4, multiplier)) : 1;
             // Training capture is a GLOBAL opt-in (WinFgCapture), independent of the per-container FG
             // multiplier — so it's re-stamped on every conf.toml rewrite (launch + live in-game edits)
             // and stays in sync when the in-game FG menu rewrites this file.
@@ -10520,7 +10532,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         // went stale under them (fixed 60 Hz then), and what the feed itself saw.
                         long frameNs = com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
                                 com.winlator.star.inputcontrols.BannerinWriter.STAT_FRAME_INTERVAL_NS);
+                        long mode = com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_AXIS_MODE);
+                        String[] modes = {"none", "frame credits", "60 Hz fallback", "fixed", "unpaced"};
                         stats.append("slot0 stick pacing: ")
+                             .append(mode >= 0 && mode < modes.length ? modes[(int) mode] : String.valueOf(mode))
+                             .append(" at ")
                              .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
                                      com.winlator.star.inputcontrols.BannerinWriter.STAT_READER_AXIS_HZ))
                              .append(" Hz last, auto->fallback ")
@@ -10535,8 +10552,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                              .append("; game frame feed: ")
                              .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
                                      com.winlator.star.inputcontrols.BannerinWriter.STAT_GAME_FRAMES))
-                             .append(" frames, interval ")
+                             .append(" frames, last interval ")
                              .append(frameNs > 0 ? String.format(java.util.Locale.ROOT, "%.2f ms", frameNs / 1e6) : "none")
+                             .append(", frame wakes ")
+                             .append(com.winlator.star.inputcontrols.BannerinWriter.getSessionStat(slot0,
+                                     com.winlator.star.inputcontrols.BannerinWriter.STAT_FRAME_WAKES))
                              .append('\n');
                         // Same file the start-of-session writer used; appended, so the counts at
                         // the end sit under the setup lines rather than replacing them.

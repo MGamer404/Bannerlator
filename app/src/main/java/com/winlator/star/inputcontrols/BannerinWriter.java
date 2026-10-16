@@ -57,15 +57,19 @@ public final class BannerinWriter {
     public static final int STAT_READER_PACED_FRAMES = 16;
     /** Publishes readers merged into a later frame instead of delivering one each. */
     public static final int STAT_READER_MERGED_AXIS = 17;
-    /** Auto pacing: the stick-frame rate (Hz) a reader last derived from the game's frame rate. */
+    /** The stick-frame rate (Hz) a reader last paced to; under frame credits the game's frame rate. */
     public static final int STAT_READER_AXIS_HZ = 18;
     /** Auto pacing: times a reader lost a fresh frame feed and fell back to the fixed 60 Hz. */
     public static final int STAT_READER_AUTO_FALLBACKS = 19;
-    /** The game frame interval the frame feed currently estimates (ns, 0 = none or stale). */
+    /** The game's last observed frame interval (ns, 0 = none, or a gap over 1 s). */
     public static final int STAT_FRAME_INTERVAL_NS = 20;
-    /** Game frames reported to the feed so far (this app process). */
+    /** Game frames counted by the feed so far (this app process): the frame credits. */
     public static final int STAT_GAME_FRAMES = 21;
-    private static final int STAT_COUNT = 22;
+    /** How a reader last paced stick-only frames: 1 frame credits, 2 60 Hz fallback, 3 fixed, 4 unpaced. */
+    public static final int STAT_READER_AXIS_MODE = 22;
+    /** Futex wakes the frame feed issued (only while a reader waited for a frame). */
+    public static final int STAT_FRAME_WAKES = 23;
+    private static final int STAT_COUNT = 24;
 
     // Each slot's counters as they stood when releaseAllRingSlots() retired its file, for the
     // session-end diagnostics that may run after the release.
@@ -173,11 +177,12 @@ public final class BannerinWriter {
     }
 
     /**
-     * The game presented a frame. Call it for every frame the game's own window presents (not the
-     * desktop shell), whether or not any HUD is shown: readers in auto pacing (the default) send
-     * stick-only updates at about 90 % of the game's frame rate, so a game that takes one input
-     * report per rendered frame never falls behind. Cheap enough for the present threads: one JNI
-     * call into a wait-free estimator plus a few atomic stores; no allocation, no lock.
+     * The game presented a frame. Call it once for every frame the game's own window presents (not
+     * the desktop shell, not frames a frame generator adds, not HUD redraws), whether or not any HUD
+     * is shown: readers in auto pacing (the default) send one stick-only update per game frame, so a
+     * game that takes one input report per rendered frame never falls behind. Cheap enough for the
+     * present threads: one JNI call, a few atomic stores; a futex wake only while a reader waits for
+     * the frame; no allocation, no lock.
      */
     public static void onGameFrame() {
         if (NATIVE_OK) nativeGameFrame();
