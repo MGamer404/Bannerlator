@@ -781,7 +781,8 @@ fn forked_reader_gets_its_own_stream() {
     const T: u64 = 500;
     let sc = Scene::new("fork");
     let shm = Shm::new();
-    // shm: 0 writer ready, 1 taps requested, 2 taps done, 3 parent progress, 4 child progress, 9 quit
+    // shm: 0 writer ready, 1 taps requested, 2 taps done, 3 parent progress, 4 child progress,
+    //      5 child has its baseline, 9 quit
     let wp = spawn("fork-writer", || {
         let mut w = sc.writer(0);
         w.open();
@@ -813,6 +814,9 @@ fn forked_reader_gets_its_own_stream() {
                 ensure!(r.poll(2000) & POLLIN != 0, "child fd readable after fork");
                 let f = r.frame(2000)?;
                 ensure!(is_full(&f), "child starts with a full-state frame: {:?}", f);
+                // Taps published before that frame are part of its state by design, so the
+                // parent only starts tapping once the child has its baseline.
+                shm.set(5, 1);
                 let mut t = Taps::new(BTN_X);
                 let end = Instant::now() + Duration::from_secs(60);
                 while t.releases < T {
@@ -831,6 +835,7 @@ fn forked_reader_gets_its_own_stream() {
             }
             unsafe { _exit(if res.is_ok() { 0 } else { 1 }) }
         }
+        shm.wait(5, 1, 30)?;
         let mut t = Taps::new(BTN_X);
         let mut issued = 0u64;
         let end = Instant::now() + Duration::from_secs(60);
