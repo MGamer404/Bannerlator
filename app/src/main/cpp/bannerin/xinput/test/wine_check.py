@@ -8,12 +8,9 @@ For every Wine "<arch>-windows" directory found under the search roots (x86_64-w
 x86_64 build, i386-windows -> i386, aarch64-windows -> arm64x; an ARM64X Wine module is compared view
 by view: native view with our native view, EC view with our EC view):
 
-1. Exports, per XInput DLL and view: every NAME Wine's builtin exports must be exported by ours; every
-   ordinal Wine exports without a name, or at 100 and above (the ordinals programs really import by:
-   XInputGetStateEx @100 ...), must be exported by ours at that ordinal, under the same name if Wine
-   gives it one. Wine numbers its other named exports sequentially from 1, unlike Windows (whose
-   numbering ours keeps for programs built against the Windows import libraries, which import those
-   by name anyway); those differences are listed, not failed.
+1. Exports, per XInput DLL and view: every NAME Wine's builtin exports must be exported by ours, and
+   every ORDINAL Wine exports must be exported by ours at the same number, under the same name when
+   Wine gives it one (ours may export more: the named extended functions 100-103 everywhere).
 2. Imports: every Wine module in those directories that imports from an XInput DLL (joy.cpl, ...)
    must find each imported name / ordinal in our DLL of the same name, arch and view.
 Exit status 1 if anything is missing.
@@ -129,15 +126,10 @@ def main():
                 for o, n in sorted(wine.items()):
                     if n and n not in our_names:
                         missing.append("name %s" % n)
-                    if n is None or o >= 100:
-                        if o not in our:
-                            missing.append("ordinal %d%s" % (o, " (%s)" % n if n else ""))
-                        elif n and our[o] != n:
-                            missing.append("ordinal %d is %s in ours, %s in Wine" % (o, our[o], n))
-                    elif o in our and our[o] != n:
-                        notes.append("%s: Wine numbers %s %d, ours %d is %s" % (tag, n, o, o, our[o]))
-                    elif o not in our:
-                        notes.append("%s: Wine numbers %s %d, ours has no ordinal %d" % (tag, n, o, o))
+                    if o not in our:
+                        missing.append("ordinal %d%s" % (o, " (%s)" % n if n else ""))
+                    elif n and our[o] != n:
+                        missing.append("ordinal %d is %s in ours, %s in Wine" % (o, our[o] or "unnamed", n))
                 print("   %-34s Wine %2d exports, ours %2d: %s" % (tag, len(wine), len(our), "MISSING " + ", ".join(missing) if missing else "superset ok"))
                 print("      Wine: %s" % ", ".join("%d %s" % (o, n or "-") for o, n in sorted(wine.items())))
                 for m in missing:

@@ -81,7 +81,7 @@ arch_flags() {
 }
 
 # stdcall argument bytes of every export (i386 decoration).
-I386_DECOR='XInputGetState:8 XInputSetState:8 XInputGetStateEx:8 XInputGetCapabilities:12 XInputGetDSoundAudioDeviceGuids:12 XInputGetBatteryInformation:12 XInputGetKeystroke:12 XInputWaitForGuideButton:12 XInputEnable:4 XInputCancelGuideButtonWait:4 XInputPowerOffController:4 XInputGetAudioDeviceIds:20 XInputGetCapabilitiesEx:16'
+I386_DECOR='DllMain:12 XInputGetState:8 XInputSetState:8 XInputGetStateEx:8 XInputGetCapabilities:12 XInputGetDSoundAudioDeviceGuids:12 XInputGetBatteryInformation:12 XInputGetKeystroke:12 XInputWaitForGuideButton:12 XInputEnable:4 XInputCancelGuideButtonWait:4 XInputPowerOffController:4 XInputGetAudioDeviceIds:20 XInputGetCapabilitiesEx:16'
 
 def_for() { # def_for <arch> <dll> <tmpdir> -> path of the .def to link with
   local src="$HERE/def/$2.def"

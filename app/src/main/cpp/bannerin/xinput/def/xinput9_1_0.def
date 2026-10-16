@@ -1,9 +1,9 @@
 LIBRARY xinput9_1_0.dll
 EXPORTS
-    XInputGetCapabilities @2
-    XInputGetDSoundAudioDeviceGuids @3
+    XInputGetCapabilities @1
+    XInputGetDSoundAudioDeviceGuids @2
+    XInputSetState @3
     XInputGetState @4
-    XInputSetState @5
     XInputGetStateEx @100
     XInputWaitForGuideButton @101
     XInputCancelGuideButtonWait @102
