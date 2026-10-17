@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -795,8 +796,13 @@ private fun ClassicAppShell(
     CompositionLocalProvider(LocalTopBarActions provides topBarActionsState, LocalTopBarTransparent provides topBarTransparentState) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = !currentRoute.startsWith("container_detail") && !isFullBleed,
+        // Swipe-to-open stays off on the container editor and full-bleed screens, but an open menu
+        // always closes: gesturesEnabled = false also turned off the tap beside the menu.
+        gesturesEnabled = drawerState.isOpen || (!currentRoute.startsWith("container_detail") && !isFullBleed),
         drawerContent = {
+            // Back closes an open menu. Composed only while it is open, so it is registered after the
+            // screen's own Back (the container editor's unsaved-changes prompt) and comes first.
+            if (drawerState.isOpen) BackHandler { scope.launch { drawerState.close() } }
             AppDrawerContent(
                 currentRoute = currentRoute,
                 account = account,
