@@ -25,4 +25,31 @@ class StickPacingTest {
         assertEquals(30, StickPacing.parse("fixed:2")!!.hz)
         assertEquals(StickPacing.DEFAULT, StickPacing.parse("auto:0"))
     }
+
+    @Test fun stepsAutoInTens() {
+        val p = StickPacing.parse("auto:60")!!
+        assertEquals("auto:70", p.step(1).format())
+        assertEquals("auto:50", p.step(-1).format())
+        assertEquals("auto:70", StickPacing.parse("auto:61")!!.step(1).format())
+        assertEquals("auto:60", StickPacing.parse("auto:61")!!.step(-1).format())
+        assertEquals("auto:160", StickPacing.parse("auto:168")!!.step(-1).format())
+        val low = StickPacing.parse("auto:20")!!
+        assertEquals(low, low.step(-1))
+        val high = StickPacing.parse("auto:240")!!
+        assertEquals(high, high.step(1))
+    }
+
+    @Test fun stepsFixedAlongTheLadder() {
+        assertEquals("fixed:150", StickPacing.parse("fixed:125")!!.step(1).format())
+        assertEquals("fixed:100", StickPacing.parse("fixed:125")!!.step(-1).format())
+        assertEquals("fixed:40", StickPacing.parse("fixed:33")!!.step(1).format())
+        assertEquals("fixed:30", StickPacing.parse("fixed:33")!!.step(-1).format())
+        val top = StickPacing.parse("fixed:1000")!!
+        assertEquals(top, top.step(1))
+        val off = StickPacing.parse("off")!!
+        assertEquals(off, off.step(1))
+        assertEquals("", off.rateLabel())
+        assertEquals("Up to 60 per second", StickPacing.DEFAULT.rateLabel())
+        assertEquals("125 per second", StickPacing.parse("fixed")!!.rateLabel())
+    }
 }

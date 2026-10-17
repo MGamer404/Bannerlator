@@ -298,6 +298,7 @@ import com.winlator.star.ui.theme.SurfaceVariant
 import com.winlator.star.ui.theme.SurfaceVariant as SurfaceVariantColor
 import com.winlator.star.widget.CPUListView
 import com.winlator.star.ui.components.EnvVarsEditor
+import com.winlator.star.ui.components.StickRateStepper
 import com.winlator.star.ui.components.AudioSettingsDialog
 import com.winlator.star.ui.components.audioConfigFromEnv
 import com.winlator.star.ui.components.audioConfigToEnv
@@ -5220,6 +5221,20 @@ private fun DpSlider(
     }
 }
 
+/** The Stick updates rate's − / + (ui.components.StickRateStepper); D-pad left / right step it too. */
+@Composable
+private fun DpStickRate(dp: SettingsDpad, id: String, pacing: StickPacing, onChange: (StickPacing) -> Unit) {
+    SideEffect {
+        dp.actions[id] = ControlActions(
+            onLeft = { onChange(pacing.step(-1)) },
+            onRight = { onChange(pacing.step(1)) },
+        )
+    }
+    DpadHighlight(focused = dp.isFocused(id), modifier = Modifier.dpadBringIntoView(dp, id)) {
+        StickRateStepper(pacing, onChange = onChange)
+    }
+}
+
 @Composable
 private fun DpButton(
     dp: SettingsDpad, id: String, onActivate: () -> Unit, modifier: Modifier = Modifier,
@@ -8033,20 +8048,7 @@ internal fun ShortcutSettingsDialogScreen(
                                 R.string.help_stick_pacing_game
                             ) { helpRes = it }
                             if (ownPacing != null && ownPacing.mode != StickPacing.MODE_OFF) {
-                                val auto = ownPacing.mode == StickPacing.MODE_AUTO
-                                Text(
-                                    if (auto) "Up to ${ownPacing.hz} per second" else "${ownPacing.hz} per second",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                                DpSlider(
-                                    dp, "stickPacingHz",
-                                    value = ownPacing.hz.toFloat(),
-                                    onValueChange = { stickPacingOwn = StickPacing(ownPacing.mode, it.toInt()).format() },
-                                    valueRange = if (auto) StickPacing.AUTO_MIN.toFloat()..StickPacing.AUTO_MAX.toFloat()
-                                                 else StickPacing.FIXED_MIN.toFloat()..StickPacing.FIXED_MAX.toFloat(),
-                                    step = if (auto) 10f else 25f,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                DpStickRate(dp, "stickPacingHz", ownPacing) { stickPacingOwn = it.format() }
                             }
                             // Controller identity: what the virtual pads say they are to this game.
                             val identityChoices = remember { ControllerIdentity.wineChoices() }

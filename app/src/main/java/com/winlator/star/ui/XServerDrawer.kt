@@ -4589,13 +4589,22 @@ private fun PadSection() {
         enabled = !pacingLocked
     )
     if (pacing.mode != StickPacing.MODE_OFF) {
-        val range = if (pacing.mode == StickPacing.MODE_AUTO) StickPacing.AUTO_MIN..StickPacing.AUTO_MAX
-                    else StickPacing.FIXED_MIN..StickPacing.FIXED_MAX
-        var hz by remember(pad.pacing) { mutableIntStateOf(pacing.hz) }
-        IntSlider(if (pacing.mode == StickPacing.MODE_AUTO) "Up to (per second)" else "Per second", hz, range,
-            onValueChange = { hz = it },
-            onValueChangeFinished = { XServerDialogState.onPadPacing?.invoke(StickPacing(pacing.mode, hz).format()) },
-            enabled = !pacingLocked)
+        // − / + (core.StickPacing.step) rather than a slider: a scroll of this menu that began on the
+        // slider changed the rate.
+        val down = pacing.step(-1)
+        val up = pacing.step(1)
+        Spacer(Modifier.height(6.dp))
+        Text(pacing.rateLabel(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.height(4.dp))
+        ModeChipGrid(
+            listOf(
+                Triple<String, Boolean, () -> Unit>("−", false) { XServerDialogState.onPadPacing?.invoke(down.format()) },
+                Triple<String, Boolean, () -> Unit>("+", false) { XServerDialogState.onPadPacing?.invoke(up.format()) },
+            ),
+            perRow = 2,
+            enabled = !pacingLocked,
+            disabledIndices = setOfNotNull(0.takeIf { down == pacing }, 1.takeIf { up == pacing })
+        )
     }
     PadNote(if (pad.nowHz > 0) "Now: ${pad.nowHz} Hz" else "Now: no game reading the pad yet")
     pad.pacingLockedReason?.let { PadNote(it) }

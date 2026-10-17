@@ -85,6 +85,37 @@ public final class StickPacing {
         }
     }
 
+    /** The rate line under the mode: "Up to 60 per second" / "125 per second" / "" (Unpaced). */
+    public String rateLabel() {
+        switch (mode) {
+            case MODE_FIXED: return hz + " per second";
+            case MODE_OFF: return "";
+            default: return "Up to " + hz + " per second";
+        }
+    }
+
+    /** The Fixed rates the editors' − / + step through. */
+    private static final int[] FIXED_STEPS = {30, 40, 50, 60, 75, 90, 100, 125, 150, 200, 250, 300, 400, 500, 750, 1000};
+
+    /**
+     * One − (dir < 0) or + (dir > 0) step of the editors' rate buttons, which replaced the sliders (a
+     * scroll that began on a slider moved it). Auto moves in tens, a value between two tens going to
+     * the next one in that direction; Fixed moves along FIXED_STEPS. This pacing itself at the end of
+     * the range, for Unpaced and for dir 0.
+     */
+    public StickPacing step(int dir) {
+        if (mode == MODE_OFF || dir == 0) return this;
+        int next = hz;
+        if (mode == MODE_AUTO) {
+            next = clamp(dir > 0 ? (hz / 10 + 1) * 10 : ((hz + 9) / 10 - 1) * 10, AUTO_MIN, AUTO_MAX);
+        } else if (dir > 0) {
+            for (int s : FIXED_STEPS) if (s > hz) { next = s; break; }
+        } else {
+            for (int i = FIXED_STEPS.length - 1; i >= 0; i--) if (FIXED_STEPS[i] < hz) { next = FIXED_STEPS[i]; break; }
+        }
+        return next == hz ? this : new StickPacing(mode, next);
+    }
+
     public static StickPacing forContainer(Container container) {
         StickPacing p = container != null ? parse(container.getExtra(EXTRA, "")) : null;
         return p != null ? p : DEFAULT;

@@ -103,6 +103,7 @@ import com.winlator.star.widget.ColorPickerView
 import com.winlator.star.widget.CPUListView
 import com.winlator.star.ui.components.CollapsibleRail
 import com.winlator.star.ui.components.ContainerGlossarySheet
+import com.winlator.star.ui.components.StickRateStepper
 import com.winlator.star.ui.components.EnvVarsEditor
 import com.winlator.star.ui.components.PlayerSlotsEditor
 import com.winlator.star.ui.components.RailItem
@@ -2634,17 +2635,7 @@ private fun AdvancedTab(
                 }
             }
             if (pacing.mode != StickPacing.MODE_OFF) {
-                val auto = pacing.mode == StickPacing.MODE_AUTO
-                Text(
-                    (if (auto) "Up to ${pacing.hz} per second" else "${pacing.hz} per second"),
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Slider(
-                    value = pacing.hz.toFloat(),
-                    onValueChange = { viewModel.stickPacing = StickPacing(pacing.mode, it.toInt()).format() },
-                    valueRange = if (auto) StickPacing.AUTO_MIN.toFloat()..StickPacing.AUTO_MAX.toFloat()
-                                 else StickPacing.FIXED_MIN.toFloat()..StickPacing.FIXED_MAX.toFloat()
-                )
+                StickRateStepper(pacing) { viewModel.stickPacing = it.format() }
             }
             // Controller identity (core.ControllerIdentity): what the virtual pads say they are to the
             // game (FAKE_EVDEV_IDENTITY at launch). Applies the next time the game starts.
