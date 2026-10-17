@@ -5138,7 +5138,7 @@ private fun DpDrop(
 private fun OverrideDrop(
     dp: SettingsDpad, id: String, label: String, containerLabel: String,
     values: List<String>, labels: List<String>, selected: String, onSelect: (String) -> Unit,
-    helpRes: Int, onHelp: (Int) -> Unit, enabled: Boolean = true,
+    helpRes: Int, enabled: Boolean = true, onHelp: (Int) -> Unit,
 ) {
     val allValues = listOf("") + values
     val allLabels = listOf("Use container default ($containerLabel)") + labels
@@ -8019,8 +8019,8 @@ internal fun ShortcutSettingsDialogScreen(
                                 onOff(DInputVibration.forContainer(shortcut.container)),
                                 onOffValues, onOffLabels, ffEnv?.let { if (it) "1" else "0" } ?: dinputVibrationOwn,
                                 { dinputVibrationOwn = it },
-                                R.string.help_dinput_vibration_game, { helpRes = it }, enabled = ffEnv == null
-                            )
+                                R.string.help_dinput_vibration_game, enabled = ffEnv == null
+                            ) { helpRes = it }
                             if (ffEnv != null) {
                                 Text(DInputVibration.ENV_LOCKED, style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
