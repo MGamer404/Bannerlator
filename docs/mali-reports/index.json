@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-10-17T14-39-40-51e301",
+    "created": "2026-10-17T14:39:40.101Z",
+    "reporter": "",
+    "device": "Samsung galaxy a04e",
+    "gpu": "Mali",
+    "game": "NFSMW 2005",
+    "symptom": "Crashes / closes to home",
+    "logs": 0
+  },
+  {
     "id": "2026-10-15T11-55-54-628360",
     "created": "2026-10-15T11:55:54.703Z",
     "reporter": "",
