@@ -2426,7 +2426,8 @@ fn ff_mode_comes_from_the_control_block_and_the_environment_wins() {
 }
 
 /// One thread's share of the smoke test: 10k calls on its own effects (at most 6, so two threads
-/// never fill the slot's 16), every result checked.
+/// never fill the slot's 16), every result checked. A short pause every 50 calls spreads them over
+/// ~100+ ms, so they also contend with the engine thread's ticks and sends, not just each other.
 fn ff_churn(h: u32, seed: u32) -> Result<u64, String> {
     let mut mine: Vec<(i16, u16)> = Vec::new();
     let mut x = seed;
@@ -2482,6 +2483,9 @@ fn ff_churn(h: u32, seed: u32) -> Result<u64, String> {
         };
         ensure!(r == 0, "call {} (op {}) failed: {}", i, i % 6, r);
         calls += 1;
+        if i % 50 == 49 {
+            std::thread::sleep(Duration::from_micros(500));
+        }
     }
     for (id, _) in mine.drain(..) {
         ensure!(bannerin_ff_erase(h, id as c_int) == 0, "final erase of {}", id);
@@ -2546,6 +2550,7 @@ fn ff_two_threads_10k_calls_each() {
         ensure!(v.windows(2).all(|p| !(zero(&p[0]) && zero(&p[1]))), "a stop is sent once");
         ensure!(nonzero as f64 <= (secs + 0.35) * 25.0 + 2.0, "{} non-zero datagrams in {:.2} s (25/s at most)", nonzero, secs);
         ensure!(s.ff_send_failures == 0 && s.ff_uploads > 0 && s.ff_plays > 0, "stats");
+        ensure!(secs >= 0.05 && nonzero >= 2, "the calls overlapped the engine: {:.3} s, {} non-zero datagrams", secs, nonzero);
         ensure!(bannerin_detach(a.h) == 0 && bannerin_detach(b.h) == 0, "detach");
         Ok(())
     });
