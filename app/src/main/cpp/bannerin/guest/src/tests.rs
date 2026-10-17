@@ -1938,7 +1938,7 @@ fn identity_is_taken_at_attach_and_never_changes_under_an_open_handle() {
     let rpid = spawn("ident-reader", || {
         shm.wait(0, 1, 30)?;
         sc.enter();
-        ensure!(bannerin_api_version() == 2, "api version {}", bannerin_api_version());
+        ensure!(bannerin_api_version() == 3, "api version {}", bannerin_api_version());
         let s0 = slot_ident(0).map_err(|e| format!("slot identity errno {}", e))?;
         ensure!(
             id_name(&s0) == "Xbox 360 Controller (0)"
@@ -2218,4 +2218,335 @@ fn identity_churn_never_tears_a_name() {
         Ok(())
     });
     assert_eq!((wait_pid(wpid), wait_pid(rpid)), (0, 0));
+}
+
+// ---------------------------------------------------------------------------------------------
+// force feedback (API 3)
+
+use bannerin_core::ff::{self, Envelope, FfEffect};
+use bannerin_core::layout::{CTL_FF_OFF, CTL_FF_ON};
+use bannerin_core::writer::STAT_READER_FF_DATAGRAMS;
+
+/// A stand-in for the app's rumble listener (BXR1 datagrams on 127.0.0.1), on a free port this
+/// process's engine is pointed at. Make it before the first call into the library.
+struct Listener(std::net::UdpSocket);
+
+impl Listener {
+    fn new() -> Listener {
+        let s = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind a UDP port");
+        std::env::set_var("BANNERIN_XINPUT_RUMBLE_PORT", s.local_addr().unwrap().port().to_string());
+        Listener(s)
+    }
+
+    /// The next datagram within `ms`: (slot, strong, weak, duration ms).
+    fn next(&self, ms: u64) -> Result<(u8, u16, u16, u16), String> {
+        self.0.set_read_timeout(Some(Duration::from_millis(ms.max(1)))).unwrap();
+        let mut b = [0u8; 64];
+        let n = self.0.recv(&mut b).map_err(|e| format!("no datagram within {} ms ({})", ms, e))?;
+        ensure!(n == 12 && b[0] == 14 && &b[1..5] == b"BXR1", "not a BXR1 datagram: {:?}", &b[..n]);
+        let u = |i: usize| u16::from_le_bytes([b[i], b[i + 1]]);
+        Ok((b[5], u(6), u(8), u(10)))
+    }
+}
+
+fn ff_up(h: u32, e: FfEffect) -> Result<i16, i32> {
+    let mut e = e;
+    let r = unsafe { bannerin_ff_upload(h, &mut e, core::mem::size_of::<FfEffect>()) };
+    if r < 0 {
+        Err(-r)
+    } else {
+        Ok(e.id)
+    }
+}
+
+fn ff_caps(h: u32) -> Result<[u8; 16], i32> {
+    let mut b = [0u8; 16];
+    let r = unsafe { bannerin_ff_bits(h, b.as_mut_ptr(), b.len()) };
+    if r < 0 {
+        Err(-r)
+    } else if r != 16 {
+        Err(0)
+    } else {
+        Ok(b)
+    }
+}
+
+const STOP: (u8, u16, u16, u16) = (1, 0, 0, 1500);
+
+#[test]
+fn ff_effects_reach_the_app_as_bxr1_datagrams() {
+    let sc = Scene::new("ff");
+    run("ff-e2e", || {
+        let rx = Listener::new();
+        let mut w = sc.writer(1);
+        w.open();
+        sc.enter();
+        let r = Rd::attach(1, sys::O_NONBLOCK)?;
+        ensure!(bannerin_api_version() == 3, "api version {}", bannerin_api_version());
+        ensure!(ff_caps(r.h) == Ok(ff::bits(true)), "mode On by default: {:?}", ff_caps(r.h));
+        let mut small = [0u8; 4];
+        ensure!(unsafe { bannerin_ff_bits(r.h, small.as_mut_ptr(), 4) } == 4, "a short buffer gets the first bytes");
+        ensure!(unsafe { bannerin_ff_bits(r.h, core::ptr::null_mut(), 0) } == 0, "len 0");
+        ensure!(unsafe { bannerin_ff_bits(0, small.as_mut_ptr(), 4) } == -sys::EBADF, "bad handle");
+        let mut e = FfEffect::rumble(1, 1);
+        ensure!(unsafe { bannerin_ff_upload(r.h, &mut e, 10) } == -sys::EINVAL, "short size");
+        ensure!(unsafe { bannerin_ff_upload(r.h, core::ptr::null_mut(), 44) } == -sys::EINVAL, "NULL");
+        ensure!(bannerin_ff_play(r.h, 0, 1) == -sys::EINVAL, "no effect 0 yet");
+
+        // a 300 ms rumble: a datagram when it starts, the stop when its run is over
+        let id = ff_up(r.h, FfEffect::rumble(0xC000, 0x4000).replay(300, 0)).map_err(|e| format!("upload errno {}", e))?;
+        ensure!(id == 0, "first id {}", id);
+        let t0 = Instant::now();
+        ensure!(bannerin_ff_play(r.h, 0, 1) == 0, "play");
+        let d = rx.next(1000)?;
+        ensure!(d == (1, 0xC000, 0x4000, 1500), "start datagram {:?}", d);
+        let d = rx.next(2000)?;
+        let ms = t0.elapsed().as_millis();
+        ensure!(d == STOP, "stop datagram {:?}", d);
+        ensure!((280..1000).contains(&ms), "stopped after {} ms (a run of 300 ms)", ms);
+        ensure!(rx.next(200).is_err(), "nothing after the stop");
+
+        // a constant force on the strong motor at half gain, stopped by the game
+        ensure!(bannerin_ff_set_gain(r.h, 0x8000) == 0, "gain");
+        let c = ff_up(r.h, FfEffect::constant(0x7FFF, Envelope::NONE)).map_err(|e| format!("upload errno {}", e))?;
+        ensure!(c == 1, "second id {}", c);
+        ensure!(bannerin_ff_play(r.h, 1, 1) == 0, "play constant");
+        let d = rx.next(1000)?;
+        ensure!(d == (1, 0x8000, 0, 1500), "constant at half gain {:?}", d);
+        ensure!(bannerin_ff_play(r.h, 1, 0) == 0, "stop");
+        ensure!(rx.next(1000)? == STOP, "stopped");
+        ensure!(bannerin_ff_set_gain(r.h, 0xFFFF) == 0, "gain back");
+
+        // the effects are the slot's: another handle plays them, and uploads its own
+        let r2 = Rd::attach(1, sys::O_NONBLOCK)?;
+        let q = ff_up(r2.h, FfEffect::rumble(0x1000, 0)).map_err(|e| format!("upload errno {}", e))?;
+        ensure!(q == 2, "third id {}", q);
+        ensure!(bannerin_ff_play(r2.h, 0, 1) == 0, "the other handle plays effect 0");
+        ensure!(rx.next(1000)? == (1, 0xC000, 0x4000, 1500), "shared effect");
+        ensure!(rx.next(2000)? == STOP, "its stop");
+        // an endless rumble the first handle uploaded, playing when it detaches: stopped and erased
+        let e = ff_up(r.h, FfEffect::rumble(0x2000, 0x2000)).map_err(|e| format!("upload errno {}", e))?;
+        ensure!(e == 3 && bannerin_ff_play(r.h, 3, 1) == 0, "endless rumble {}", e);
+        ensure!(rx.next(1000)? == (1, 0x2000, 0x2000, 1500), "endless rumble on");
+        ensure!(bannerin_detach(r.h) == 0, "detach");
+        ensure!(rx.next(1000)? == STOP, "detach stops what the handle uploaded");
+        ensure!(bannerin_ff_play(r2.h, 1, 1) == -sys::EINVAL && bannerin_ff_play(r2.h, 3, 1) == -sys::EINVAL, "and erases it");
+        ensure!(bannerin_ff_erase(r2.h, 2) == 0, "the other handle's effect stayed");
+        ensure!(ff_up(r2.h, FfEffect::rumble(1, 1)) == Ok(0), "the freed ids are reused, lowest first");
+        ensure!(bannerin_ff_play(r.h, 0, 1) == -sys::EBADF, "stale handle");
+
+        // counters: the process's, and the slot file's (an ff call flushes them into it)
+        std::thread::sleep(Duration::from_millis(50)); // the engine counts a datagram after sending it
+        let s = stats();
+        ensure!(
+            (s.ff_uploads, s.ff_plays, s.ff_datagrams, s.ff_send_failures) == (5, 4, 8, 0),
+            "process ff stats: uploads {} plays {} datagrams {} failures {}",
+            s.ff_uploads,
+            s.ff_plays,
+            s.ff_datagrams,
+            s.ff_send_failures
+        );
+        ensure!(bannerin_ff_set_autocenter(r2.h, 0x4000) == 0, "autocenter accepted");
+        let st = slot_view(1);
+        ensure!(
+            (st.reader_ff_uploads, st.reader_ff_plays, st.reader_ff_datagrams, st.reader_ff_guard_fades) == (5, 4, 8, 0),
+            "slot ff stats {:?}",
+            st
+        );
+        ensure!(w.stat(STAT_READER_FF_DATAGRAMS) == 8, "the app reads them: {}", w.stat(STAT_READER_FF_DATAGRAMS));
+        ensure!(bannerin_detach(r2.h) == 0, "detach r2");
+        Ok(())
+    });
+}
+
+#[test]
+fn ff_mode_comes_from_the_control_block_and_the_environment_wins() {
+    let sc = Scene::new("ffmode");
+    let sine = || FfEffect::periodic(ff::FF_SINE, 100, 0x4000, 0, 0, Envelope::NONE);
+    run("ff-mode-app", || {
+        let mut w = SlotWriter::new(0);
+        w.set_ff_mode(CTL_FF_OFF);
+        w.prepare(sc.backing().as_bytes()).map_err(|e| format!("prepare {}", e))?;
+        w.open();
+        sc.enter();
+        let r = Rd::attach(0, sys::O_NONBLOCK)?;
+        ensure!(ff_caps(r.h) == Ok(ff::bits(false)), "the app's Off: rumble and gain only, {:?}", ff_caps(r.h));
+        ensure!(ff_up(r.h, sine()) == Err(sys::EINVAL), "periodic in Off");
+        ensure!(ff_up(r.h, FfEffect::constant(0x4000, Envelope::NONE)) == Err(sys::EINVAL), "constant in Off");
+        ensure!(ff_up(r.h, FfEffect::rumble(0x4000, 0)) == Ok(0), "rumble in Off");
+        // the app turns it on: the open handle keeps what it told the game, a new one gets On
+        w.set_ff_mode(CTL_FF_ON);
+        ensure!(ff_caps(r.h) == Ok(ff::bits(false)), "the open handle keeps Off");
+        ensure!(ff_up(r.h, sine()) == Err(sys::EINVAL), "still Off");
+        let r2 = Rd::attach(0, sys::O_NONBLOCK)?;
+        ensure!(ff_caps(r2.h) == Ok(ff::bits(true)), "a new handle takes On");
+        ensure!(ff_up(r2.h, sine()) == Ok(1), "periodic in On");
+        Ok(())
+    });
+    run("ff-mode-env-on", || {
+        let mut w = SlotWriter::new(0);
+        w.set_ff_mode(CTL_FF_OFF);
+        w.prepare(sc.backing().as_bytes()).map_err(|e| format!("prepare {}", e))?;
+        w.open();
+        sc.enter();
+        std::env::set_var("BANNERIN_DINPUT_FF", "1");
+        let r = Rd::attach(0, sys::O_NONBLOCK)?;
+        ensure!(ff_caps(r.h) == Ok(ff::bits(true)), "BANNERIN_DINPUT_FF=1 wins over the app's Off");
+        ensure!(ff_up(r.h, sine()) == Ok(0), "periodic");
+        Ok(())
+    });
+    run("ff-mode-env-off", || {
+        let mut w = SlotWriter::new(0);
+        w.set_ff_mode(CTL_FF_ON);
+        w.prepare(sc.backing().as_bytes()).map_err(|e| format!("prepare {}", e))?;
+        w.open();
+        sc.enter();
+        std::env::set_var("BANNERIN_DINPUT_FF", "0");
+        let r = Rd::attach(0, sys::O_NONBLOCK)?;
+        ensure!(ff_caps(r.h) == Ok(ff::bits(false)), "BANNERIN_DINPUT_FF=0 wins over the app's On");
+        ensure!(ff_up(r.h, sine()) == Err(sys::EINVAL), "periodic in Off");
+        Ok(())
+    });
+    run("ff-mode-older-file", || {
+        let mut w = SlotWriter::new(0);
+        w.set_ff_mode(CTL_FF_OFF);
+        w.prepare(sc.backing().as_bytes()).map_err(|e| format!("prepare {}", e))?;
+        w.open();
+        // a format 1.5 block carries no ff_mode (its word is reserved): force feedback is on
+        let sh = map_shared(&sc.pad(0));
+        sh.header.minor.store(5, Relaxed);
+        sh.ctl.rec[bannerin_core::layout::rec::FF_MODE].store(0, Relaxed);
+        sc.enter();
+        let r = Rd::attach(0, sys::O_NONBLOCK)?;
+        ensure!(ff_caps(r.h) == Ok(ff::bits(true)), "a 1.5 file: On");
+        ensure!(ff_up(r.h, sine()) == Ok(0), "periodic");
+        ensure!(slot_view(0).reader_ff_uploads == 0, "no ff counters in a 1.5 file");
+        Ok(())
+    });
+}
+
+/// One thread's share of the smoke test: 10k calls on its own effects (at most 6, so two threads
+/// never fill the slot's 16), every result checked.
+fn ff_churn(h: u32, seed: u32) -> Result<u64, String> {
+    let mut mine: Vec<(i16, u16)> = Vec::new();
+    let mut x = seed;
+    let mut calls = 0u64;
+    for i in 0..10_000u32 {
+        x = x.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+        let pick = (x >> 16) as usize;
+        let r: c_int = match i % 6 {
+            0 | 1 if mine.len() < 6 => {
+                let e = match pick % 3 {
+                    0 => FfEffect::rumble(pick as u16, (pick >> 3) as u16).replay((pick % 50) as u16, 0),
+                    1 => FfEffect::periodic(ff::FF_SINE, (pick % 200) as u16, 0x3000, 0, 0, Envelope::NONE),
+                    _ => FfEffect::constant(0x2000, Envelope::NONE).replay(20, 5),
+                };
+                let kind = e.kind;
+                match ff_up(h, e) {
+                    Ok(id) => {
+                        mine.push((id, kind));
+                        0
+                    }
+                    Err(e) => -e,
+                }
+            }
+            2 if !mine.is_empty() => bannerin_ff_play(h, mine[pick % mine.len()].0 as c_int, 1 + (pick % 3) as i32),
+            3 if !mine.is_empty() => {
+                let (id, kind) = mine[pick % mine.len()];
+                let mut e = match kind {
+                    ff::FF_RUMBLE => FfEffect::rumble(0x7000, 0x100),
+                    ff::FF_PERIODIC => FfEffect::periodic(ff::FF_SQUARE, 40, 0x1000, 0x100, 0, Envelope::NONE),
+                    _ => FfEffect::constant(-0x1000, Envelope::NONE),
+                };
+                e.id = id;
+                unsafe { bannerin_ff_upload(h, &mut e, core::mem::size_of::<FfEffect>()) }
+            }
+            4 if !mine.is_empty() => {
+                if pick % 2 == 0 {
+                    bannerin_ff_play(h, mine[pick % mine.len()].0 as c_int, 0)
+                } else {
+                    bannerin_ff_set_gain(h, (pick as u16) | 0x8000)
+                }
+            }
+            5 if !mine.is_empty() => {
+                let (id, _) = mine.swap_remove(pick % mine.len());
+                bannerin_ff_erase(h, id as c_int)
+            }
+            _ => {
+                let mut b = [0u8; 16];
+                match unsafe { bannerin_ff_bits(h, b.as_mut_ptr(), b.len()) } {
+                    16 => 0,
+                    n => n.min(-1),
+                }
+            }
+        };
+        ensure!(r == 0, "call {} (op {}) failed: {}", i, i % 6, r);
+        calls += 1;
+    }
+    for (id, _) in mine.drain(..) {
+        ensure!(bannerin_ff_erase(h, id as c_int) == 0, "final erase of {}", id);
+    }
+    Ok(calls)
+}
+
+#[test]
+fn ff_two_threads_10k_calls_each() {
+    let sc = Scene::new("ffthreads");
+    run("ff-threads", || {
+        let rx = Listener::new();
+        let mut w = sc.writer(2);
+        w.open();
+        sc.enter();
+        let a = Rd::attach(2, sys::O_NONBLOCK)?;
+        let b = Rd::attach(2, sys::O_NONBLOCK)?;
+        // drain the listener on its own thread: a full socket buffer would drop the last datagrams
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sock = rx.0.try_clone().map_err(|e| format!("clone socket: {}", e))?;
+        let got = {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                sock.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
+                let mut v: Vec<(u8, u16, u16)> = Vec::new();
+                let mut buf = [0u8; 64];
+                while !stop.load(SeqCst) {
+                    if let Ok(12) = sock.recv(&mut buf) {
+                        v.push((buf[5], u16::from_le_bytes([buf[6], buf[7]]), u16::from_le_bytes([buf[8], buf[9]])));
+                    }
+                }
+                v
+            })
+        };
+        let (ha, hb) = (a.h, b.h);
+        let t0 = Instant::now();
+        let ta = std::thread::spawn(move || ff_churn(ha, 1));
+        let tb = std::thread::spawn(move || ff_churn(hb, 2));
+        let na = ta.join().map_err(|_| "thread a panicked".to_string())??;
+        let nb = tb.join().map_err(|_| "thread b panicked".to_string())??;
+        let secs = t0.elapsed().as_secs_f64();
+        std::thread::sleep(Duration::from_millis(300)); // the engine's last ticks, and its stop
+        stop.store(true, SeqCst);
+        let v = got.join().map_err(|_| "listener thread panicked".to_string())?;
+        let zero = |d: &(u8, u16, u16)| d.1 == 0 && d.2 == 0;
+        let nonzero = v.iter().filter(|&d| !zero(d)).count();
+        let s = stats();
+        say(&format!(
+            "[ff-threads] 2 x {} calls in {:.2} s; {} datagrams ({} non-zero); uploads {} plays {} fades {} failures {}\n",
+            na,
+            secs,
+            v.len(),
+            nonzero,
+            s.ff_uploads,
+            s.ff_plays,
+            s.ff_guard_fades,
+            s.ff_send_failures
+        ));
+        ensure!(na == 10_000 && nb == 10_000, "calls {} / {}", na, nb);
+        ensure!(v.iter().all(|d| d.0 == 2), "datagrams for slot 2 only");
+        ensure!(v.last().map_or(true, zero), "the motors end stopped: {:?}", v.last());
+        ensure!(v.windows(2).all(|p| !(zero(&p[0]) && zero(&p[1]))), "a stop is sent once");
+        ensure!(nonzero as f64 <= (secs + 0.35) * 25.0 + 2.0, "{} non-zero datagrams in {:.2} s (25/s at most)", nonzero, secs);
+        ensure!(s.ff_send_failures == 0 && s.ff_uploads > 0 && s.ff_plays > 0, "stats");
+        ensure!(bannerin_detach(a.h) == 0 && bannerin_detach(b.h) == 0, "detach");
+        Ok(())
+    });
 }

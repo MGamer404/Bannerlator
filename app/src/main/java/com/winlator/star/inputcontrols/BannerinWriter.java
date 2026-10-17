@@ -85,7 +85,15 @@ public final class BannerinWriter {
     public static final int STAT_READER_IDENTITY_READS = 28;
     /** This slot's own control gen (what the readers' applied gen converges to). */
     public static final int STAT_CONTROL_GEN = 29;
-    private static final int STAT_COUNT = 30;
+    /** Force feedback (format 1.6), all reader processes: effects uploaded (new or updated). */
+    public static final int STAT_READER_FF_UPLOADS = 30;
+    /** Force-feedback effects started (played with a count). */
+    public static final int STAT_READER_FF_PLAYS = 31;
+    /** Rumble datagrams the guest's force-feedback engine sent to the app. */
+    public static final int STAT_READER_FF_DATAGRAMS = 32;
+    /** Anti-buzz guard fades begun (a constant force held steady for 2 s, faded out). */
+    public static final int STAT_READER_FF_GUARD_FADES = 33;
+    private static final int STAT_COUNT = 34;
 
     // Values for setSessionControl (match bannerin_core::layout::CTL_*).
     /** Stick pacing: leave it to the guest environment (BANNERIN_AXIS_HZ / _AUTO_MAX). */
@@ -104,6 +112,12 @@ public final class BannerinWriter {
     public static final int XINPUT_FLAG_FORWARD_AVAILABLE = 1;
     /** xinputFlags bit: hide the pads from XInput. */
     public static final int XINPUT_FLAG_HIDDEN = 2;
+    /** Force feedback (setFfMode): unset, which the guest treats as on. */
+    public static final int FF_MODE_UNSET = 0;
+    /** Force feedback on: DirectInput rumble, periodic, constant, ramp and condition effects. */
+    public static final int FF_MODE_ON = 1;
+    /** Force feedback off: rumble effects only. */
+    public static final int FF_MODE_OFF = 2;
 
     // Each slot's counters as they stood when releaseAllRingSlots() retired its file, for the
     // session-end diagnostics that may run after the release.
@@ -138,6 +152,7 @@ public final class BannerinWriter {
     private static native void nativeSetSessionControl(int axisMode, int axisHz, int autoMax,
                                                        int xinputMode, int xinputFlags);
     private static native long nativeGetControlGen(int slot);
+    private static native void nativeSetFfMode(int mode);
 
     // ------------------------------------------------------------------------------------------
     // static (process-wide)
@@ -264,7 +279,22 @@ public final class BannerinWriter {
         if (NATIVE_OK) nativeSetSessionControl(axisMode, axisHz, autoMax, xinputMode, xinputFlags);
     }
 
-    /** The slot's control gen: bumped by every identity or session-control change; 0 if unavailable. */
+    /**
+     * DirectInput force feedback for all four slots: one of FF_MODE_* (anything else = unset). With
+     * it on, the guest offers DirectInput games rumble, periodic, constant, ramp and condition
+     * effects and mixes them into the pad's two motors (vibration arrives as the usual rumble
+     * datagrams); off offers rumble effects only. A guest handle reads the mode when the game opens
+     * the device, so set it with the session settings, before the game starts. BANNERIN_DINPUT_FF=1
+     * or 0 in the guest environment overrides it. Bumps every slot's control gen when it changes.
+     */
+    public static void setFfMode(int mode) {
+        if (NATIVE_OK) nativeSetFfMode(mode);
+    }
+
+    /**
+     * The slot's control gen: bumped by every identity, session-control or force-feedback mode
+     * change; 0 if unavailable.
+     */
     public static long getControlGen(int slot) {
         if (!NATIVE_OK || !validSlot(slot)) return 0;
         return nativeGetControlGen(slot);

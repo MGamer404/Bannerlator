@@ -113,7 +113,7 @@ android)
   say "JNI writer exports"
   JNI="$("$NDK_BIN/llvm-nm" -D --defined-only "$SO" | awk '{print $NF}')"
   for f in Prepare Release Open Publish SetOverlay Reset Unplug Stat GameFrame \
-           SetSlotIdentity ClearSlotIdentity SetSessionControl GetControlGen; do
+           SetSlotIdentity ClearSlotIdentity SetSessionControl GetControlGen SetFfMode; do
     grep -qx "Java_com_winlator_star_inputcontrols_BannerinWriter_native$f" <<<"$JNI" \
       || die "libbannerin.so does not export native$f"
   done

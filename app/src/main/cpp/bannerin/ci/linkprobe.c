@@ -6,6 +6,7 @@
 #include "bannerin.h"
 
 #include <fcntl.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,6 +18,10 @@ __attribute__((visibility("default"))) long bannerin_linkprobe_entry(int slot);
 typedef char bannerin_identity_size_check[(sizeof(struct bannerin_identity) == 92) ? 1 : -1];
 typedef char bannerin_identity_key_check[(offsetof(struct bannerin_identity, key) == 12) ? 1 : -1];
 typedef char bannerin_identity_name_check[(offsetof(struct bannerin_identity, name) == 28) ? 1 : -1];
+/* struct bannerin_ff_effect must match the library's (core/src/ff.rs FfEffect). */
+typedef char bannerin_ff_effect_size_check[(sizeof(struct bannerin_ff_effect) == 44) ? 1 : -1];
+typedef char bannerin_ff_effect_u_check[(offsetof(struct bannerin_ff_effect, u) == 12) ? 1 : -1];
+typedef char bannerin_ff_effect_delay_check[(offsetof(struct bannerin_ff_effect, replay_delay) == 8) ? 1 : -1];
 
 static void probe_log(int level, const char *line)
 {
@@ -31,6 +36,8 @@ long bannerin_linkprobe_entry(int slot)
     struct bannerin_stats gs;
     struct bannerin_slot_stats ss;
     struct bannerin_identity id;
+    struct bannerin_ff_effect fx;
+    uint8_t ffbits[16];
     unsigned char buf[BANNERIN_EVENT_SIZE * 4];
     long acc = 0;
     int fd;
@@ -44,6 +51,14 @@ long bannerin_linkprobe_entry(int slot)
         acc += (long)bannerin_read(h, buf, sizeof buf, 1);
         acc += bannerin_current_state(h, &st);
         acc += bannerin_identity(h, &id, sizeof id);
+        acc += bannerin_ff_bits(h, ffbits, sizeof ffbits);
+        memset(&fx, 0, sizeof fx);
+        fx.type = BANNERIN_FF_RUMBLE;
+        fx.id = -1;
+        fx.u.rumble.strong_magnitude = 0x8000;
+        acc += bannerin_ff_upload(h, &fx, sizeof fx);
+        acc += bannerin_ff_play(h, fx.id, 1) + bannerin_ff_set_gain(h, 0xffff) + bannerin_ff_set_autocenter(h, 0);
+        acc += bannerin_ff_erase(h, fx.id);
         acc += bannerin_detach(h);
     }
     acc += bannerin_get_stats(&gs, sizeof gs);

@@ -360,6 +360,23 @@ pub extern "system" fn Java_com_winlator_star_inputcontrols_BannerinWriter_nativ
     }
 }
 
+/// `static native void nativeSetFfMode(int mode)`: DirectInput force feedback for all four slots
+/// (0 unset = on, 1 on, 2 off: rumble effects only; anything else = unset), written into the live
+/// files now and into later files when they are created. A guest handle reads it when it
+/// attaches; BANNERIN_DINPUT_FF in the guest overrides it.
+#[no_mangle]
+pub extern "system" fn Java_com_winlator_star_inputcontrols_BannerinWriter_nativeSetFfMode(
+    _env: JEnv,
+    _cls: JClass,
+    mode: JInt,
+) {
+    for i in 0..SLOTS.len() as JInt {
+        if let Some(mut w) = slot(i) {
+            w.set_ff_mode(mode.max(0) as u32);
+        }
+    }
+}
+
 /// `static native long nativeGetControlGen(int slot)`: the slot's control gen (bumped by every
 /// change to its control record), 0 for a bad slot.
 #[no_mangle]
@@ -436,6 +453,23 @@ mod tests {
         assert_eq!(Java_com_winlator_star_inputcontrols_BannerinWriter_nativeGetControlGen(z(), z(), 2), g1);
         let (_, st) = slot(1).unwrap().control();
         assert_eq!((st.axis_mode, st.axis_hz, st.xinput_mode), (2, 30, 1), "session settings reach every slot");
+    }
+
+    #[test]
+    fn the_ff_mode_reaches_every_slot_and_bumps_the_gen() {
+        fn z<T>() -> *mut T {
+            std::ptr::null_mut()
+        }
+        let gens: Vec<JLong> = (0..4).map(|s| Java_com_winlator_star_inputcontrols_BannerinWriter_nativeGetControlGen(z(), z(), s)).collect();
+        Java_com_winlator_star_inputcontrols_BannerinWriter_nativeSetFfMode(z(), z(), 2);
+        for s in 0..4 {
+            assert_eq!(Java_com_winlator_star_inputcontrols_BannerinWriter_nativeGetControlGen(z(), z(), s), gens[s as usize] + 1);
+            assert_eq!(slot(s).unwrap().control().1.ff_mode, 2);
+        }
+        Java_com_winlator_star_inputcontrols_BannerinWriter_nativeSetFfMode(z(), z(), -5);
+        assert_eq!(slot(3).unwrap().control().1.ff_mode, 0, "out of range: unset");
+        Java_com_winlator_star_inputcontrols_BannerinWriter_nativeSetFfMode(z(), z(), 0);
+        assert_eq!(Java_com_winlator_star_inputcontrols_BannerinWriter_nativeGetControlGen(z(), z(), 0), gens[0] + 2, "the same mode again changes nothing");
     }
 
     #[test]

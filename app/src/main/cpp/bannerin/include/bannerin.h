@@ -86,6 +86,44 @@
  *   releasing anything held), and re-attaches by itself when a valid file appears (again starting
  *   with a full-state frame). Only an explicit unplug by the app (writer destroy()) removes it.
  *
+ * FORCE FEEDBACK (API 3)
+ *   The evdev layer forwards the Linux EV_FF interface of a BANNERIN-backed device (EVIOCGBIT(EV_FF),
+ *   EVIOCSFF, EVIOCRMFF, EV_FF play / FF_GAIN / FF_AUTOCENTER writes) to bannerin_ff_*. The library
+ *   keeps the effects, mixes the playing ones into the pad's two motors (strong = low-frequency,
+ *   weak = high-frequency) and sends them to the app as the 12-byte BXR1 rumble datagram the
+ *   BANNERIN-XInput DLL sends (UDP to 127.0.0.1:BANNERIN_XINPUT_RUMBLE_PORT, default 7947). With
+ *   it, Wine's SDL bus advertises DirectInput force feedback for the pad.
+ *     Effects: up to BANNERIN_FF_MAX_EFFECTS per slot, shared by every handle of the slot; the
+ *       handle that uploaded one owns it, and detaching that handle stops and erases it. A play
+ *       with count > 0 (re)starts it: replay_delay ms, then replay_length ms, count times;
+ *       replay_length 0 plays until stopped. An effect stops by itself when its runs are over.
+ *     Values (evdev's): levels and envelope levels -0x7FFF..0x7FFF (envelope levels absolute),
+ *       rumble magnitudes 0..0xFFFF, periodic phase in 1/65536 of a cycle, times in ms. Periodic:
+ *       offset + magnitude x waveform (square, triangle, sine, saw up, saw down); period 0 = a
+ *       constant of offset + magnitude. Ramp: start_level to end_level over replay_length. The
+ *       envelope ramps the amplitude from attack_level over the first attack_length ms of a run,
+ *       and to fade_level over its last fade_length ms (finite runs). Conditions (spring, friction,
+ *       damper, inertia) are stored and playable but move no motor.
+ *     Motors (mixed every 10 ms while anything plays; nothing plays = no wake-ups): s = |v| / 0x7FFF;
+ *       constant and ramp on the strong motor; a periodic of period >= 80 ms there too (the wave is
+ *       felt), a faster one on the weak motor as (|offset| + 0.7 |magnitude|) / 0x7FFF; rumble on
+ *       both as given. Each motor is the clamped sum times the slot's gain.
+ *     Anti-buzz guard: a constant or ramp whose share stays within 0.02 of one value for 2 s
+ *       fades out over 500 ms and stays off until it moves by more than that or is uploaded or
+ *       played again (a steady centring force would otherwise run a motor flat out).
+ *     Output: a datagram when a motor moves by 1/32 of full scale or to / from zero, at most one
+ *       non-zero datagram per 40 ms, a refresh every second while the motors run (the app plays
+ *       one-shots of the datagram's 1500 ms), and a stop at once. Send failures are counted and
+ *       logged (the first, then at most one line per 10 s); no call ever waits for the network.
+ *     Modes: On offers RUMBLE, PERIODIC (all five waveforms), CONSTANT, RAMP, the four conditions
+ *       and GAIN; Off offers RUMBLE and GAIN only (any other upload: -EINVAL; rumble still works).
+ *       A handle takes its mode when it attaches: BANNERIN_DINPUT_FF ("1" on, "0" off) if set,
+ *       else the slot file's control block (ff_mode, format 1.6; unset = on), else on. It never
+ *       changes under a handle that made a bannerin_ff_* call.
+ *   All of them are thread-safe like the rest of the API (an engine lock held for in-memory work
+ *   only; one engine thread per process, started on first use), never block on I/O, and are
+ *   fork-safe: a forked child starts with no effects.
+ *
  * THREADS, SIGNALS, FORK
  *   All functions are thread-safe and safe to call before the host's constructors run and after
  *   its static destructors (all state is static, nothing is ever torn down). No lock is held while
@@ -108,7 +146,7 @@
 extern "C" {
 #endif
 
-#define BANNERIN_API_VERSION 2u
+#define BANNERIN_API_VERSION 3u
 #define BANNERIN_MAX_SLOTS 4
 #define BANNERIN_BUTTONS 11
 #define BANNERIN_AXES 8
@@ -180,6 +218,11 @@ struct bannerin_stats {
     uint64_t ctl_applied;            /* API 2: control records applied (live pacing changes) */
     uint64_t ctl_busy;               /* control reads that found the record mid-update (retried) */
     uint64_t identity_reads;         /* bannerin_identity / bannerin_slot_identity calls answered */
+    uint64_t ff_uploads;             /* API 3: force-feedback effects uploaded (new or updated) */
+    uint64_t ff_plays;               /* effects started (play with count > 0) */
+    uint64_t ff_datagrams;           /* rumble datagrams sent to the app */
+    uint64_t ff_send_failures;       /* datagrams that could not be sent */
+    uint64_t ff_guard_fades;         /* anti-buzz guard fades begun */
 };
 
 /* Counters stored in a slot file: its writer's and the sum over all of its readers. */
@@ -215,6 +258,10 @@ struct bannerin_slot_stats {
     uint64_t reader_ctl_gen_applied;        /* the control gen a reader last applied */
     uint64_t reader_id_gen_attached;        /* the gen whose identity the last attach took */
     uint64_t reader_identity_reads;         /* identity queries readers answered from this file */
+    uint64_t reader_ff_uploads;             /* format 1.6: force-feedback effects uploaded */
+    uint64_t reader_ff_plays;               /* effects started */
+    uint64_t reader_ff_datagrams;           /* rumble datagrams sent to the app */
+    uint64_t reader_ff_guard_fades;         /* anti-buzz guard fades begun */
 };
 
 /* level 0 = info, 1 = warning; line is NUL-terminated, valid only during the call. */
@@ -309,6 +356,58 @@ uint32_t bannerin_axis_hz(void);
 /* 1 if stick frames are paced by game frame credits (auto: from the control block, or
  * BANNERIN_AXIS_HZ unset / "auto" when the control block leaves it to the environment), else 0. */
 int bannerin_axis_auto(void);
+
+/* ---- force feedback (API 3; see FORCE FEEDBACK above) ---- */
+
+#define BANNERIN_FF_MAX_EFFECTS 16
+/* Codes: identical to linux/input-event-codes.h */
+#define BANNERIN_FF_RUMBLE 0x50
+#define BANNERIN_FF_PERIODIC 0x51
+#define BANNERIN_FF_CONSTANT 0x52
+#define BANNERIN_FF_SPRING 0x53
+#define BANNERIN_FF_FRICTION 0x54
+#define BANNERIN_FF_DAMPER 0x55
+#define BANNERIN_FF_INERTIA 0x56
+#define BANNERIN_FF_RAMP 0x57
+#define BANNERIN_FF_SQUARE 0x58
+#define BANNERIN_FF_TRIANGLE 0x59
+#define BANNERIN_FF_SINE 0x5a
+#define BANNERIN_FF_SAW_UP 0x5b
+#define BANNERIN_FF_SAW_DOWN 0x5c
+#define BANNERIN_FF_GAIN 0x60
+#define BANNERIN_FF_AUTOCENTER 0x61
+
+struct bannerin_ff_envelope { uint16_t attack_length, attack_level, fade_length, fade_level; };
+/* 44 bytes, 2-byte aligned. */
+struct bannerin_ff_effect {
+    uint16_t type;           /* RUMBLE, PERIODIC, CONSTANT, RAMP, SPRING, FRICTION, DAMPER, INERTIA */
+    int16_t  id;             /* -1 on upload = new effect; the engine writes the id it chose */
+    uint16_t direction;      /* kept, unused for two motors */
+    uint16_t replay_length;  /* ms; 0 = plays until stopped */
+    uint16_t replay_delay;   /* ms before it starts, each time it is played */
+    uint16_t reserved;
+    union {
+        struct { uint16_t strong_magnitude, weak_magnitude; } rumble;
+        struct { uint16_t waveform; uint16_t period; int16_t magnitude; int16_t offset; uint16_t phase;
+                 struct bannerin_ff_envelope envelope; } periodic;
+        struct { int16_t level; struct bannerin_ff_envelope envelope; } constant;
+        struct { int16_t start_level; int16_t end_level; struct bannerin_ff_envelope envelope; } ramp;
+        uint8_t raw[32];      /* conditions: accepted, not used */
+    } u;
+};
+/* EV_FF capability bitmap for this handle in EVIOCGBIT layout (bit n of byte n/8 = code n); fills
+ * min(len, 16) bytes (codes 0..0x7f), returns the bytes written or -errno. */
+int bannerin_ff_bits(bannerin_handle h, uint8_t *bits, size_t len);
+/* id -1: new (lowest free id of the slot, -ENOSPC when 16 are in use); id >= 0: update that effect in place
+ * (-EINVAL if it does not exist or the type changes; a playing effect keeps playing with the new parameters).
+ * -EINVAL for an unknown type or waveform, or a type the current mode does not offer. size = sizeof(*e). */
+int bannerin_ff_upload(bannerin_handle h, struct bannerin_ff_effect *e, size_t size);
+int bannerin_ff_erase(bannerin_handle h, int id);                 /* stops it first; -EINVAL unknown id */
+int bannerin_ff_play(bannerin_handle h, int id, int32_t count);   /* count > 0: play count times; 0: stop */
+int bannerin_ff_set_gain(bannerin_handle h, uint16_t gain);        /* 0..0xFFFF, the slot's master gain (default 0xFFFF) */
+int bannerin_ff_set_autocenter(bannerin_handle h, uint16_t value); /* accepted, no effect */
+/* All return 0 (bits: the byte count) or -errno; -EBADF for a bad handle, -EINVAL for a NULL
+ * pointer, a size below sizeof(struct bannerin_ff_effect) or a negative count. */
 
 #ifdef __cplusplus
 }

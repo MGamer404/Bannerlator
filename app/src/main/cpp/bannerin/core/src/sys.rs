@@ -33,6 +33,7 @@ mod nr {
     pub const SCHED_YIELD: usize = 124;
     pub const PRCTL: usize = 167;
     pub const GETPID: usize = 172;
+    pub const SOCKET: usize = 198;
     pub const SOCKETPAIR: usize = 199;
     pub const SENDTO: usize = 206;
     pub const RECVFROM: usize = 207;
@@ -51,6 +52,7 @@ mod nr {
     pub const IOCTL: usize = 16;
     pub const SCHED_YIELD: usize = 24;
     pub const GETPID: usize = 39;
+    pub const SOCKET: usize = 41;
     pub const SENDTO: usize = 44;
     pub const RECVFROM: usize = 45;
     pub const SOCKETPAIR: usize = 53;
@@ -80,6 +82,7 @@ pub const EEXIST: i32 = 17;
 pub const ENODEV: i32 = 19;
 pub const EINVAL: i32 = 22;
 pub const EMFILE: i32 = 24;
+pub const ENOSPC: i32 = 28;
 pub const ENAMETOOLONG: i32 = 36;
 pub const ENODATA: i32 = 61;
 pub const ETIMEDOUT: i32 = 110;
@@ -114,7 +117,10 @@ const FUTEX_WAKE: usize = 1;
 const FUTEX_PRIVATE_FLAG: usize = 128;
 
 const AF_UNIX: usize = 1;
+const AF_INET: usize = 2;
 const SOCK_STREAM: usize = 1;
+const SOCK_DGRAM: usize = 2;
+const SOCK_NONBLOCK: usize = 0o4000;
 const SOCK_CLOEXEC: usize = 0o2000000;
 const MSG_DONTWAIT: usize = 0x40;
 const MSG_NOSIGNAL: usize = 0x4000;
@@ -344,6 +350,37 @@ pub fn drain(fd: i32) {
             _ => break,
         }
     }
+}
+
+/// A UDP socket, close-on-exec and non-blocking (the force-feedback datagrams).
+pub fn udp_socket() -> Result<i32, i32> {
+    ck(unsafe { raw(nr::SOCKET, AF_INET, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0, 0, 0, 0) }).map(|v| v as i32)
+}
+
+/// `struct sockaddr_in`.
+#[repr(C)]
+#[allow(dead_code)] // read by the kernel, never by us
+struct SockAddrIn {
+    family: u16,
+    port: u16,     // network order
+    addr: [u8; 4], // network order
+    zero: [u8; 8],
+}
+
+/// Send one datagram to 127.0.0.1:`port`, never blocking and without SIGPIPE.
+pub fn send_loopback(fd: i32, buf: &[u8], port: u16) -> Result<usize, i32> {
+    let sa = SockAddrIn { family: AF_INET as u16, port: u16::from_ne_bytes(port.to_be_bytes()), addr: [127, 0, 0, 1], zero: [0; 8] };
+    ck(unsafe {
+        raw(
+            nr::SENDTO,
+            fdarg(fd),
+            buf.as_ptr() as usize,
+            buf.len(),
+            MSG_DONTWAIT | MSG_NOSIGNAL,
+            &sa as *const SockAddrIn as usize,
+            core::mem::size_of::<SockAddrIn>(),
+        )
+    })
 }
 
 pub fn fionread(fd: i32) -> Result<i32, i32> {
@@ -581,5 +618,21 @@ mod tests {
         assert_eq!(poll(&mut pfd, 1, 100).unwrap(), 1);
         assert!(pfd.revents & POLLHUP != 0, "peer close must report POLLHUP, got {:#x}", pfd.revents);
         close(sv[0]);
+    }
+
+    #[test]
+    fn udp_datagram_to_loopback() {
+        let rx = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        rx.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+        let port = rx.local_addr().unwrap().port();
+        let fd = udp_socket().unwrap();
+        assert!(fcntl(fd, F_GETFL, 0).unwrap() & O_NONBLOCK as usize != 0, "non-blocking");
+        assert!(fcntl(fd, F_GETFD, 0).unwrap() & FD_CLOEXEC != 0, "close-on-exec");
+        assert_eq!(send_loopback(fd, b"BXR1-test", port), Ok(9));
+        let mut b = [0u8; 32];
+        let (n, from) = rx.recv_from(&mut b).unwrap();
+        assert_eq!(&b[..n], b"BXR1-test");
+        assert!(from.ip().is_loopback());
+        close(fd);
     }
 }

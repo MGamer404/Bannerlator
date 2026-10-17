@@ -10,7 +10,9 @@
 //!          0xc0  reader statistics (readers add to these)
 //! 0x100  4 state copies x 128 bytes (sequence word + 31 data words, see W_*)
 //! 0x300  journal: 256 x u64 button-edge entries
-//! 0xb00  end of format-1 data; the file is FILE_SIZE (4096) bytes and never grows
+//! 0xb00  control block (minor 5, 256 bytes; `ff_mode` and the force-feedback counters since
+//!        minor 6, see `Control`)
+//! 0xc00  end of the layout; the file is FILE_SIZE (4096) bytes and never grows
 //! ```
 //!
 //! Compatibility: readers accept major == 1 and a file of at least FILE_SIZE bytes. A compatible
@@ -30,9 +32,11 @@ pub const FORMAT_MAJOR: u32 = 1;
 /// minor 2 the game frame feed (`frame_interval_ns`, `frame_time_ns`) and `r_axis_hz` /
 /// `r_auto_fallbacks`; minor 3 the frame credits (`frame_count`, `frame_waiters`, `r_axis_mode`)
 /// and `r_helper_wakes`; minor 4 `r_auto_max` and AXIS_MODE_CEILING; minor 5 the control block
-/// at 0xB00 (live stick pacing and controller identity, see `Control`).
-/// All zero in older files, which readers treat as "no frame feed" / "no control block".
-pub const FORMAT_MINOR: u32 = 5;
+/// at 0xB00 (live stick pacing and controller identity, see `Control`); minor 6 the
+/// force-feedback mode (`ff_mode`, 0xB24) and four reader force-feedback counters (0xBCC..0xBD8).
+/// All zero in older files, which readers treat as "no frame feed" / "no control block" /
+/// "force feedback unset (on)".
+pub const FORMAT_MINOR: u32 = 6;
 
 /// `r_axis_mode` values: how a reader last paced stick-only frames.
 pub const AXIS_MODE_UNKNOWN: u32 = 0;
@@ -156,7 +160,7 @@ pub struct Shared {
 
 // ---------------------------------------------------------------------------------------------
 // Control block (minor 5): session settings the app can change live (stick pacing, the XInput
-// DLL's mode) and the slot's controller identity. Every field is a 32-bit word so that a 32-bit
+// DLL's mode, and since minor 6 the force-feedback mode) and the slot's controller identity. Every field is a 32-bit word so that a 32-bit
 // reader without 64-bit atomics (the i386 XInput DLL) reads it the same way. One writer (the app,
 // per slot); readers use the seqlock: `seq` odd while a record is being written, `gen` bumped by
 // every completed update. A control update never rings the bell: readers pick it up at their
@@ -165,6 +169,9 @@ pub struct Shared {
 pub const CTL_MAGIC: u32 = u32::from_le_bytes(*b"BCTL");
 /// The first header minor that carries a control block.
 pub const CTL_FIRST_MINOR: u32 = 5;
+/// The first header minor whose control block carries `ff_mode` and the force-feedback counters
+/// (both reserved, 0, in a minor-5 block: force feedback unset, i.e. on).
+pub const FF_FIRST_MINOR: u32 = 6;
 /// Seqlock read attempts before keeping the last good copy.
 pub const CTL_READ_ATTEMPTS: u32 = 64;
 /// Words of the record the seqlock protects: control offsets 0x10 .. 0xA4.
@@ -177,7 +184,8 @@ pub mod rec {
     pub const AXIS_AUTO_MAX: usize = 2; // 0xB18
     pub const XINPUT_MODE: usize = 3; // 0xB1C
     pub const XINPUT_FLAGS: usize = 4; // 0xB20
-    // 5 ..= 11: 0xB24 .. 0xB3F reserved, 0
+    pub const FF_MODE: usize = 5; // 0xB24 (minor 6)
+    // 6 ..= 11: 0xB28 .. 0xB3F reserved, 0
     pub const ID_FLAGS: usize = 12; // 0xB40
     pub const ID_BUSTYPE: usize = 13; // 0xB44
     pub const ID_VENDOR: usize = 14; // 0xB48
@@ -200,6 +208,11 @@ pub const CTL_XINPUT_FORWARD: u32 = 2;
 pub const CTL_XI_FORWARD_AVAILABLE: u32 = 1;
 pub const CTL_XI_HIDDEN: u32 = 2;
 pub const CTL_XI_FLAGS_KNOWN: u32 = CTL_XI_FORWARD_AVAILABLE | CTL_XI_HIDDEN;
+/// `ff_mode` values (minor 6): DirectInput force feedback for the slot's handles, read when a
+/// handle attaches. BANNERIN_DINPUT_FF in the guest overrides it.
+pub const CTL_FF_UNSET: u32 = 0; // = on
+pub const CTL_FF_ON: u32 = 1; // every effect type offered
+pub const CTL_FF_OFF: u32 = 2; // rumble effects only
 /// `id_flags` bit 0: the identity fields hold a controller identity.
 pub const CTL_ID_VALID: u32 = 1;
 pub const ID_KEY_LEN: usize = 16;
@@ -216,7 +229,12 @@ pub struct Control {
     pub r_ctl_gen_applied: AtomicU32, // 0xC0 reader stat: the control gen a reader last applied
     pub r_id_gen_attached: AtomicU32, // 0xC4 reader stat: the gen whose identity an attach took
     pub r_identity_reads: AtomicU32,  // 0xC8 reader stat: identity queries answered
-    pub _res2: [AtomicU32; 13], // 0xCC .. 0xFF reserved
+    // minor 6, readers add to these (force feedback, all reader processes):
+    pub r_ff_uploads: AtomicU32,     // 0xCC effects uploaded (new or updated)
+    pub r_ff_plays: AtomicU32,       // 0xD0 effects started (play with a count)
+    pub r_ff_datagrams: AtomicU32,   // 0xD4 rumble datagrams sent to the app
+    pub r_ff_guard_fades: AtomicU32, // 0xD8 anti-buzz guard fades begun
+    pub _res2: [AtomicU32; 9], // 0xDC .. 0xFF reserved
 }
 
 /// A controller identity as the control block carries it.
@@ -264,6 +282,8 @@ pub struct ControlState {
     pub axis_auto_max: u32,
     pub xinput_mode: u32,
     pub xinput_flags: u32,
+    /// CTL_FF_* (minor 6; 0 in older blocks).
+    pub ff_mode: u32,
     pub id: Option<Identity>,
 }
 
@@ -285,7 +305,7 @@ fn unpack<const N: usize>(words: &[u32]) -> [u8; N] {
 
 impl ControlState {
     pub const DEFAULT: ControlState =
-        ControlState { axis_mode: 0, axis_hz: 0, axis_auto_max: 0, xinput_mode: 0, xinput_flags: 0, id: None };
+        ControlState { axis_mode: 0, axis_hz: 0, axis_auto_max: 0, xinput_mode: 0, xinput_flags: 0, ff_mode: 0, id: None };
 
     pub fn encode(&self) -> [u32; CTL_REC_WORDS] {
         let mut w = [0u32; CTL_REC_WORDS];
@@ -294,6 +314,7 @@ impl ControlState {
         w[rec::AXIS_AUTO_MAX] = self.axis_auto_max;
         w[rec::XINPUT_MODE] = self.xinput_mode;
         w[rec::XINPUT_FLAGS] = self.xinput_flags;
+        w[rec::FF_MODE] = self.ff_mode;
         if let Some(id) = &self.id {
             w[rec::ID_FLAGS] = CTL_ID_VALID;
             w[rec::ID_BUSTYPE] = id.bustype as u32;
@@ -325,6 +346,7 @@ impl ControlState {
             axis_auto_max: w[rec::AXIS_AUTO_MAX],
             xinput_mode: w[rec::XINPUT_MODE],
             xinput_flags: w[rec::XINPUT_FLAGS],
+            ff_mode: w[rec::FF_MODE],
             id,
         }
     }
@@ -365,6 +387,7 @@ const _: () = {
     assert!(0x10 + 4 * rec::AXIS_AUTO_MAX == 0x18);
     assert!(0x10 + 4 * rec::XINPUT_MODE == 0x1C);
     assert!(0x10 + 4 * rec::XINPUT_FLAGS == 0x20);
+    assert!(0x10 + 4 * rec::FF_MODE == 0x24);
     assert!(0x10 + 4 * rec::ID_FLAGS == 0x40);
     assert!(0x10 + 4 * rec::ID_BUSTYPE == 0x44);
     assert!(0x10 + 4 * rec::ID_VENDOR == 0x48);
@@ -377,6 +400,11 @@ const _: () = {
     assert!(offset_of!(Control, r_ctl_gen_applied) == 0xC0);
     assert!(offset_of!(Control, r_id_gen_attached) == 0xC4);
     assert!(offset_of!(Control, r_identity_reads) == 0xC8);
+    assert!(offset_of!(Control, r_ff_uploads) == 0xCC);
+    assert!(offset_of!(Control, r_ff_plays) == 0xD0);
+    assert!(offset_of!(Control, r_ff_datagrams) == 0xD4);
+    assert!(offset_of!(Control, r_ff_guard_fades) == 0xD8);
+    assert!(offset_of!(Control, _res2) == 0xDC);
     assert!(LAYOUT_END <= 0x1000);
     assert!(LAYOUT_END <= FILE_SIZE);
     assert!(W_TIME_HI < COPY_WORDS);
@@ -496,6 +524,11 @@ impl Shared {
             && self.ctl.size.load(Relaxed) as usize == CTL_SIZE
     }
 
+    /// The control block also carries the force-feedback counters (minor >= 6).
+    pub fn ff_stats_present(&self) -> bool {
+        self.control_present() && self.header.minor.load(Relaxed) >= FF_FIRST_MINOR
+    }
+
     /// One consistent control record and the gen it belongs to, or None if the block is absent or
     /// the writer kept it busy for CTL_READ_ATTEMPTS reads (the caller keeps its last good copy).
     pub fn read_control(&self) -> Option<(u32, ControlState)> {
@@ -543,9 +576,10 @@ mod tests {
     #[test]
     fn control_state_roundtrip_and_string_fields() {
         let id = Identity::new(3, 0x045e, 0x028e, 0x0114, b"xbox360", "Xbox 360 Controller (0)".as_bytes());
-        let st = ControlState { axis_mode: CTL_AXIS_FIXED, axis_hz: 30, axis_auto_max: 0, xinput_mode: 2, xinput_flags: 3, id: Some(id) };
+        let st = ControlState { axis_mode: CTL_AXIS_FIXED, axis_hz: 30, axis_auto_max: 0, xinput_mode: 2, xinput_flags: 3, ff_mode: CTL_FF_OFF, id: Some(id) };
         let w = st.encode();
         assert_eq!(ControlState::decode(&w), st);
+        assert_eq!(w[rec::FF_MODE], CTL_FF_OFF, "ff_mode is the word at 0xB24");
         assert_eq!(w[rec::ID_KEY], u32::from_le_bytes(*b"xbox"), "key bytes are little-endian in the words");
         assert_eq!(Identity::text(&id.name), b"Xbox 360 Controller (0)");
         // overlong strings are cut, NUL-terminated, never mid-character

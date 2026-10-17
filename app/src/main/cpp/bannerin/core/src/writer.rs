@@ -14,7 +14,7 @@
 //!   older one of ours, or one left by an earlier app process) is marked retired and its sleepers
 //!   are woken, which makes every reader re-attach to the new file.
 //! * Control block (format minor 5): the writer keeps the slot's control record (session pacing,
-//!   XInput DLL mode, controller identity) in process memory too, and every file it creates gets
+//!   XInput DLL mode, force-feedback mode since minor 6, controller identity) in process memory too, and every file it creates gets
 //!   that record and its gen BEFORE the file's magic is published, so a reader can never attach to
 //!   a new or healed file and see a default identity first. Ordering contract for the app: a
 //!   `set_identity` must have returned before the slot's discovery node is created (before the
@@ -70,6 +70,14 @@ pub const STAT_READER_ID_GEN_ATTACHED: u32 = 27;
 pub const STAT_READER_IDENTITY_READS: u32 = 28;
 /// The writer's own control gen (what readers converge to).
 pub const STAT_CONTROL_GEN: u32 = 29;
+/// Force feedback (format 1.6), summed over every reader: effects uploaded (new or updated)...
+pub const STAT_READER_FF_UPLOADS: u32 = 30;
+/// ...effects started (play with a count)...
+pub const STAT_READER_FF_PLAYS: u32 = 31;
+/// ...rumble datagrams the guest's force-feedback engine sent to the app...
+pub const STAT_READER_FF_DATAGRAMS: u32 = 32;
+/// ...and anti-buzz guard fades it began (a constant force held steady for 2 s).
+pub const STAT_READER_FF_GUARD_FADES: u32 = 33;
 
 // ---------------------------------------------------------------------------------------------
 // Game frame feed: the app's present threads report every frame the game presents. Each one is
@@ -530,6 +538,14 @@ impl SlotWriter {
         self.update_control(st);
     }
 
+    /// DirectInput force feedback for this slot's handles (`CTL_FF_*`, anything else = unset).
+    /// A guest handle reads it when it attaches, so it applies to handles opened after the call.
+    pub fn set_ff_mode(&mut self, mode: u32) {
+        let mut st = self.ctl;
+        st.ff_mode = if mode <= CTL_FF_OFF { mode } else { CTL_FF_UNSET };
+        self.update_control(st);
+    }
+
     pub fn control(&self) -> (u32, ControlState) {
         (self.ctl_gen, self.ctl)
     }
@@ -687,6 +703,10 @@ impl SlotWriter {
             STAT_READER_CTL_GEN_APPLIED => return sh.ctl.r_ctl_gen_applied.load(Relaxed) as u64,
             STAT_READER_ID_GEN_ATTACHED => return sh.ctl.r_id_gen_attached.load(Relaxed) as u64,
             STAT_READER_IDENTITY_READS => return sh.ctl.r_identity_reads.load(Relaxed) as u64,
+            STAT_READER_FF_UPLOADS => return sh.ctl.r_ff_uploads.load(Relaxed) as u64,
+            STAT_READER_FF_PLAYS => return sh.ctl.r_ff_plays.load(Relaxed) as u64,
+            STAT_READER_FF_DATAGRAMS => return sh.ctl.r_ff_datagrams.load(Relaxed) as u64,
+            STAT_READER_FF_GUARD_FADES => return sh.ctl.r_ff_guard_fades.load(Relaxed) as u64,
             _ => return 0,
         };
         v.load(Relaxed)
@@ -753,7 +773,8 @@ mod tests {
         let m = Map::open(&dir.join("pad1"));
         let sh = m.sh();
         assert!(sh.control_present());
-        assert_eq!(sh.header.minor.load(Relaxed), 5);
+        assert_eq!(sh.header.minor.load(Relaxed), FORMAT_MINOR);
+        assert_eq!(FORMAT_MINOR, 6);
         assert_eq!(sh.read_control(), Some((gen, st)), "a new file starts with the full record");
         assert_eq!(sh.ctl.seq.load(Relaxed) & 1, 0);
 
@@ -784,6 +805,29 @@ mod tests {
         let m3 = Map::open(&dir.join("pad1"));
         assert_ne!(m3.sh().header.instance.load(Relaxed), m2.sh().header.instance.load(Relaxed));
         assert_eq!(m3.sh().read_control(), Some(expect));
+    }
+
+    #[test]
+    fn the_ff_mode_reaches_the_live_file_and_bumps_the_gen() {
+        let dir = tmpdir("ffmode");
+        let mut w = SlotWriter::new(0);
+        w.prepare(dir.to_str().unwrap().as_bytes()).unwrap();
+        let m = Map::open(&dir.join("pad0"));
+        let sh = m.sh();
+        assert!(sh.ff_stats_present());
+        assert_eq!(sh.read_control().map(|(_, st)| st.ff_mode), Some(CTL_FF_UNSET));
+        let g = w.control().0;
+        w.set_ff_mode(CTL_FF_OFF);
+        assert_eq!(sh.read_control(), Some((g + 1, ControlState { ff_mode: CTL_FF_OFF, ..ControlState::DEFAULT })));
+        assert_eq!(sh.ctl.rec[rec::FF_MODE].load(Relaxed), CTL_FF_OFF, "the word at 0xB24");
+        w.set_ff_mode(CTL_FF_OFF);
+        assert_eq!(w.control().0, g + 1, "the same mode again is not a change");
+        w.set_ff_mode(7);
+        assert_eq!(w.control(), (g + 2, ControlState::DEFAULT), "unknown values are unset");
+        // the reader counters (through the writer's own read-write mapping; Map is read-only)
+        w.backing.as_ref().unwrap().shared().ctl.r_ff_datagrams.fetch_add(5, Relaxed);
+        assert_eq!(w.stat(STAT_READER_FF_DATAGRAMS), 5);
+        assert_eq!(w.stat(STAT_READER_FF_UPLOADS), 0);
     }
 
     #[test]

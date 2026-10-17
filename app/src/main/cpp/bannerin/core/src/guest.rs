@@ -26,7 +26,11 @@
 //! not exist in the child; the next call into the library restarts them), and gives each open
 //! handle a fresh socketpair dup3()ed onto the same fd number, so parent and child keep the same
 //! fd numbers with independent readiness and independent read positions. The child's first read
-//! is a full-state frame.
+//! is a full-state frame. The force-feedback engine starts clean in the child (no effects).
+//!
+//! **Force feedback** (API 3, `crate::ff`): the `ff_*` calls below take the handle's slot and mode
+//! (captured when it attaches: BANNERIN_DINPUT_FF, else the control block's ff_mode) under the
+//! entry lock and hand the call to the process's engine.
 
 use core::cell::UnsafeCell;
 use core::ffi::{c_char, c_int, c_void};
@@ -35,6 +39,7 @@ use core::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst};
 use core::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize};
 
 use crate::abi::*;
+use crate::ff;
 use crate::frame::{Cursor, Due, Ev, Frame, FrameStats, Journal, NoJournal};
 use crate::layout::{self, ControlState, Identity, Shared, Snapshot, FILE_SIZE};
 use crate::msg::Msg;
@@ -66,7 +71,8 @@ pub const AUTO_STALE_NS: u64 = 250_000_000;
 /// that freezes still gets the rest position.
 pub const AUTO_STALL_MIN_NS: u64 = 50_000_000;
 /// 2: the control block (live pacing, controller identity: `identity`, `slot_identity`).
-pub const API_VERSION: u32 = 2;
+/// 3: force feedback (`ff_*`).
+pub const API_VERSION: u32 = 3;
 
 /// Upper bound on how long a missed wake could delay input while a slot is active (the
 /// fallback re-check).
@@ -101,7 +107,7 @@ static CONFIG: Config = Config {
     paths: UnsafeCell::new([[0; PATH_CAP]; MAX_SLOTS]),
 };
 
-fn trim(mut s: &[u8]) -> &[u8] {
+pub(crate) fn trim(mut s: &[u8]) -> &[u8] {
     while let [b' ' | b'\t' | b'\n' | b'\r', rest @ ..] = s {
         s = rest;
     }
@@ -156,6 +162,8 @@ pub fn init() -> u32 {
                     AXIS_HZ.store(hz, Relaxed);
                     let ns = if hz == 0 || hz == AXIS_AUTO { 0 } else { 1_000_000_000 / hz as u64 };
                     AXIS_NS.store(ns, Relaxed);
+                    FF_ENV.store(ff::parse_env_mode(sys::env(ff::ENV_FF)), Relaxed);
+                    ff::set_port(ff::parse_port(sys::env(ff::ENV_PORT)));
                     CONFIG.state.store(2, Release);
                     return mask;
                 }
@@ -514,6 +522,11 @@ pub struct Stats {
     pub ctl_applied: AtomicU64,
     pub ctl_busy: AtomicU64,
     pub identity_reads: AtomicU64,
+    pub ff_uploads: AtomicU64,
+    pub ff_plays: AtomicU64,
+    pub ff_datagrams: AtomicU64,
+    pub ff_send_failures: AtomicU64,
+    pub ff_guard_fades: AtomicU64,
 }
 
 const Z: AtomicU64 = AtomicU64::new(0);
@@ -545,6 +558,11 @@ pub static STATS: Stats = Stats {
     ctl_applied: Z,
     ctl_busy: Z,
     identity_reads: Z,
+    ff_uploads: Z,
+    ff_plays: Z,
+    ff_datagrams: Z,
+    ff_send_failures: Z,
+    ff_guard_fades: Z,
 };
 
 /// Process-wide reader statistics (`struct bannerin_stats`).
@@ -587,6 +605,13 @@ pub struct StatsView {
     pub ctl_busy: u64,
     /// bannerin_identity / bannerin_slot_identity calls answered.
     pub identity_reads: u64,
+    /// API 3, force feedback: effects uploaded (new or updated), effects started (play with a
+    /// count), rumble datagrams sent to the app, sends that failed, anti-buzz guard fades begun.
+    pub ff_uploads: u64,
+    pub ff_plays: u64,
+    pub ff_datagrams: u64,
+    pub ff_send_failures: u64,
+    pub ff_guard_fades: u64,
 }
 
 pub fn stats() -> StatsView {
@@ -619,6 +644,11 @@ pub fn stats() -> StatsView {
         ctl_applied: s.ctl_applied.load(Relaxed),
         ctl_busy: s.ctl_busy.load(Relaxed),
         identity_reads: s.identity_reads.load(Relaxed),
+        ff_uploads: s.ff_uploads.load(Relaxed),
+        ff_plays: s.ff_plays.load(Relaxed),
+        ff_datagrams: s.ff_datagrams.load(Relaxed),
+        ff_send_failures: s.ff_send_failures.load(Relaxed),
+        ff_guard_fades: s.ff_guard_fades.load(Relaxed),
     }
 }
 
@@ -658,6 +688,11 @@ pub struct SlotStatsView {
     pub reader_ctl_gen_applied: u64,
     pub reader_id_gen_attached: u64,
     pub reader_identity_reads: u64,
+    /// Format 1.6 (zero in older files): force feedback, summed over every reader process.
+    pub reader_ff_uploads: u64,
+    pub reader_ff_plays: u64,
+    pub reader_ff_datagrams: u64,
+    pub reader_ff_guard_fades: u64,
 }
 
 pub type LogFn = unsafe extern "C" fn(level: c_int, line: *const c_char);
@@ -668,7 +703,7 @@ pub fn set_logger(f: Option<LogFn>) {
     log_config_once();
 }
 
-fn log(level: c_int, m: &mut Msg) {
+pub(crate) fn log(level: c_int, m: &mut Msg) {
     let f = LOGGER.load(Acquire);
     if f != 0 {
         let f: LogFn = unsafe { core::mem::transmute::<usize, LogFn>(f) };
@@ -847,6 +882,12 @@ struct Data {
     /// file (never changed under the open handle), and the control gen it came from.
     id: Option<Identity>,
     id_gen: u32,
+    /// Force feedback: mode On (every effect type) or Off (rumble only), captured with the
+    /// identity; fixed once the guest made an ff call (it has seen the capabilities by then).
+    ff_on: bool,
+    ff_fixed: bool,
+    /// This handle uploaded effects (detach erases them).
+    ff_owner: bool,
 }
 
 impl Data {
@@ -884,6 +925,9 @@ impl Data {
         ctl_gen: 0,
         id: None,
         id_gen: 0,
+        ff_on: true,
+        ff_fixed: false,
+        ff_owner: false,
     };
 }
 
@@ -1022,18 +1066,19 @@ impl Journal for ShJournal<'_> {
 
 /// The identity a new attachment to `sh` reports: the file's, if its control block has a valid
 /// one. A record the writer keeps busy through every attempt leaves `prev` (the identity this
-/// handle had on its previous file, None for a new handle).
-fn capture_identity(sh: &Shared, prev: (Option<Identity>, u32)) -> (Option<Identity>, u32) {
+/// handle had on its previous file, None for a new handle). Also the record's ff_mode (None: no
+/// control block, or the record stayed busy).
+fn capture_identity(sh: &Shared, prev: (Option<Identity>, u32)) -> (Option<Identity>, u32, Option<u32>) {
     if !sh.control_present() {
-        return (None, 0);
+        return (None, 0, None);
     }
     for _ in 0..4 {
         if let Some((gen, st)) = sh.read_control() {
-            return (st.id, gen);
+            return (st.id, gen, Some(st.ff_mode));
         }
         STATS.ctl_busy.fetch_add(1, Relaxed);
     }
-    prev
+    (prev.0, prev.1, None)
 }
 
 fn install(d: &mut Data, m: Mapped, first: bool) {
@@ -1041,11 +1086,17 @@ fn install(d: &mut Data, m: Mapped, first: bool) {
     d.writable = m.writable;
     d.instance = m.instance;
     if let Some(sh) = shared(d) {
-        let (id, gen) = capture_identity(sh, (d.id, d.id_gen));
+        let (id, gen, ff_mode) = capture_identity(sh, (d.id, d.id_gen));
         d.id = id;
         d.id_gen = gen;
         if d.writable && sh.control_present() {
             sh.ctl.r_id_gen_attached.store(gen, Relaxed);
+        }
+        if !d.ff_fixed {
+            // A busy record keeps the mode the handle had; a file without a block: the default.
+            if ff_mode.is_some() || !sh.control_present() {
+                d.ff_on = ff::mode_on(FF_ENV.load(Relaxed), ff_mode);
+            }
         }
     }
     d.base_pending = true;
@@ -1542,6 +1593,7 @@ fn service(slot: usize, now: u64, verify: bool) -> Hold {
             let h = sync_ready(d, &snap, sys::mono_ns());
             all.deadline = earlier(all.deadline, h.deadline);
             all.frame |= h.frame;
+            ff_flush(d);
         }
         unlock(e);
         release(e);
@@ -1713,6 +1765,7 @@ unsafe extern "C" fn atfork_child() {
         rt.handles.store(counts[s], Relaxed);
     }
     STATS.fork_rebinds.fetch_add(rebound, Relaxed);
+    ff::atfork_child();
 }
 
 fn register_atfork() {
@@ -1764,6 +1817,7 @@ pub fn attach(slot: i32, open_flags: i32) -> Result<(i32, u32), i32> {
     let d = unsafe { data(e) };
     *d = Data::EMPTY;
     env_cfg(d);
+    d.ff_on = ff::mode_on(FF_ENV.load(Relaxed), None); // until a file's control block says more
     d.slot = slot;
     d.guest_fd = guest;
     d.drain_fd = drain;
@@ -1817,6 +1871,7 @@ pub fn detach(h: u32) -> Result<(), i32> {
     let fd = d.guest_fd;
     d.guest_fd = -1;
     let slot = d.slot;
+    let ff_owner = d.ff_owner;
     // A read blocked on this handle may be in a long idle sleep: wake it (FUTEX_WAKE needs no
     // write access and changes nothing; other sleepers on the bell just go back to sleep).
     match shared(d) {
@@ -1828,6 +1883,9 @@ pub fn detach(h: u32) -> Result<(), i32> {
         }
     }
     unlock(e);
+    if ff_owner {
+        ff::detach(slot, h); // stops and erases the effects this handle uploaded
+    }
     SLOTS.s[slot].handles.fetch_sub(1, AcqRel);
     sys::close(fd);
     STATS.detaches.fetch_add(1, Relaxed);
@@ -2104,9 +2162,110 @@ pub fn slot_stats(slot: i32) -> Result<SlotStatsView, i32> {
             v.reader_id_gen_attached = c.r_id_gen_attached.load(Relaxed) as u64;
             v.reader_identity_reads = c.r_identity_reads.load(Relaxed) as u64;
         }
+        if sh.ff_stats_present() {
+            let c = &sh.ctl;
+            v.reader_ff_uploads = c.r_ff_uploads.load(Relaxed) as u64;
+            v.reader_ff_plays = c.r_ff_plays.load(Relaxed) as u64;
+            v.reader_ff_datagrams = c.r_ff_datagrams.load(Relaxed) as u64;
+            v.reader_ff_guard_fades = c.r_ff_guard_fades.load(Relaxed) as u64;
+        }
     }
     m.release();
     Ok(v)
+}
+
+// ---------------------------------------------------------------------------------------------
+// force feedback (API 3): the handle side of crate::ff
+
+/// BANNERIN_DINPUT_FF as init parsed it (layout::CTL_FF_*; UNSET: the control block decides).
+static FF_ENV: AtomicU32 = AtomicU32::new(layout::CTL_FF_UNSET);
+/// Slots whose force-feedback mode this process has logged (one line each).
+static FF_LOGGED: AtomicU32 = AtomicU32::new(0);
+
+/// Add the slot's force-feedback counters to its file (control block, format 1.6). Entry lock
+/// held. They wait while the handle has no writable live file of that format.
+fn ff_flush(d: &Data) {
+    let p = match ff::PENDING.get(d.slot) {
+        Some(p) => p,
+        None => return,
+    };
+    let sh = match shared(d) {
+        Some(sh) if d.writable && !d.dead && sh.ff_stats_present() => sh,
+        _ => return,
+    };
+    let c = &sh.ctl;
+    let dst = [&c.r_ff_uploads, &c.r_ff_plays, &c.r_ff_datagrams, &c.r_ff_guard_fades];
+    for (i, w) in [ff::P_UPLOADS, ff::P_PLAYS, ff::P_DATAGRAMS, ff::P_FADES].iter().enumerate() {
+        if p[*w].load(Relaxed) != 0 {
+            dst[i].fetch_add(p[*w].swap(0, Relaxed), Relaxed);
+        }
+    }
+}
+
+/// A force-feedback call on `h`: under the entry lock, without the refresh other calls do (no
+/// file I/O), given the handle's data and value. The engine's lock nests inside the entry lock
+/// (its thread never takes an entry lock); the logger is never called from here.
+fn with_ff<R>(h: u32, f: impl FnOnce(&mut Data, u32) -> R) -> Result<R, i32> {
+    let e = acquire(h).ok_or(sys::EBADF)?;
+    lock(e);
+    let d = unsafe { data(e) };
+    d.ff_fixed = true;
+    let r = f(d, h);
+    ff_flush(d);
+    unlock(e);
+    release(e);
+    Ok(r)
+}
+
+/// The EV_FF capability bitmap for this handle's mode (`ff::bits`).
+pub fn ff_bits(h: u32) -> Result<[u8; ff::BITS_LEN], i32> {
+    let (slot, on) = with_ff(h, |d, _| (d.slot, d.ff_on))?;
+    let bit = 1u32 << slot;
+    if LOGGER.load(Relaxed) != 0 && FF_LOGGED.fetch_or(bit, AcqRel) & bit == 0 {
+        let mut m = Msg::new();
+        m.s(b"bannerin: slot ").u(slot as u64).s(b": force feedback ");
+        if on {
+            m.s(b"on (rumble, periodic, constant, ramp, conditions; gain)");
+        } else {
+            m.s(b"off (rumble only)");
+        }
+        if FF_ENV.load(Relaxed) == layout::CTL_FF_UNSET {
+            m.s(b" by the app's setting");
+        } else {
+            m.s(b" by BANNERIN_DINPUT_FF");
+        }
+        log(0, &mut m);
+    }
+    Ok(ff::bits(on))
+}
+
+/// Upload a new effect (`e.id` -1: the chosen id is written back) or update one (see
+/// `ff::Engine::upload`).
+pub fn ff_upload(h: u32, e: &mut ff::FfEffect) -> Result<(), i32> {
+    with_ff(h, |d, h| {
+        let r = ff::upload(d.slot, h, e, d.ff_on);
+        if r.is_ok() {
+            d.ff_owner = true;
+        }
+        r
+    })?
+}
+
+pub fn ff_erase(h: u32, id: i32) -> Result<(), i32> {
+    with_ff(h, |d, _| ff::erase(d.slot, id))?
+}
+
+pub fn ff_play(h: u32, id: i32, count: i32) -> Result<(), i32> {
+    with_ff(h, |d, _| ff::play(d.slot, id, count))?
+}
+
+pub fn ff_set_gain(h: u32, gain: u16) -> Result<(), i32> {
+    with_ff(h, |d, _| ff::set_gain(d.slot, gain))?
+}
+
+/// Accepted, no effect (a pad has no centring spring).
+pub fn ff_set_autocenter(h: u32, _value: u16) -> Result<(), i32> {
+    with_ff(h, |_, _| ())
 }
 
 #[cfg(test)]
@@ -2252,6 +2411,29 @@ mod tests {
         assert_eq!(control_pacing(&st(9, 60, 60)), None, "unknown mode = the environment");
         assert_eq!(control_pacing(&st(CTL_AXIS_UNSET, 60, 60)), None);
         w.set_identity(None);
+    }
+
+    #[test]
+    fn the_ff_mode_is_taken_from_the_control_block_when_a_handle_attaches() {
+        let (mut w, dir, d) = rig("ff-mode", 1, |w| w.set_ff_mode(layout::CTL_FF_OFF));
+        assert!(!d.ff_on, "the app's Off");
+        w.set_ff_mode(layout::CTL_FF_ON);
+        assert!(attach_data(&dir, 1).ff_on, "a new attach takes On");
+        w.set_ff_mode(layout::CTL_FF_UNSET);
+        assert!(attach_data(&dir, 1).ff_on, "unset = on");
+        w.set_ff_mode(layout::CTL_FF_OFF);
+        // fixed once the guest made an ff call: a re-attach to another file keeps it
+        let mut d = attach_data(&dir, 1);
+        assert!(!d.ff_on);
+        d.ff_fixed = true;
+        w.set_ff_mode(layout::CTL_FF_ON);
+        w.release();
+        w.prepare(dir.to_str().unwrap().as_bytes()).unwrap();
+        let fresh = attach_data(&dir, 1);
+        assert!(fresh.ff_on, "the new file says On");
+        install(&mut d, Mapped { ptr: fresh.map, fd: -1, dev: 0, ino: 0, instance: fresh.instance, writable: true }, false);
+        assert!(!d.ff_on, "kept Off across the re-attach");
+        assert_eq!(FF_ENV.load(Relaxed), layout::CTL_FF_UNSET, "BANNERIN_DINPUT_FF is not set in the tests");
     }
 
     #[test]

@@ -9,6 +9,7 @@
 use core::ffi::{c_int, c_short, c_void};
 
 use bannerin_core::abi::{AXES, BUTTONS};
+use bannerin_core::ff::FfEffect;
 use bannerin_core::guest::{self, IdentityView, LogFn, SlotStatsView, StatsView};
 use bannerin_core::sys;
 
@@ -183,6 +184,75 @@ pub extern "C" fn bannerin_axis_hz() -> u32 {
 #[no_mangle]
 pub extern "C" fn bannerin_axis_auto() -> c_int {
     (guest::axis_config() == guest::AXIS_AUTO) as c_int
+}
+
+/// `int bannerin_ff_bits(bannerin_handle h, uint8_t *bits, size_t len)`
+#[no_mangle]
+pub unsafe extern "C" fn bannerin_ff_bits(h: u32, bits: *mut u8, len: usize) -> c_int {
+    let b = match guest::ff_bits(h) {
+        Ok(b) => b,
+        Err(e) => return neg(e),
+    };
+    let n = len.min(b.len());
+    if n > 0 {
+        if bits.is_null() {
+            return neg(sys::EINVAL);
+        }
+        core::ptr::copy_nonoverlapping(b.as_ptr(), bits, n);
+    }
+    n as c_int
+}
+
+/// `int bannerin_ff_upload(bannerin_handle h, struct bannerin_ff_effect *e, size_t size)`
+#[no_mangle]
+pub unsafe extern "C" fn bannerin_ff_upload(h: u32, e: *mut FfEffect, size: usize) -> c_int {
+    if e.is_null() || size < core::mem::size_of::<FfEffect>() {
+        return neg(sys::EINVAL);
+    }
+    let mut v = core::ptr::read_unaligned(e);
+    match guest::ff_upload(h, &mut v) {
+        Ok(()) => {
+            core::ptr::write_unaligned(core::ptr::addr_of_mut!((*e).id), v.id);
+            0
+        }
+        Err(err) => neg(err),
+    }
+}
+
+/// `int bannerin_ff_erase(bannerin_handle h, int id)`
+#[no_mangle]
+pub extern "C" fn bannerin_ff_erase(h: u32, id: c_int) -> c_int {
+    match guest::ff_erase(h, id) {
+        Ok(()) => 0,
+        Err(e) => neg(e),
+    }
+}
+
+/// `int bannerin_ff_play(bannerin_handle h, int id, int32_t count)`
+#[no_mangle]
+pub extern "C" fn bannerin_ff_play(h: u32, id: c_int, count: i32) -> c_int {
+    match guest::ff_play(h, id, count) {
+        Ok(()) => 0,
+        Err(e) => neg(e),
+    }
+}
+
+/// `int bannerin_ff_set_gain(bannerin_handle h, uint16_t gain)`
+#[no_mangle]
+pub extern "C" fn bannerin_ff_set_gain(h: u32, gain: u16) -> c_int {
+    match guest::ff_set_gain(h, gain) {
+        Ok(()) => 0,
+        Err(e) => neg(e),
+    }
+}
+
+/// `int bannerin_ff_set_autocenter(bannerin_handle h, uint16_t value)`
+#[no_mangle]
+pub extern "C" fn bannerin_ff_set_autocenter(h: u32, value: u16) -> c_int {
+    match guest::ff_set_autocenter(h, value) {
+        Ok(()) => 0,
+        Err(e) => neg(e),
+    }
 }
 
 #[cfg(not(test))]
