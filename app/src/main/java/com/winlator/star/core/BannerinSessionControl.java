@@ -7,8 +7,9 @@ import com.winlator.star.inputcontrols.BannerinWriter;
 /**
  * The app's writes into BANNERIN's control block (format minor 5): each slot's identity, read by the
  * evdev layer when a reader attaches (so a reconnect presents a new identity), and the session control,
- * read live by the readers (stick pacing) and by the XInput DLLs (Direct / forward / hidden).
- * One place, used at launch (before the guest starts) and from the in-game menu.
+ * read live by the readers (stick pacing) and by the XInput DLLs (Direct / forward / hidden), plus
+ * DirectInput vibration, read when a reader attaches. One place, used at launch (before the guest
+ * starts) and from the in-game menu.
  */
 public final class BannerinSessionControl {
     private static final String TAG = "BannerinControl";
@@ -48,6 +49,25 @@ public final class BannerinSessionControl {
     }
 
     /**
+     * DirectInput vibration (core.DInputVibration) for every slot: readers take it when a pad is
+     * opened, so write it before the guest starts, and before a reconnect's replug in-game.
+     * BANNERIN_DINPUT_FF in the guest's env wins over it.
+     */
+    public static void writeFfMode(boolean on) {
+        applyFfMode(DInputVibration.ffMode(on));
+        Log.i(TAG, "DirectInput vibration: " + (on ? "on" : "off"));
+    }
+
+    private static void applyFfMode(int mode) {
+        try {
+            BannerinWriter.setFfMode(mode);
+        } catch (UnsatisfiedLinkError e) {
+            // libbannerin.so missing or older than the force-feedback API: the readers keep their default.
+            Log.w(TAG, "DirectInput vibration: setFfMode unavailable", e);
+        }
+    }
+
+    /**
      * No identity and no session settings: the readers go by their environment (FAKE_EVDEV_IDENTITY,
      * BANNERIN_AXIS_*). For the Linux runtime session, which sets its own env. The record outlives a
      * session in this process, so without this a Linux launch after a Wine game would present that
@@ -59,7 +79,8 @@ public final class BannerinSessionControl {
         }
         BannerinWriter.setSessionControl(BannerinWriter.AXIS_MODE_UNSET, 0, 0,
                 BannerinWriter.XINPUT_MODE_UNSET, 0);
-        Log.i(TAG, "control block cleared: identity and pacing from the env vars");
+        applyFfMode(DInputVibration.FF_MODE_UNSET);
+        Log.i(TAG, "control block cleared: identity, pacing and DirectInput vibration from the env vars");
     }
 
     /** The XInput mode for a live Direct/Wine choice, when the session can switch. */

@@ -22,6 +22,7 @@ import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.WrapperManager
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.ControllerIdentity
+import com.winlator.star.core.DInputVibration
 import com.winlator.star.core.DInputVisibility
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.EnvVars
@@ -378,6 +379,8 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // Enable XInput / Enable DInput / Exclusive Input. Saved into the same inputType/exclusiveXInput
     // fields older builds read; a new container starts off, as the old default did.
     var dinputVisible by mutableStateOf(false)
+    // "DirectInput vibration" (core.DInputVibration, extra "dinputVibration", stored only when off).
+    var dinputVibration by mutableStateOf(true)
     // Direct XInput (BANNERIN): XInput games read the BANNERIN slot files directly (core/BannerinXInput).
     var bannerinXInput by mutableStateOf(false)
     // "Allow in-game switching" of Direct XInput (core/BannerinXInput.switchingEffective).
@@ -746,6 +749,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
         // DirectInput visibility, read from the stored inputType / exclusiveXInput (old values included)
         dinputVisible  = DInputVisibility.forContainer(seed)
+        dinputVibration = DInputVibration.forContainer(seed)
         bannerinXInput = seed?.isBannerinXInput ?: false
         bannerinXInputSwitching = seed?.isBannerinXInputSwitching ?: true
         stickPacing    = StickPacing.forContainer(seed).format()
@@ -1373,6 +1377,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         c.setReshadeParams(reshadeLoadout.paramsJsonOrNull())
         c.setReshadeEffect(reshadeLoadout.firstEffectName())
         DInputVisibility.writeTo(c, dinputVisible)   // inputType + exclusiveXInput, as older builds read them
+        c.putExtra(DInputVibration.EXTRA, DInputVibration.containerExtra(dinputVibration))
         c.setBannerinXInput(bannerinXInput)
         c.setBannerinXInputSwitching(bannerinXInputSwitching)
         // Only stored when it differs from the default, so an untouched container's data doesn't change.

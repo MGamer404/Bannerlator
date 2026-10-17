@@ -19,6 +19,7 @@ import com.winlator.star.container.Container
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
 import com.winlator.star.core.BannerinXInput
 import com.winlator.star.core.ControllerIdentity
+import com.winlator.star.core.DInputVibration
 import com.winlator.star.core.DInputVisibility
 import com.winlator.star.core.DirectAudioSupport
 import com.winlator.star.core.FastOpenGL
@@ -1083,6 +1084,16 @@ internal object SettingsRegistry {
                     e.put(DInputVisibility.EXTRA_INPUT_TYPE, "${DInputVisibility.inputTypeFor(v == "1")}")
                 },
             ),
+        ),
+        SettingDef(
+            id = "input.dinputVibration", category = "input", group = "Controllers", level = ADVANCED,
+            label = "DirectInput vibration", hint = "DirectInput games (racing, flight, many older titles) can make the controller vibrate. On by default.",
+            help = "Lets DirectInput games make the controller vibrate: plain rumble, and the force effects racing and flight games send to a wheel or a joystick, felt through the controller's two motors. It follows the Vibration settings (rumble target and intensity). A steady force (a racing game holding the wheel straight, for example) fades after a couple of seconds, so the controller doesn't keep buzzing. DirectInput games only feel it while they can see the controller. A change applies when the controller reconnects (in-game, Controls › Pad does that) or on the next launch. BANNERIN_DINPUT_FF in the env vars wins over this setting.",
+            tech = DInputVibration.EXTRA,
+            control = { _, _ -> Control.Toggle },
+            vm = vmBool({ it.dinputVibration }, { vm, v -> vm.dinputVibration = v }),
+            game = key10(DInputVibration.EXTRA),
+            disabled = { env, _ -> DInputVibration.lockedReason(env.vm?.container, env.shortcut) },
         ),
         SettingDef(
             id = "input.bannerinXInput", category = "input", group = "Controllers", level = ADVANCED,

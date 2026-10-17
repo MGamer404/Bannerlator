@@ -380,6 +380,10 @@ object XServerDialogState {
         val dinputVisible: Boolean = false,
         /** Non-null: why DirectInput visibility is fixed for this launch (passthrough, DirectInput pad). */
         val dinputLockedReason: String? = null,
+        /** DirectInput vibration (core.DInputVibration): DirectInput games' force feedback reaches the pad. */
+        val dinputVibration: Boolean = true,
+        /** Non-null: why it can't change here (BANNERIN_DINPUT_FF in the env vars). */
+        val dinputVibrationLockedReason: String? = null,
         /** StickPacing format: auto:N / fixed:N / off. */
         val pacing: String = "auto:60",
         /** Non-null: why the pacing can't change here (BANNERIN_AXIS_* env vars). */
@@ -402,6 +406,7 @@ object XServerDialogState {
     @JvmField var onPadIdentity: PadStringCallback? = null
     @JvmField var onPadXInputDirect: PadBoolCallback? = null
     @JvmField var onPadDInputVisible: PadBoolCallback? = null
+    @JvmField var onPadDInputVibration: PadBoolCallback? = null
     @JvmField var onPadPacing: PadStringCallback? = null
     @JvmField var onPadReconnectNow: Runnable? = null
     @JvmField var onPadNextLaunch: Runnable? = null
@@ -1081,7 +1086,7 @@ object XServerDialogState {
         onRequestResume = null
         onVibrationSlotChanged = null
         onVibrationModeChanged = null; onVibrationIntensityChanged = null; onRumbleMotorsChanged = null
-        onPadIdentity = null; onPadXInputDirect = null; onPadDInputVisible = null; onPadPacing = null
+        onPadIdentity = null; onPadXInputDirect = null; onPadDInputVisible = null; onPadDInputVibration = null; onPadPacing = null
         onPadReconnectNow = null; onPadNextLaunch = null; onPadRefresh = null
         onControllerSaveScope = null
         onPlayerSlotChanged = null; onPlayerSlotsRefresh = null; onResetInput = null

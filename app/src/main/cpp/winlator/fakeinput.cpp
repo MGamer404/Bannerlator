@@ -36,6 +36,11 @@
 
 #include "../bannerin/include/bannerin.h"
 
+// Force feedback (EVIOCSFF / EVIOCRMFF / EV_FF writes) goes to BANNERIN's effect engine (API 3).
+#if BANNERIN_API_VERSION < 3
+#error "fakeinput.cpp needs the BANNERIN force-feedback API (bannerin.h API version 3)"
+#endif
+
 #define EXPORT __attribute__((visibility("default"))) extern "C"
 
 // bionic declares ioctl's request as int, glibc as unsigned long.
@@ -139,7 +144,6 @@ static const uint16_t kPadAxisCodes[BANNERIN_AXES] = BANNERIN_AXIS_CODES;
 static std::unordered_map<int, FakeController> controller_map;
 static const char *hook_dir = nullptr;
 static const char *udev_data_dir = nullptr;
-static bool vibration_enabled = true;
 
 static int (*my_open)(const char *, int, ...) = nullptr;
 static int (*my_openat)(int, const char *, int, ...) = nullptr;
@@ -159,9 +163,6 @@ static int (*my_ppoll)(struct pollfd *, nfds_t, const struct timespec *,
 static int (*my_select)(int, fd_set *, fd_set *, fd_set *,
                         struct timeval *) = nullptr;
 static ssize_t (*my_write)(int, const void *, size_t) = nullptr;
-
-static std::unordered_map<int, struct ff_effect> ff_effects;
-static int next_ff_id = 0;
 
 namespace Logger {
 int log_enabled;
@@ -202,8 +203,6 @@ __attribute__((constructor)) static void library_init() {
                    ? getenv("FAKE_EVDEV_DIR")
                    : "/data/data/com.termux/files/home/fake-input";
   udev_data_dir = getenv("FAKE_UDEV_DATA_DIR");
-  vibration_enabled =
-      getenv("FAKE_EVDEV_VIBRATION") && atoi(getenv("FAKE_EVDEV_VIBRATION"));
 
   pad_identity = find_pad_identity(getenv("FAKE_EVDEV_IDENTITY"));
 
@@ -213,57 +212,140 @@ __attribute__((constructor)) static void library_init() {
   bannerin_init();
 }
 
-__attribute__((visibility("hidden"))) static void
-send_vibration(int strong, int weak, uint16_t duration_ms, uint16_t slot) {
-  if (!vibration_enabled)
-    return;
+// Force feedback. Every pad fd is a BANNERIN handle, and BANNERIN's effect engine owns its effects:
+// it answers which effect types the pad supports, keeps each handle's uploaded effects (as the kernel
+// keeps them per open file), plays them, mixes them into the two rumble motors and sends those to the
+// app. Here the evdev calls are only translated: EVIOCSFF / EVIOCRMFF / EVIOCGEFFECTS and the EV_FF
+// events a program writes (play / stop, gain, autocenter).
 
-  int sock = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (sock < 0)
-    return;
-
-  struct sockaddr_un addr = {};
-  addr.sun_family = AF_UNIX;
-  const char *name = "winlator_vibration";
-  memcpy(addr.sun_path + 1, name, strlen(name));
-  socklen_t addrlen = offsetof(struct sockaddr_un, sun_path) + 1 + strlen(name);
-
-  if (connect(sock, reinterpret_cast<struct sockaddr *>(&addr), addrlen) < 0) {
-    syscall(SYS_close, sock);
-    return;
+// The pad's EV_FF bitmap (EVIOCGBIT layout, FF_MAX + 1 bits), zeroed when the engine has none.
+__attribute__((visibility("hidden"))) static bool
+ff_bits(bannerin_handle handle, unsigned char (&bits)[(FF_MAX + 8) / 8]) {
+  memset(bits, 0, sizeof(bits));
+  int n = bannerin_ff_bits(handle, bits, sizeof(bits));
+  if (n <= 0) {
+    memset(bits, 0, sizeof(bits));
+    return false;
   }
-
-  uint16_t data[4];
-  data[0] = static_cast<uint16_t>(strong);
-  data[1] = static_cast<uint16_t>(weak);
-  data[2] = duration_ms;
-  data[3] = slot;
-  send(sock, data, sizeof(data), 0);
-  syscall(SYS_close, sock);
+  for (unsigned char byte : bits)
+    if (byte)
+      return true;
+  return false;
 }
 
 __attribute__((visibility("hidden"))) static void
-check_ff_event(const struct input_event *ev, uint16_t slot) {
-  if (ev->type != EV_FF)
-    return;
+copy_ff_envelope(struct bannerin_ff_envelope *out, const struct ff_envelope &in) {
+  out->attack_length = in.attack_length;
+  out->attack_level = in.attack_level;
+  out->fade_length = in.fade_length;
+  out->fade_level = in.fade_level;
+}
 
-  int id = ev->code;
-  if (ev->value > 0) {
-    auto it = ff_effects.find(id);
-    if (it == ff_effects.end())
-      return;
-
-    uint16_t duration = it->second.replay.length;
-    if (it->second.type == FF_RUMBLE) {
-      send_vibration(it->second.u.rumble.strong_magnitude,
-                     it->second.u.rumble.weak_magnitude, duration, slot);
-    } else if (it->second.type == FF_PERIODIC) {
-      send_vibration(it->second.u.periodic.magnitude,
-                     it->second.u.periodic.magnitude, duration, slot);
-    }
-  } else {
-    send_vibration(0, 0, 0, slot);
+// struct ff_effect -> the engine's effect. The trigger button and a custom waveform's sample data
+// have no counterpart (the engine plays effects only on request, and custom samples live in the
+// caller's memory); everything else is copied field by field.
+__attribute__((visibility("hidden"))) static void
+to_bannerin_effect(const struct ff_effect &in, struct bannerin_ff_effect *out) {
+  memset(out, 0, sizeof(*out));
+  out->type = in.type;
+  out->id = in.id;
+  out->direction = in.direction;
+  out->replay_length = in.replay.length;
+  out->replay_delay = in.replay.delay;
+  switch (in.type) {
+  case FF_RUMBLE:
+    out->u.rumble.strong_magnitude = in.u.rumble.strong_magnitude;
+    out->u.rumble.weak_magnitude = in.u.rumble.weak_magnitude;
+    break;
+  case FF_PERIODIC:
+    out->u.periodic.waveform = in.u.periodic.waveform;
+    out->u.periodic.period = in.u.periodic.period;
+    out->u.periodic.magnitude = in.u.periodic.magnitude;
+    out->u.periodic.offset = in.u.periodic.offset;
+    out->u.periodic.phase = in.u.periodic.phase;
+    copy_ff_envelope(&out->u.periodic.envelope, in.u.periodic.envelope);
+    break;
+  case FF_CONSTANT:
+    out->u.constant.level = in.u.constant.level;
+    copy_ff_envelope(&out->u.constant.envelope, in.u.constant.envelope);
+    break;
+  case FF_RAMP:
+    out->u.ramp.start_level = in.u.ramp.start_level;
+    out->u.ramp.end_level = in.u.ramp.end_level;
+    copy_ff_envelope(&out->u.ramp.envelope, in.u.ramp.envelope);
+    break;
+  case FF_SPRING:
+  case FF_FRICTION:
+  case FF_DAMPER:
+  case FF_INERTIA:
+    // Conditions travel as raw bytes: struct ff_condition_effect[2] (one per axis), as evdev has it.
+    static_assert(sizeof(in.u.condition) <= sizeof(out->u.raw),
+                  "two ff_condition_effect fit the engine's raw effect data");
+    memcpy(out->u.raw, in.u.condition, sizeof(in.u.condition));
+    break;
+  default:
+    // A type the pad doesn't advertise: the engine refuses it.
+    break;
   }
+}
+
+// EVIOCSFF: upload a new effect (id -1; the engine picks the id) or update one of this fd's. The id
+// goes back into the caller's struct, as evdev writes it.
+__attribute__((visibility("hidden"))) static int
+upload_ff_effect(bannerin_handle handle, fakeinput_ioctl_request_t op, void *argp) {
+  if (!argp) {
+    errno = EFAULT;
+    return -1;
+  }
+  struct ff_effect effect;
+  memset(&effect, 0, sizeof(effect));
+  memcpy(&effect, argp, std::min<size_t>(_IOC_SIZE(op), sizeof(effect)));
+
+  struct bannerin_ff_effect converted;
+  to_bannerin_effect(effect, &converted);
+  int error = bannerin_ff_upload(handle, &converted, sizeof(converted));
+  if (error < 0) {
+    Logger::log("EVIOCSFF type 0x%x id %d refused: %s\n", effect.type, effect.id, strerror(-error));
+    errno = -error;
+    return -1;
+  }
+  static_cast<struct ff_effect *>(argp)->id = converted.id;
+  return 0;
+}
+
+// The EV_FF events of one write: FF_GAIN / FF_AUTOCENTER set the device's gain / autocenter (values
+// above 0xffff ignored, as evdev does), any other code plays (value = count) or stops (0) the effect
+// with that id. Other event types are accepted and ignored, as before.
+__attribute__((visibility("hidden"))) static void
+write_ff_events(bannerin_handle handle, const void *buf, size_t count) {
+  const struct input_event *events = static_cast<const struct input_event *>(buf);
+  for (size_t i = 0; i < count / sizeof(struct input_event); i++) {
+    const struct input_event &ev = events[i];
+    if (ev.type != EV_FF)
+      continue;
+    int error;
+    if (ev.code == FF_GAIN || ev.code == FF_AUTOCENTER) {
+      if (ev.value < 0 || ev.value > 0xffff)
+        continue;
+      uint16_t value = static_cast<uint16_t>(ev.value);
+      error = ev.code == FF_GAIN ? bannerin_ff_set_gain(handle, value)
+                                 : bannerin_ff_set_autocenter(handle, value);
+    } else {
+      error = bannerin_ff_play(handle, ev.code, ev.value);
+    }
+    if (error < 0)
+      Logger::log("EV_FF code %u value %d: %s\n", ev.code, ev.value, strerror(-error));
+  }
+}
+
+// An EVIOCGBIT reply the way evdev gives it: no more than the caller's buffer (_IOC_SIZE), and the
+// number of bytes copied as the result.
+__attribute__((visibility("hidden"))) static int
+copy_bits_reply(fakeinput_ioctl_request_t op, void *argp, const void *bits, size_t size) {
+  size_t n = std::min<size_t>(_IOC_SIZE(op), size);
+  if (argp && n)
+    memcpy(argp, bits, n);
+  return static_cast<int>(n);
 }
 
 __attribute__((visibility("hidden"))) char *
@@ -766,8 +848,12 @@ EXPORT int ioctl(int fd, fakeinput_ioctl_request_t op, ...) {
     bitmask[EV_SYN / 8] |= (1 << (EV_SYN % 8));
     bitmask[EV_KEY / 8] |= (1 << (EV_KEY % 8));
     bitmask[EV_ABS / 8] |= (1 << (EV_ABS % 8));
-    memcpy(argp, (void *)&bitmask, sizeof(bitmask));
-    return 0;
+    // EV_FF while the pad has any effect type: SDL's haptic layer, and through it winebus's
+    // DirectInput force feedback, looks for it.
+    unsigned char ff[(FF_MAX + 8) / 8];
+    if (ff_bits(controller->second.handle, ff))
+      bitmask[EV_FF / 8] |= (1 << (EV_FF % 8));
+    return copy_bits_reply(op, argp, bitmask, sizeof(bitmask));
   } else if (type == 0x45 && number == 0x21) {
     Logger::log("Hooking ioctl EVIOCGBIT(EV_KEY, len) for event %s\n", event);
     char bitmask[KEY_MAX / 8] = {0};
@@ -776,13 +862,11 @@ EXPORT int ioctl(int fd, fakeinput_ioctl_request_t op, ...) {
                                 BTN_MODE, BTN_THUMBL, BTN_THUMBR};
     for (int button : xbox_buttons)
       bitmask[button / 8] |= (1 << (button % 8));
-    memcpy(argp, (void *)&bitmask, sizeof(bitmask));
-    return 0;
+    return copy_bits_reply(op, argp, bitmask, sizeof(bitmask));
   } else if (type == 0x45 && number == 0x22) {
     Logger::log("Hooking ioctl EVIOCGBIT(EV_REL, len) for event %s\n", event);
     char bitmask[REL_MAX / 8] = {0};
-    memcpy(argp, (void *)&bitmask, sizeof(bitmask));
-    return 0;
+    return copy_bits_reply(op, argp, bitmask, sizeof(bitmask));
   } else if (type == 0x45 && number == 0x23) {
     Logger::log("Hooking ioctl EVIOCGBIT(EV_ABS, len) for event %s\n", event);
     char bitmask[ABS_MAX / 8] = {0};
@@ -794,37 +878,23 @@ EXPORT int ioctl(int fd, fakeinput_ioctl_request_t op, ...) {
     bitmask[ABS_BRAKE / 8] |= (1 << (ABS_BRAKE % 8));
     bitmask[ABS_HAT0X / 8] |= (1 << (ABS_HAT0X % 8));
     bitmask[ABS_HAT0Y / 8] |= (1 << (ABS_HAT0Y % 8));
-    memcpy(argp, (void *)&bitmask, sizeof(bitmask));
-    return 0;
+    return copy_bits_reply(op, argp, bitmask, sizeof(bitmask));
   } else if (type == 0x45 && number == 0x35) {
     Logger::log("Hooking ioctl EVIOCGBIT(EV_FF, len) for event %s\n", event);
-    char bitmask[FF_MAX / 8] = {0};
-    bitmask[FF_RUMBLE / 8] |= (1 << (FF_RUMBLE % 8));
-    bitmask[FF_PERIODIC / 8] |= (1 << (FF_PERIODIC % 8));
-    memcpy(argp, (void *)&bitmask, sizeof(bitmask));
-    return 0;
+    unsigned char bitmask[(FF_MAX + 8) / 8];
+    ff_bits(controller->second.handle, bitmask);
+    return copy_bits_reply(op, argp, bitmask, sizeof(bitmask));
   } else if (type == 0x45 && number == 0x80) {
-    struct ff_effect *effect = static_cast<struct ff_effect *>(argp);
-    if (effect->id == -1)
-      effect->id = next_ff_id++;
-    ff_effects[effect->id] = *effect;
-
-    uint16_t duration = effect->replay.length;
-    uint16_t slot = static_cast<uint16_t>(event_number);
-    if (effect->type == FF_RUMBLE) {
-      send_vibration(effect->u.rumble.strong_magnitude,
-                     effect->u.rumble.weak_magnitude, duration, slot);
-    } else if (effect->type == FF_PERIODIC) {
-      send_vibration(effect->u.periodic.magnitude, effect->u.periodic.magnitude,
-                     duration, slot);
+    return upload_ff_effect(controller->second.handle, op, argp);
+  } else if (type == 0x45 && number == 0x81) {
+    int error = bannerin_ff_erase(controller->second.handle, static_cast<int>((intptr_t)argp));
+    if (error < 0) {
+      errno = -error;
+      return -1;
     }
     return 0;
-  } else if (type == 0x45 && number == 0x81) {
-    int id = (intptr_t)argp;
-    ff_effects.erase(id);
-    return 0;
   } else if (type == 0x45 && number == 0x84) {
-    int max_effects = 16;
+    int max_effects = BANNERIN_FF_MAX_EFFECTS;
     memcpy(argp, &max_effects, sizeof(int));
     return 0;
   } else if (type == 0x45 && number >= 0x40 && number <= 0x51) {
@@ -939,13 +1009,7 @@ EXPORT ssize_t write(int fd, const void *buf, size_t count) {
     if (fake_fd_write_fails(controller->second.handle))
       return -1;
 
-    const struct input_event *ev = nullptr;
-    uint16_t slot = static_cast<uint16_t>(controller->second.slot);
-    if (count == sizeof(struct input_event)) {
-      ev = static_cast<const struct input_event *>(buf);
-      check_ff_event(ev, slot);
-    }
-
+    write_ff_events(controller->second.handle, buf, count);
     return static_cast<ssize_t>(count);
   }
   return my_write(fd, buf, count);
@@ -957,14 +1021,9 @@ EXPORT ssize_t writev(int fd, const struct iovec *iov, int iovcnt) {
     if (fake_fd_write_fails(controller->second.handle))
       return -1;
 
-    uint16_t slot = static_cast<uint16_t>(controller->second.slot);
     ssize_t total = 0;
     for (int i = 0; i < iovcnt; i++) {
-      if (iov[i].iov_len == sizeof(struct input_event)) {
-        const struct input_event *ev =
-            static_cast<const struct input_event *>(iov[i].iov_base);
-        check_ff_event(ev, slot);
-      }
+      write_ff_events(controller->second.handle, iov[i].iov_base, iov[i].iov_len);
       total += static_cast<ssize_t>(iov[i].iov_len);
     }
     return total;

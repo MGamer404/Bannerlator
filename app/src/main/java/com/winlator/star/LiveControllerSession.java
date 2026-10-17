@@ -9,6 +9,7 @@ import com.winlator.star.container.Shortcut;
 import com.winlator.star.core.BannerinSessionControl;
 import com.winlator.star.core.BannerinXInput;
 import com.winlator.star.core.ControllerIdentity;
+import com.winlator.star.core.DInputVibration;
 import com.winlator.star.core.JoystickRegistry;
 import com.winlator.star.core.StickPacing;
 import com.winlator.star.inputcontrols.BannerinWriter;
@@ -23,14 +24,15 @@ import java.util.List;
 
 /**
  * The in-game controller settings (Controls › Pad) of a Wine session: Controller type, XInput source,
- * DirectInput visibility and stick updates. Every change is saved through {@link ControllerSaveTarget}
- * (this game, or all games in the container, as the footer says) and reaches the running game in one
- * of three ways:
+ * DirectInput visibility, DirectInput vibration and stick updates. Every change is saved through
+ * {@link ControllerSaveTarget} (this game, or all games in the container, as the footer says) and
+ * reaches the running game in one of three ways:
  * <ul>
  *   <li>live: stick updates (BANNERIN session control, read by the readers at once)</li>
  *   <li>by reconnecting the controller (WinHandler.reconnectSlots): the identity, DirectInput
- *       visibility and, when the session allows it, the XInput source. Batched: 800 ms after the
- *       last change, on "Reconnect now", or when the menu closes</li>
+ *       visibility, DirectInput vibration (BANNERIN reads it when the pad is opened again) and, when
+ *       the session allows it, the XInput source. Batched: 800 ms after the last change, on
+ *       "Reconnect now", or when the menu closes</li>
  *   <li>on the next launch: switching to or from the Classic DirectInput pad (winebus reads "Map
  *       Controllers" once), and the XInput source when in-game switching was off at launch</li>
  * </ul>
@@ -65,6 +67,7 @@ final class LiveControllerSession {
     private final String identityLockedReason;
     private final String pacingLockedReason;
     private final String dinputLockedReason;
+    private final String vibrationLockedReason;
     private final boolean xinputSwitchable;
     /** Control block xinput_flags written at launch (FORWARD_AVAILABLE, HIDDEN). */
     private final int xinputFlags;
@@ -76,6 +79,8 @@ final class LiveControllerSession {
     private String appliedIdentity;
     private boolean dinputVisible;
     private boolean appliedDInputVisible;
+    private boolean dinputVibration;
+    private boolean appliedDInputVibration;
     private boolean xinputDirect;
     private boolean appliedXInputDirect;
     private StickPacing pacing;
@@ -114,6 +119,11 @@ final class LiveControllerSession {
         this.dinputVisible = launchDInput;
         this.appliedDInputVisible = launchDInput;
         this.dinputLockedReason = dinputForcedWhy != null ? "Always on for this launch (" + dinputForcedWhy + ")." : null;
+        // The launch wrote this game's setting (GuestProgramLauncherComponent); BANNERIN_DINPUT_FF in the
+        // env vars wins in the guest, so the row then shows that value and can't change.
+        this.dinputVibration = DInputVibration.effective(container, shortcut);
+        this.appliedDInputVibration = dinputVibration;
+        this.vibrationLockedReason = DInputVibration.lockedReason(container, shortcut);
         this.xinputDirect = xinputDirect;
         this.appliedXInputDirect = xinputDirect;
         this.xinputSwitchable = xinputSwitchable;
@@ -157,6 +167,7 @@ final class LiveControllerSession {
         ds.onPadIdentity = this::onIdentity;
         ds.onPadXInputDirect = this::onXInputDirect;
         ds.onPadDInputVisible = this::onDInputVisible;
+        ds.onPadDInputVibration = this::onDInputVibration;
         ds.onPadPacing = this::onPacing;
         ds.onPadReconnectNow = this::reconnectNow;
         ds.onPadNextLaunch = this::nextLaunch;
@@ -205,6 +216,14 @@ final class LiveControllerSession {
         markPending();
     }
 
+    private void onDInputVibration(boolean on) {
+        if (vibrationLockedReason != null || on == dinputVibration) return;
+        dinputVibration = on;
+        saveDInputVibration(on);
+        Log.i(TAG, "DirectInput vibration -> " + (on ? "on" : "off"));
+        markPending();
+    }
+
     private void onXInputDirect(boolean direct) {
         if (direct == xinputDirect) return;
         xinputDirect = direct;
@@ -240,7 +259,8 @@ final class LiveControllerSession {
     private boolean needsReconnect() {
         boolean identityChange = !identity.equals(appliedIdentity) && !nextLaunchOnly.contains(NOTE_IDENTITY);
         boolean xinputChange = xinputSwitchable && xinputDirect != appliedXInputDirect;
-        return identityChange || dinputVisible != appliedDInputVisible || xinputChange;
+        return identityChange || dinputVisible != appliedDInputVisible
+                || dinputVibration != appliedDInputVibration || xinputChange;
     }
 
     private void reconnectNow() {
@@ -275,6 +295,11 @@ final class LiveControllerSession {
                     appliedIdentity = targetIdentity;
                 }
                 appliedDInputVisible = targetDInput;
+                // Before the replug: BANNERIN reads the mode when the game opens the pad again.
+                if (dinputVibration != appliedDInputVibration) {
+                    appliedDInputVibration = dinputVibration;
+                    BannerinSessionControl.writeFfMode(dinputVibration);
+                }
                 if (xinputSwitchable && xinputDirect != appliedXInputDirect) {
                     appliedXInputDirect = xinputDirect;
                     xinputMode = BannerinSessionControl.xinputModeFor(xinputDirect);
@@ -292,6 +317,7 @@ final class LiveControllerSession {
         if (!identity.equals(appliedIdentity)) addNote(NOTE_IDENTITY);
         if (xinputDirect != appliedXInputDirect) addNote(NOTE_XINPUT);
         if (dinputVisible != appliedDInputVisible) addNote("DirectInput visibility applies on the next launch.");
+        if (dinputVibration != appliedDInputVibration) addNote("DirectInput vibration applies on the next launch.");
         publish();
     }
 
@@ -319,6 +345,8 @@ final class LiveControllerSession {
                 xinputSwitchable,
                 dinputVisible,
                 dinputLockedReason,
+                dinputVibration,
+                vibrationLockedReason,
                 pacing.format(),
                 pacingLockedReason,
                 nowHz,
@@ -335,6 +363,11 @@ final class LiveControllerSession {
 
     private void saveDInput(boolean visible) {
         saveTarget.saveDInput(visible);
+    }
+
+    private void saveDInputVibration(boolean on) {
+        saveTarget.save(DInputVibration.EXTRA, on ? "1" : "0",
+                () -> container.putExtra(DInputVibration.EXTRA, DInputVibration.containerExtra(on)));
     }
 
     private void saveXInput(boolean direct) {

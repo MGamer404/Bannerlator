@@ -23,6 +23,7 @@ import com.winlator.star.contents.ContentsManager;
 import com.winlator.star.core.BannerinSessionControl;
 import com.winlator.star.core.Callback;
 import com.winlator.star.core.ControllerIdentity;
+import com.winlator.star.core.DInputVibration;
 import com.winlator.star.core.EnvVars;
 import com.winlator.star.core.FileUtils;
 import com.winlator.star.core.GPUInformation;
@@ -679,10 +680,16 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         }
         // BANNERIN control block, written before the guest starts: every slot's identity (the evdev
         // layer reads it when a reader attaches, ahead of FAKE_EVDEV_IDENTITY, so a reconnect presents a
-        // changed one) and the session control (stick pacing; Direct XInput's mode and flags).
+        // changed one), the session control (stick pacing; Direct XInput's mode and flags) and
+        // DirectInput vibration (read when a reader attaches; BANNERIN_DINPUT_FF in the env vars wins).
         BannerinSessionControl.writeSlotIdentities(padIdentity);
         BannerinSessionControl.writeSessionControl(StickPacing.forGame(container, shortcut),
                 bannerinXInputMode, bannerinXInputFlags, StickPacing.envOverrides(container, shortcut));
+        BannerinSessionControl.writeFfMode(DInputVibration.forGame(container, shortcut));
+        if (DInputVibration.envOverride(container, shortcut) != null) {
+            Log.i("GuestLauncher", "DirectInput vibration: " + DInputVibration.ENV + " in the env vars decides ("
+                    + (DInputVibration.effective(container, shortcut) ? "on" : "off") + ")");
+        }
 
         Log.d("GuestLauncher", "Final LD_PRELOAD: " + ld_preload);
         // winewayland.so (unixlib) dlopens libwayland-client/-egl/xkbcommon/xkbregistry. These resolve

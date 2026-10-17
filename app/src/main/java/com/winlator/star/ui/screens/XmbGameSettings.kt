@@ -56,6 +56,7 @@ import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.WrapperManager
 import com.winlator.star.core.BannerinXInput
 import com.winlator.star.core.ControllerIdentity
+import com.winlator.star.core.DInputVibration
 import com.winlator.star.core.DInputVisibility
 import com.winlator.star.core.RumbleMotors
 import com.winlator.star.core.StickPacing
@@ -774,6 +775,20 @@ private fun controllerRows(xmb: XmbScope, p: XmbPrefs): List<XmbRow> {
                 xmb.saved(); s.saveData(); xmb.refresh()
             }
             helpRow("inputHelp", "What does the DirectInput switch do?", "DirectInput", R.string.help_dinput_visible_game)
+        }
+        // DirectInput vibration (core.DInputVibration). BANNERIN_DINPUT_FF in the env vars decides
+        // instead: the row shows its value and is greyed.
+        run {
+            val labels = listOf(inherit(onOff(DInputVibration.forContainer(c))), "On", "Off")
+            val values = listOf("", "1", "0")
+            val env = DInputVibration.envOverride(c, s)
+            val own = env?.let { if (it) "1" else "0" } ?: (DInputVibration.normalize(p.ex(DInputVibration.EXTRA, "")) ?: "")
+            rows += XmbRow.Choice("dinputVibration", "DirectInput vibration", Icons.Filled.Vibration, labels, labels[values.indexOf(own)],
+                subtitle = "DirectInput games can make the controller vibrate",
+                disabledReason = DInputVibration.lockedReason(c, s)) { v ->
+                xmb.set(p, DInputVibration.EXTRA, values[labels.indexOf(v).coerceAtLeast(0)].ifEmpty { null })
+            }
+            helpRow("dinputVibrationHelp", "What is DirectInput vibration?", "DirectInput vibration", R.string.help_dinput_vibration_game)
         }
         onOffRow("bannerinXInput", BannerinXInput.EXTRA_KEY, "Direct XInput (BANNERIN)", c.isBannerinXInput(), "XInput games read the controller directly")
         helpRow("bannerinXInputHelp", "What is Direct XInput?", "Direct XInput", R.string.help_bannerin_xinput_game)

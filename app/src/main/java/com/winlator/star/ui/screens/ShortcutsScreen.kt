@@ -244,6 +244,7 @@ import com.winlator.star.ui.screens.adrenodownload.RemoteDriverEntry
 import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
 import com.winlator.star.core.BannerinXInput
 import com.winlator.star.core.ControllerIdentity
+import com.winlator.star.core.DInputVibration
 import com.winlator.star.core.DInputVisibility
 import com.winlator.star.core.GameXInputDlls
 import com.winlator.star.core.RumbleMotors
@@ -5137,7 +5138,7 @@ private fun DpDrop(
 private fun OverrideDrop(
     dp: SettingsDpad, id: String, label: String, containerLabel: String,
     values: List<String>, labels: List<String>, selected: String, onSelect: (String) -> Unit,
-    helpRes: Int, onHelp: (Int) -> Unit,
+    helpRes: Int, onHelp: (Int) -> Unit, enabled: Boolean = true,
 ) {
     val allValues = listOf("") + values
     val allLabels = listOf("Use container default ($containerLabel)") + labels
@@ -5148,6 +5149,7 @@ private fun OverrideDrop(
             options = allLabels,
             selected = allLabels[allValues.indexOf(selected).coerceAtLeast(0)],
             onSelect = { opt -> onSelect(allValues[allLabels.indexOf(opt).coerceAtLeast(0)]) },
+            enabled = enabled,
             modifier = Modifier.weight(1f)
         )
         IconButton(onClick = { onHelp(helpRes) }) {
@@ -5784,6 +5786,8 @@ internal fun ShortcutSettingsDialogScreen(
         mutableStateOf(if (!DInputVisibility.gameOwns(shortcut)) ""
                        else if (DInputVisibility.forGame(shortcut.container, shortcut)) "1" else "0")
     }
+    // DirectInput vibration: "1" / "0" under the container's key (core.DInputVibration).
+    var dinputVibrationOwn by remember { mutableStateOf(ownOnOff(shortcut.getExtra(DInputVibration.EXTRA))) }
     var bannerinXInputOwn by remember { mutableStateOf(ownOnOff(shortcut.getExtra(BannerinXInput.EXTRA_KEY))) }
     var xinputSwitchingOwn by remember { mutableStateOf(ownOnOff(shortcut.getExtra(BannerinXInput.EXTRA_SWITCHING))) }
     // This game only, off by default: move the game's own xinput DLLs aside for the session (GameXInputDlls).
@@ -6190,6 +6194,7 @@ internal fun ShortcutSettingsDialogScreen(
             val ownDInput: Boolean? = dinputOwn.ifEmpty { null }?.let { it == "1" }
             putExtra(DInputVisibility.EXTRA_EXCLUSIVE, ownDInput?.let { "1" })
             putExtra(DInputVisibility.EXTRA_INPUT_TYPE, ownDInput?.let { DInputVisibility.inputTypeFor(it).toString() })
+            putExtra(DInputVibration.EXTRA, dinputVibrationOwn.ifEmpty { null })
             putExtra(BannerinXInput.EXTRA_KEY, bannerinXInputOwn.ifEmpty { null })
             putExtra(BannerinXInput.EXTRA_SWITCHING, xinputSwitchingOwn.ifEmpty { null })
             putExtra(GameXInputDlls.EXTRA_OVER_GAME, if (xinputOverGameDll) "1" else null)
@@ -6378,7 +6383,7 @@ internal fun ShortcutSettingsDialogScreen(
             }
             4 -> { // Controller
                 if (!isLinuxEntry) {
-                    add("dinputVisible"); add("bannerinXInput"); add("bannerinXInputSwitching"); add("xinputOverGameDll"); add("stickPacing")
+                    add("dinputVisible"); add("dinputVibration"); add("bannerinXInput"); add("bannerinXInputSwitching"); add("xinputOverGameDll"); add("stickPacing")
                     if (StickPacing.parse(stickPacingOwn)?.let { it.mode != StickPacing.MODE_OFF } == true) add("stickPacingHz")
                     add("controllerIdentity"); add("disableXInput")
                 }
@@ -8006,6 +8011,20 @@ internal fun ShortcutSettingsDialogScreen(
                                 onOffValues, onOffLabels, dinputOwn, { dinputOwn = it },
                                 R.string.help_dinput_visible_game
                             ) { helpRes = it }
+                            // DirectInput vibration (core.DInputVibration). BANNERIN_DINPUT_FF in this game's
+                            // (or the container's) env vars decides instead: the row shows it, greyed.
+                            val ffEnv = DInputVibration.envValue(envVarsStr, shortcut.container.envVars)
+                            OverrideDrop(
+                                dp, "dinputVibration", stringResource(R.string.dinput_vibration),
+                                onOff(DInputVibration.forContainer(shortcut.container)),
+                                onOffValues, onOffLabels, ffEnv?.let { if (it) "1" else "0" } ?: dinputVibrationOwn,
+                                { dinputVibrationOwn = it },
+                                R.string.help_dinput_vibration_game, { helpRes = it }, enabled = ffEnv == null
+                            )
+                            if (ffEnv != null) {
+                                Text(DInputVibration.ENV_LOCKED, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                             OverrideDrop(
                                 dp, "bannerinXInput", stringResource(R.string.bannerin_xinput), onOff(shortcut.container.isBannerinXInput()),
                                 onOffValues, onOffLabels, bannerinXInputOwn, { bannerinXInputOwn = it },

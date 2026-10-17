@@ -70,6 +70,7 @@ import com.winlator.star.contents.WrapperManager
 import com.winlator.star.contents.WrapperSettingsDictionary
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.ControllerIdentity
+import com.winlator.star.core.DInputVibration
 import com.winlator.star.core.RumbleMotors
 import com.winlator.star.core.StickPacing
 import com.winlator.star.core.DefaultVersion
@@ -2570,6 +2571,28 @@ private fun AdvancedTab(
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(R.string.dinput_visible), modifier = Modifier.weight(1f))
                 IconButton(onClick = { helpRes = R.string.help_dinput_visible }) {
+                    Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
+                }
+            }
+            // DirectInput vibration (core.DInputVibration): DirectInput force feedback on the pads, on by
+            // default. BANNERIN_DINPUT_FF in this container's env vars decides instead: shown, not editable.
+            val ffEnv = DInputVibration.envValue(null, viewModel.envVarsStr)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = ffEnv ?: viewModel.dinputVibration,
+                    onCheckedChange = { viewModel.dinputVibration = it },
+                    enabled = ffEnv == null
+                )
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.dinput_vibration))
+                    Text(
+                        if (ffEnv != null) DInputVibration.ENV_LOCKED else stringResource(R.string.dinput_vibration_summary),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.5.sp
+                    )
+                }
+                IconButton(onClick = { helpRes = R.string.help_dinput_vibration }) {
                     Icon(Icons.Default.Help, contentDescription = null, modifier = Modifier.size(18.dp))
                 }
             }

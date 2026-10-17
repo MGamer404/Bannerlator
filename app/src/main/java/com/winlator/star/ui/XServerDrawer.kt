@@ -4568,6 +4568,19 @@ private fun PadSection() {
     )
     pad.dinputLockedReason?.let { PadNote(it) }
 
+    // DirectInput vibration: BANNERIN takes it when the game opens the pad, so a change reconnects it.
+    Spacer(Modifier.height(8.dp))
+    PadRowHeader(stringResource(R.string.dinput_vibration), PadApply.RECONNECT, R.string.help_dinput_vibration)
+    ModeChipGrid(
+        listOf(
+            Triple<String, Boolean, () -> Unit>("On", pad.dinputVibration) { if (!pad.dinputVibration) XServerDialogState.onPadDInputVibration?.invoke(true) },
+            Triple<String, Boolean, () -> Unit>("Off", !pad.dinputVibration) { if (pad.dinputVibration) XServerDialogState.onPadDInputVibration?.invoke(false) },
+        ),
+        perRow = 2,
+        enabled = pad.dinputVibrationLockedReason == null
+    )
+    pad.dinputVibrationLockedReason?.let { PadNote(it) }
+
     // Stick updates: BANNERIN's pacing, live.
     Spacer(Modifier.height(8.dp))
     PadRowHeader("Stick updates", PadApply.LIVE, R.string.help_stick_pacing)
