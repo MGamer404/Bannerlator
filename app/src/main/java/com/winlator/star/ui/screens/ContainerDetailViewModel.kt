@@ -382,7 +382,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
     // "DirectInput vibration" (core.DInputVibration, extra "dinputVibration", stored only when off).
     var dinputVibration by mutableStateOf(true)
     // Direct XInput (BANNERIN): XInput games read the BANNERIN slot files directly (core/BannerinXInput).
-    var bannerinXInput by mutableStateOf(false)
+    var bannerinXInput by mutableStateOf(true)
     // "Allow in-game switching" of Direct XInput (core/BannerinXInput.switchingEffective).
     var bannerinXInputSwitching by mutableStateOf(true)
     // "Stick updates" (core.StickPacing format: auto:N / fixed:N / off).
@@ -750,7 +750,15 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         // DirectInput visibility, read from the stored inputType / exclusiveXInput (old values included)
         dinputVisible  = DInputVisibility.forContainer(seed)
         dinputVibration = DInputVibration.forContainer(seed)
-        bannerinXInput = seed?.isBannerinXInput ?: false
+        // Direct XInput: on for a new container (3.1.7-pre4). An existing container keeps its own (a
+        // missing key there is an older container that had it off); a saved defaults profile keeps its
+        // choice when it stored one (profiles saved before pre4 stored only "on").
+        bannerinXInput = when {
+            c != null -> c.isBannerinXInput
+            NewContainerDefaults.load(context, seedArch)?.let { runCatching { JSONObject(it).has("bannerinXInput") }.getOrNull() } == true ->
+                template?.isBannerinXInput ?: true
+            else -> true
+        }
         bannerinXInputSwitching = seed?.isBannerinXInputSwitching ?: true
         stickPacing    = StickPacing.forContainer(seed).format()
         vibrationMode      = seed?.getVibrationMode() ?: Container.VIBRATION_MODE_DEFAULT

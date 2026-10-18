@@ -1486,7 +1486,9 @@ public class Container {
             data.put("primaryController", primaryController);
             data.put("controllerMapping", controllerMapping);
             data.put("exclusiveXInput", exclusiveXInput);
-            if (bannerinXInput) data.put("bannerinXInput", true);
+            // Always written since 3.1.7-pre4 (new containers start with it on): before, only "on" was
+            // stored, so a container without the key is an older one that had it off.
+            data.put("bannerinXInput", bannerinXInput);
             data.put("bannerinXInputSwitching", bannerinXInputSwitching);
             data.put("renderer", renderer);
             data.put("rendererNative", rendererNative);

@@ -1097,7 +1097,7 @@ internal object SettingsRegistry {
         ),
         SettingDef(
             id = "input.bannerinXInput", category = "input", group = "Controllers", level = ADVANCED,
-            label = "Direct XInput (BANNERIN)", hint = "XInput games read the controller directly, with no input queue (no stale stick after release). Off by default.", tech = "bannerinXInput",
+            label = "Direct XInput (BANNERIN)", hint = "XInput games read the controller directly, with no input queue (no stale stick after release). On for new containers.", tech = "bannerinXInput",
             help = "XInput games read the controller straight from Bannerlator instead of through Wine's controller queue: always the live stick position, no added delay, rumble included. Off: XInput goes through Wine as before. If a game misbehaves, turn it off for that game.",
             control = { _, _ -> Control.Toggle },
             vm = vmBool({ it.bannerinXInput }, { vm, v -> vm.bannerinXInput = v }),
