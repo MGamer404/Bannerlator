@@ -79,7 +79,7 @@ Before any **stable release** is published, all changes are **manually debugged 
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) · `Bannerlator Bionic AnTuTu` (antutu) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) · `com.antutu.ABenchMark` (antutu) |
-| **Version** | Bannerlator **V 3.1.7-pre2** — built from Star **marcescence** (`versionName 3.1.7-pre2`, `versionCode 100`) |
+| **Version** | Bannerlator **V 3.1.7-pre3** — built from Star **marcescence** (`versionName 3.1.7-pre3`, `versionCode 101`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -111,6 +111,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [🤖 AI Disclaimer](#-ai-disclaimer)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
+- [🎮 BANNERIN controllers, in-game controller settings & DirectInput vibration (3.1.7-pre3)](#-bannerin-controllers-in-game-controller-settings--directinput-vibration-317-pre3)
 - [⚙️ Every setting in Deck, full-screen XMB & Open with (3.1.7-pre2)](#️-every-setting-in-deck-full-screen-xmb--open-with-317-pre2)
 - [🎮 The full Deck style, Windows components & Remove (3.1.7-pre1)](#-the-full-deck-style-windows-components--remove-317-pre1)
 - [⬇️ Small updates, Win Components offline & smarter game adding (3.1.6)](#️-small-updates-win-components-offline--smarter-game-adding-316)
@@ -132,6 +133,16 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📄 License](#-license)
 
 ---
+
+## 🎮 BANNERIN controllers, in-game controller settings & DirectInput vibration (3.1.7-pre3)
+
+**[3.1.7-pre3](https://github.com/The412Banner/Bannerlator/releases/tag/3.1.7-pre3) is the controller release and a small update (about 22–23 MB from 3.1.6 or 3.1.7-pre2).**
+
+- **BANNERIN** — controller input on a new Rust transport: stick updates follow the game's frame rate (at most 60/s by default), so sticks stop the moment you let go; idle pads don't wake the CPU; no phantom controllers.
+- **Direct XInput** — XInput games read the pad straight from BANNERIN (32-bit, 64-bit, ARM64X), with rumble on both motors or one; a game's own XInput DLL no longer breaks its controls.
+- **Controller settings in game** — Controls › Pad: controller type (Xbox, PlayStation, Switch, Steam Deck and more), XInput source, DirectInput visibility and stick updates, while the game runs.
+- **DirectInput vibration** — DirectInput games can vibrate the pad (constant, ramp and periodic effects mixed into the two motors; steady forces fade after ~2 s). On by default.
+- **Save backups** — game and container backups include emulator saves kept outside the user folder (`ProgramData/Steam/<name>/<app id>`, CODEX-style Public folders, OnlineFix, EMPRESS).
 
 ## ⚙️ Every setting in Deck, full-screen XMB & Open with (3.1.7-pre2)
 
