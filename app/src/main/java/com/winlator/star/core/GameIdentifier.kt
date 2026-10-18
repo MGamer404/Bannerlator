@@ -98,6 +98,14 @@ object GameIdentifier {
         )
     }
 
+    /**
+     * The Steam appId the files in [dir] itself name: an `AppId=` emulator ini (steam_api.ini,
+     * steam_emu.ini, ColdClientLoader.ini, …), else steam_appid.txt. Unlike [identify] it never walks
+     * up the tree or reads manifests and PE headers — save backups file a game's emulator saves under
+     * the id configured beside its exe and must not borrow one from a parent folder. Read-only.
+     */
+    fun appIdInFolder(dir: File): Int? = readEmuIniAppId(dir) ?: readSteamAppIdTxt(dir)
+
     private val TRUSTED_NAMES = setOf(Source.STEAM_MANIFEST_ACF, Source.GOG_INFO, Source.PE_VERSION)
     /** Folders an exe sits in below its game folder ("Binaries/Win64"). */
     private val BUILD_DIRS = setOf("bin", "bin32", "bin64", "binaries", "win32", "win64", "x86", "x64", "x86_64", "amd64", "retail", "shipping", "release")

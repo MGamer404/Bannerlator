@@ -12,6 +12,7 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.util.zip.ZipEntry
@@ -31,6 +32,11 @@ import java.util.zip.ZipOutputStream
  *   Back up (export):  <container>/.wine/drive_c/users/xuser/...  ->  zip /drive_c/users/steamuser/...
  *
  * "Public" is shared under both and is never translated.
+ *
+ * Steam emulators that keep saves outside the profile ([EmuSaveRoots]: ProgramData/Steam/<name>/<appid>,
+ * users/Public/Documents/…/<appid>) are archived beside it under their own drive_c path, e.g.
+ * "/drive_c/ProgramData/Steam/elamigos/201700/storage/…", and restored to that same path: there is
+ * no user segment in them to translate.
  */
 object GameSaveBackup {
 
@@ -107,12 +113,23 @@ object GameSaveBackup {
     }
 
     private fun doRestore(context: Context, uri: Uri, container: Container): RestoreResult {
-        val driveC = File(container.rootDir, ".wine/drive_c")
-        val profile = File(driveC, "users/${ImageFs.USER}")
+        val input = context.contentResolver.openInputStream(uri)
+            ?: return RestoreResult(false, 0, "Could not open backup file")
         // Emulator identity is diverted here first instead of straight into the prefix: whether it
         // may be applied depends on the id, which can arrive in a later entry than the file holding
         // it, and a conflict must survive the stream so the user can be asked afterwards.
         val stagingRoot = File(context.cacheDir, "emu-id-restore")
+        return restoreInto(input, container.rootDir, stagingRoot)
+    }
+
+    /**
+     * Unzips (and closes) [input] into the container rooted at [containerRootDir], diverting emulator
+     * identity through [stagingRoot]. Every entry lands at its drive_c-relative path ([remapForRestore]):
+     * profile entries under our Wine user, Public and the emulator roots outside the profile as they are.
+     */
+    internal fun restoreInto(input: InputStream, containerRootDir: File, stagingRoot: File): RestoreResult {
+        val driveC = File(containerRootDir, ".wine/drive_c")
+        val profile = File(driveC, "users/${ImageFs.USER}")
         // Sweep any previous restore's leftovers first: a new restore supersedes an unanswered
         // conflict from an old one, and this keeps the cache from accreting stale prefixes.
         stagingRoot.deleteRecursively()
@@ -122,9 +139,6 @@ object GameSaveBackup {
         val driveCCanon = driveC.canonicalFile
         val basePrefix = driveCCanon.path + File.separator
         var written = 0
-
-        val input = context.contentResolver.openInputStream(uri)
-            ?: return RestoreResult(false, 0, "Could not open backup file")
 
         input.use { rawIn ->
             ZipInputStream(BufferedInputStream(rawIn)).use { zis ->
@@ -156,7 +170,7 @@ object GameSaveBackup {
             }
         }
 
-        val (applied, conflicts) = resolveEmuIdentity(staging, profile, container)
+        val (applied, conflicts) = resolveEmuIdentity(staging, profile, containerRootDir)
         if (conflicts.isEmpty()) staging.deleteRecursively()
         return RestoreResult(true, written + applied, null, conflicts)
     }
@@ -174,7 +188,7 @@ object GameSaveBackup {
     private fun resolveEmuIdentity(
         staging: File,
         profile: File,
-        container: Container,
+        containerRootDir: File,
     ): Pair<Int, List<EmuIdConflict>> {
         if (!staging.isDirectory) return 0 to emptyList()
         var applied = 0
@@ -193,7 +207,7 @@ object GameSaveBackup {
                     currentId = currentId,
                     backupId = backupId,
                     stagedDir = stagedDir.absolutePath,
-                    containerRootDir = container.rootDir.absolutePath,
+                    containerRootDir = containerRootDir.absolutePath,
                 )
             }
         }
@@ -268,7 +282,7 @@ object GameSaveBackup {
      * Returns null for entries not rooted under drive_c (defensive — GameHub always roots at
      * "/drive_c", but we skip anything unexpected rather than dumping it at the prefix root).
      */
-    private fun remapForRestore(rawName: String): String? {
+    internal fun remapForRestore(rawName: String): String? {
         val segs = splitDriveC(rawName) ?: return null
         if (segs.isEmpty()) return null
         if (isFrontendShortcut(segs)) return null
@@ -303,17 +317,20 @@ object GameSaveBackup {
      * callers; equivalent to [backup] with `roots = null`, `gameName = null`, GAMEHUB.
      */
     fun backup(context: Context, container: Container, onResult: (BackupResult) -> Unit) =
-        backup(context, container, null, null, BackupLayout.GAMEHUB, onResult)
+        backup(context, container, null, null, BackupLayout.GAMEHUB, onResult = onResult)
 
     /**
      * Zips a container's saves into an archive under Downloads/Winlator/Backups/GameSaves, off the
      * UI thread (posts [onResult] on the main thread).
      *
-     *  - [roots] == null  → the whole xuser profile (whole-container backup).
+     *  - [roots] == null  → the whole xuser profile plus every emulator save folder outside it
+     *    (whole-container backup).
      *  - [roots] != null  → only those subtrees under the xuser profile (per-game backup); each
      *    entry is a path relative to xuser (e.g. "Documents/My Games/Elden Ring").
      *  - [gameName] names the zip ("&lt;name&gt;_&lt;epoch&gt;.zip"); falls back to the container name.
      *  - [layout] chooses how each entry is rooted (see [BackupLayout]).
+     *  - [appId] is the game's Steam app id for a per-game backup: the emulator save folders named
+     *    by it ([EmuSaveRoots]) go in too. Ignored by a whole-container backup, which takes them all.
      */
     fun backup(
         context: Context,
@@ -321,11 +338,12 @@ object GameSaveBackup {
         roots: List<String>?,
         gameName: String?,
         layout: BackupLayout,
+        appId: Int? = null,
         onResult: (BackupResult) -> Unit,
     ) {
         Thread {
             val res = try {
-                doBackup(container, roots, gameName, layout)
+                doBackup(container, roots, gameName, layout, appId)
             } catch (e: Exception) {
                 BackupResult(false, null, 0, e.message ?: e.javaClass.simpleName)
             }
@@ -338,6 +356,7 @@ object GameSaveBackup {
         roots: List<String>?,
         gameName: String?,
         layout: BackupLayout,
+        appId: Int?,
     ): BackupResult {
         val outDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
@@ -346,7 +365,7 @@ object GameSaveBackup {
         outDir.mkdirs()
         val safeName = sanitize((gameName ?: container.name).ifBlank { "container-${container.id}" })
         val outFile = File(outDir, "${safeName}_${System.currentTimeMillis()}.zip")
-        return backupToFile(container, roots, layout, outFile)
+        return backupToFile(container, roots, layout, outFile, appId)
     }
 
     /**
@@ -362,8 +381,18 @@ object GameSaveBackup {
         roots: List<String>?,
         layout: BackupLayout,
         outFile: File,
+        appId: Int? = null,
+    ): BackupResult = backupDriveC(File(container.rootDir, ".wine/drive_c"), roots, layout, outFile, appId)
+
+    /** [backupToFile] for the prefix whose drive_c is [driveC]. */
+    internal fun backupDriveC(
+        driveC: File,
+        roots: List<String>?,
+        layout: BackupLayout,
+        outFile: File,
+        appId: Int? = null,
     ): BackupResult {
-        val profile = File(container.rootDir, ".wine/drive_c/users/${ImageFs.USER}")
+        val profile = File(driveC, "users/${ImageFs.USER}")
         if (!profile.isDirectory) {
             return BackupResult(false, null, 0, "No save profile found in this container")
         }
@@ -376,10 +405,21 @@ object GameSaveBackup {
 
         // Subtrees to walk. Unscoped already covers the whole profile, emulator identity included;
         // a SCOPED backup must be told about it, or the archive holds saves the game can't read back
-        // after a prefix rebuild rerolls the account id (see [EmuAccountIdentity]).
-        val scopeRoots: List<String>? = roots?.plus(EmuAccountIdentity.BACKUP_ROOTS)
+        // after a prefix rebuild rerolls the account id (see [EmuAccountIdentity]). Likewise the
+        // emulator folders named by the game's app id, which no name-matched root ever picks up.
+        val scopeRoots: List<String>? = roots
+            ?.plus(EmuAccountIdentity.BACKUP_ROOTS)
+            ?.plus(appId?.let { EmuSaveRoots.profileRootsFor(profile, it) }.orEmpty())
         val scopeDirs: List<File> = if (scopeRoots == null) listOf(profile)
         else scopeRoots.map { File(profile, it) }.filter { it.exists() }
+
+        // Emulator saves outside the profile (ProgramData, Public): every one for a whole-container
+        // backup, the game's own for a scoped one — none when its app id is unknown.
+        val outsideDirs: List<File> = when {
+            roots == null -> EmuSaveRoots.allDriveCRoots(driveC)
+            appId != null -> EmuSaveRoots.driveCRootsFor(driveC, appId)
+            else -> emptyList()
+        }.map { File(driveC, it) }
 
         outFile.parentFile?.mkdirs()
 
@@ -395,6 +435,7 @@ object GameSaveBackup {
                 if (d.isDirectory) d.listFiles()?.forEach { stack.addLast(it) }
                 else if (d.isFile) stack.addLast(d)
             }
+            outsideDirs.forEach { d -> d.listFiles()?.forEach { stack.addLast(it) } }
             while (stack.isNotEmpty()) {
                 val f = stack.removeLast()
                 // Skip volatile noise that isn't a save — keeps backups small and GameHub-clean,
@@ -404,14 +445,16 @@ object GameSaveBackup {
                     f.listFiles()?.forEach { stack.addLast(it) }
                     continue
                 }
-                // Relative path inside the xuser profile, re-rooted per the chosen layout.
-                val rel = f.relativeTo(profile).path.replace(File.separatorChar, '/')
-                val entryName = "${rootPrefix}users/$userSeg/$rel"
+                // Relative path inside the xuser profile, re-rooted per the chosen layout. An emulator
+                // folder outside the profile keeps its drive_c path: no user segment to translate.
+                val inProfile = f.startsWith(profile)
+                val rel = f.relativeTo(if (inProfile) profile else driveC).path.replace(File.separatorChar, '/')
+                val entryName = if (inProfile) "${rootPrefix}users/$userSeg/$rel" else "$rootPrefix$rel"
                 if (!seen.add(entryName)) continue
                 zos.putNextEntry(ZipEntry(entryName))
                 f.inputStream().use { it.copyTo(zos) }
                 zos.closeEntry()
-                if (EmuAccountIdentity.isIdentityPath(rel)) identityCount++ else count++
+                if (inProfile && EmuAccountIdentity.isIdentityPath(rel)) identityCount++ else count++
             }
         }
 

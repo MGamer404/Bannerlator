@@ -135,8 +135,9 @@ object CustomSaveVault {
     /**
      * Snapshot this game's saves into `<vault>/<key>.zip`, overwriting any previous snapshot.
      * Discovers the game's save roots via [SaveLocator] (persisted sidecar first, else a fresh
-     * discover); if none are found this is a no-op ("no saves"). SYNCHRONOUS — run off the main
-     * thread. Never throws.
+     * discover), plus the emulator save folders named by its Steam app id ([EmuSaveRoots]); if
+     * neither finds anything this is a no-op ("no saves"). SYNCHRONOUS — run off the main thread.
+     * Never throws.
      *
      * Writes to a temp sibling then atomically renames over the current zip, so a killed process (the
      * emulator restarts on exit) can never leave a half-written snapshot in place of the last good one.
@@ -150,13 +151,16 @@ object CustomSaveVault {
                 else SaveLocator.discover(container, shortcut.name, shortcut.path ?: "", shortcut.wmClass ?: "")
                     .map { it.relPath }
             }
-            if (roots.isEmpty()) return VaultResult(false, 0, null, "no saves")
+            // A game whose saves are all emulator-kept (ProgramData/Steam/<name>/<appid>, …) has no
+            // name-matched root at all, so the app id alone is reason enough to snapshot.
+            val appId = EmuSaveRoots.appIdFor(container, shortcut)
+            if (roots.isEmpty() && appId == null) return VaultResult(false, 0, null, "no saves")
 
             val out = vaultFile(shortcut)
             out.parentFile?.mkdirs()
             val tmp = File(out.parentFile, out.name + ".tmp")
 
-            val res = GameSaveBackup.backupToFile(container, roots, GameSaveBackup.BackupLayout.WINLATOR, tmp)
+            val res = GameSaveBackup.backupToFile(container, roots, GameSaveBackup.BackupLayout.WINLATOR, tmp, appId)
             if (!res.ok) {
                 tmp.delete()
                 return VaultResult(false, res.fileCount, null, res.error)
@@ -218,10 +222,12 @@ object CustomSaveVault {
                 val roots = if (saved != null && saved.roots.isNotEmpty()) saved.roots
                     else SaveLocator.discover(container, shortcut.name, shortcut.path ?: "", shortcut.wmClass ?: "")
                         .map { it.relPath }
-                // Empty → whole-container backup (roots = null), matching the Containers "whole" scope.
+                // Empty → whole-container backup (roots = null), matching the Containers "whole" scope;
+                // that already carries every emulator save folder, so the app id only matters when scoped.
                 val effectiveRoots: List<String>? = if (roots.isEmpty()) null else roots
+                val appId = EmuSaveRoots.appIdFor(container, shortcut)
                 val outFile = perGameBackupFile(shortcut.name, System.currentTimeMillis())
-                val r = GameSaveBackup.backupToFile(container, effectiveRoots, layout, outFile)
+                val r = GameSaveBackup.backupToFile(container, effectiveRoots, layout, outFile, appId)
                 VaultResult(r.ok, r.fileCount, r.path, r.error, wholeContainer = effectiveRoots == null)
             } catch (t: Throwable) {
                 Log.w(TAG, "manual backup failed for \"${shortcut.name}\"", t)

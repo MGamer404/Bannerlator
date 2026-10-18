@@ -1679,6 +1679,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="save_backup_confirm_remembered">Remembered from your last backup. Re-scan to look again.</string>
     <string name="save_backup_add_folder">Add folder…</string>
     <string name="save_backup_rescan">Re-scan</string>
+    <string name="save_backup_emu_included">Also backed up — emulator saves for Steam app %1$d:</string>
     <string name="save_backup_overlap_note">Some selected folders overlap; shared files are backed up once.</string>
     <string name="save_backup_add_folder_title">Add a save folder</string>
     <string name="save_backup_add_folder_here">Use this folder</string>

@@ -99,6 +99,7 @@ import com.winlator.star.container.ContainerLayerUpdater
 import com.winlator.star.container.Shortcut
 import com.winlator.star.store.SteamFriendsAction
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
+import com.winlator.star.core.EmuSaveRoots
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.GameSaveBackup
 import com.winlator.star.util.InAppFilePicker
@@ -629,6 +630,7 @@ fun ContainersScreen(
                                         gameKey = SaveLocator.gameKey(sc.wmClass, sc.file.name),
                                         exePath = sc.path ?: "",
                                         wmClass = sc.wmClass ?: "",
+                                        appIdExtra = sc.getExtra("steamAppId"),
                                     )
                                 }
                             }
@@ -644,10 +646,11 @@ fun ContainersScreen(
             gameKey = flow.gameKey,
             exePath = flow.exePath,
             wmClass = flow.wmClass,
+            appIdExtra = flow.appIdExtra,
             onBack = { saveFlow = SaveFlow.GamePicker(flow.container) },
             onCancel = { saveFlow = null },
-            onNext = { roots ->
-                saveFlow = SaveFlow.BackupFormat(flow.container, roots, flow.gameName)
+            onNext = { roots, appId ->
+                saveFlow = SaveFlow.BackupFormat(flow.container, roots, flow.gameName, appId)
             },
         )
         is SaveFlow.BackupFormat -> OutlinedAlertDialog(
@@ -974,6 +977,8 @@ private sealed class SaveFlow {
         val gameKey: String,
         val exePath: String,
         val wmClass: String,
+        /** The shortcut's `steamAppId` extra ("" when untagged); see [EmuSaveRoots.appIdFor]. */
+        val appIdExtra: String,
     ) : SaveFlow()
     /** Restore → choose a backup source (GameHub backup today; more later). */
     data class RestoreSource(val container: Container) : SaveFlow()
@@ -981,12 +986,14 @@ private sealed class SaveFlow {
     data class Confirm(val container: Container, val uri: android.net.Uri, val gameName: String) : SaveFlow()
     /**
      * Back up → choose the output layout. [roots] == null is a whole-container backup; otherwise
-     * the profile-relative subtrees to include. [gameName] names the resulting zip.
+     * the profile-relative subtrees to include. [gameName] names the resulting zip. [appId] is the
+     * scoped game's Steam app id, whose emulator save folders go in too.
      */
     data class BackupFormat(
         val container: Container,
         val roots: List<String>?,
         val gameName: String?,
+        val appId: Int? = null,
     ) : SaveFlow()
 }
 
@@ -1002,7 +1009,7 @@ private fun runScopedBackup(
     val name = flow.gameName ?: flow.container.name
     dismiss()
     setBusy("Backing up $name…")
-    GameSaveBackup.backup(context, flow.container, flow.roots, flow.gameName, layout) { r ->
+    GameSaveBackup.backup(context, flow.container, flow.roots, flow.gameName, layout, flow.appId) { r ->
         setBusy(null)
         setResult(
             if (r.ok) "Saved ${r.fileCount} files → ${r.path?.substringAfterLast('/')}"
@@ -1072,7 +1079,9 @@ private fun BackupFormatOption(title: String, subtitle: String, onClick: () -> U
  * Discover → confirm for a single game. On enter it either restores the remembered folder set from
  * the sidecar (pre-ticked, skip discovery) or scans the container for candidates. The user ticks
  * folders, can add one manually (browser rooted at the xuser profile, escape-guarded), and on Next
- * the selection is persisted to the sidecar and handed to the format step.
+ * the selection is persisted to the sidecar and handed to the format step. The emulator save
+ * folders named by the game's Steam app id ([EmuSaveRoots]) are listed apart: the backup always
+ * takes them, so they are shown rather than ticked, and they alone are enough to go on.
  */
 @Composable
 private fun GameSavesDialog(
@@ -1081,12 +1090,16 @@ private fun GameSavesDialog(
     gameKey: String,
     exePath: String,
     wmClass: String,
+    appIdExtra: String,
     onBack: () -> Unit,
     onCancel: () -> Unit,
-    onNext: (List<String>) -> Unit,
+    onNext: (roots: List<String>, appId: Int?) -> Unit,
 ) {
     val rows = remember(gameKey) { mutableStateListOf<SaveLocator.Candidate>() }
     val checked = remember(gameKey) { mutableStateListOf<String>() }
+    var appId by remember(gameKey) { mutableStateOf<Int?>(null) }
+    // drive_c-relative emulator folders for [appId], with their sizes.
+    val emuDirs = remember(gameKey) { mutableStateListOf<Pair<String, Long>>() }
     var loading by remember(gameKey) { mutableStateOf(true) }
     var fromSidecar by remember(gameKey) { mutableStateOf(false) }
     var rescan by remember(gameKey) { mutableStateOf(0) }
@@ -1105,6 +1118,14 @@ private fun GameSavesDialog(
                 SaveLocator.discover(container, gameName, exePath, wmClass) to false
             }
         }
+        val (foundId, emu) = withContext(Dispatchers.IO) {
+            val found = EmuSaveRoots.appIdFor(container, appIdExtra, exePath)
+            val driveC = File(container.rootDir, ".wine/drive_c")
+            found to found?.let { EmuSaveRoots.includedFor(driveC, it) }.orEmpty()
+                .map { it to FileUtils.totalSize(File(driveC, it)) }
+        }
+        appId = foundId
+        emuDirs.clear(); emuDirs.addAll(emu)
         rows.clear(); rows.addAll(list)
         checked.clear(); checked.addAll(list.map { it.relPath })
         fromSidecar = sidecar
@@ -1179,6 +1200,17 @@ private fun GameSavesDialog(
                         }
                     }
                 }
+                val id = appId
+                if (id != null && emuDirs.isNotEmpty()) {
+                    Spacer(Modifier.size(6.dp))
+                    Text(stringResource(R.string.save_backup_emu_included, id), color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    emuDirs.forEach { (rel, size) ->
+                        Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 2.dp, bottom = 2.dp)) {
+                            Text(rel, color = OnSurface, style = MaterialTheme.typography.bodyMedium)
+                            Text(StringUtils.formatBytes(size), color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
                 if (escapeError) {
                     Text(stringResource(R.string.save_backup_add_folder_escape), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
@@ -1196,12 +1228,13 @@ private fun GameSavesDialog(
         },
         confirmButton = {
             TextButton(
-                enabled = checked.isNotEmpty(),
+                enabled = checked.isNotEmpty() || emuDirs.isNotEmpty(),
                 onClick = {
                     val roots = checked.toList()
-                    // Persist the taught mapping off the UI thread, then advance to the format step.
-                    Thread { SaveLocator.saveMap(container, gameKey, gameName, roots) }.start()
-                    onNext(roots)
+                    // Persist the taught mapping off the UI thread, then advance to the format step. An
+                    // emulator-folders-only backup teaches nothing, so it leaves a remembered set alone.
+                    if (roots.isNotEmpty()) Thread { SaveLocator.saveMap(container, gameKey, gameName, roots) }.start()
+                    onNext(roots, appId)
                 },
             ) { Text(stringResource(R.string.save_backup_next)) }
         },
