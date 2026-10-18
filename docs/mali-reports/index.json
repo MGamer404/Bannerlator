@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-10-18T00-53-57-7623d1",
+    "created": "2026-10-18T00:53:57.954Z",
+    "reporter": "",
+    "device": "Samsung a07 5g  3gb ram dimensity 6300",
+    "gpu": "Mali-G57 mc2",
+    "game": "Gta 5",
+    "symptom": "Black screen (no image)",
+    "logs": 0
+  },
+  {
     "id": "2026-10-17T14-39-40-51e301",
     "created": "2026-10-17T14:39:40.101Z",
     "reporter": "",
