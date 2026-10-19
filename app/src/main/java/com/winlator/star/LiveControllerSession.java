@@ -291,7 +291,8 @@ final class LiveControllerSession {
             }
 
             @Override public void registry(Runnable done) {
-                JoystickRegistry.Desired desired = JoystickRegistry.desired(targetIdentity, targetDInput);
+                JoystickRegistry.Desired desired = JoystickRegistry.desired(targetIdentity, targetDInput,
+                        dinputLockedReason != null);
                 LiveWineRegistry.apply(winHandler, driveC, desired, (ok, detail) -> done.run());
             }
 

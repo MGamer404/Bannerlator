@@ -284,24 +284,27 @@ public abstract class WineUtils {
     }
 
     /**
-     * Configure Wine DirectInput joystick registry keys for all gamepads: "override" when DirectInput
-     * games may see the controller (core.DInputVisibility), "disabled" when they may not.
+     * Configure Wine DirectInput joystick registry keys for all gamepads (core.JoystickRegistry): no
+     * entry when DirectInput games may see the controller (core.DInputVisibility), "override" when
+     * that is forced for the launch, "disabled" when they may not.
      *
      * Wine matches these entries by the pad's DirectInput name, which follows the container's
      * Controller identity, so the names come from {@link ControllerIdentity#dinputNames} (for the
      * Generic identity the eight "Generic HID Gamepad N" / "ric HID Gamepad N" values this always
      * wrote). Names belonging to the other identities are removed, so switching identity between
-     * launches leaves no stale hide/show rule behind. The entries are always written: the old
-     * "Exclusive Input off" state, which wrote none, now reads as visible (see DInputVisibility).
+     * launches leaves no stale hide/show rule behind. Visible writes none, as the old "Exclusive Input
+     * off" did: "override" makes Wine's DirectInput open its internal XInput HID device for the pad,
+     * which some DirectInput games did not take (see JoystickRegistry).
      *
      * @param container The container to configure
      * @param dinputVisible Whether DirectInput games may see the controller
+     * @param forced Visibility is forced on for this launch (controller passthrough, Classic DirectInput pad)
      * @param identity The launch's effective Controller identity (ControllerIdentity value)
      */
-    public static void setJoystickRegistryKeys(Container container, boolean dinputVisible, String identity) {
+    public static void setJoystickRegistryKeys(Container container, boolean dinputVisible, boolean forced, String identity) {
         File userRegFile = new File(container.getRootDir(), ".wine/user.reg");
         // The same builder the in-game change uses (LiveWineRegistry), so launch and live never disagree.
-        JoystickRegistry.Desired desired = JoystickRegistry.desired(identity, dinputVisible);
+        JoystickRegistry.Desired desired = JoystickRegistry.desired(identity, dinputVisible, forced);
         try (WineRegistryEditor registryEditor = new WineRegistryEditor(userRegFile)) {
             for (String stale : desired.delete) registryEditor.removeValue(JoystickRegistry.KEY, stale);
             for (Map.Entry<String, String> e : desired.set.entrySet()) {

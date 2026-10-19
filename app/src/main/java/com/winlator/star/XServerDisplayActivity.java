@@ -8184,7 +8184,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         launchDInputVisible = dinputVisible;
         launchDInputForcedWhy = dinputWhy.equals("settings") ? null
                 : (dinputWhy.startsWith("forced on by ") ? dinputWhy.substring("forced on by ".length()) : dinputWhy);
-        WineUtils.setJoystickRegistryKeys(container, dinputVisible, padIdentity);
+        boolean dinputForced = !dinputWhy.equals("settings");
+        WineUtils.setJoystickRegistryKeys(container, dinputVisible, dinputForced, padIdentity);
+        com.winlator.star.core.ControllerLog.setup("DirectInput registry",
+                com.winlator.star.core.JoystickRegistry.describe(dinputVisible, dinputForced));
         WineUtils.setWinebusOptions(container, com.winlator.star.core.ControllerIdentity.mapControllers(padIdentity));
 
         String startupServices;

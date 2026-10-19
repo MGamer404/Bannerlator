@@ -7,13 +7,15 @@ import com.winlator.star.winhandler.WinHandler;
 /**
  * "DirectInput games can see the controller": the one switch that replaced Enable XInput / Enable
  * DInput / Exclusive Input. At launch it decides the HKCU\Software\Wine\DirectInput\Joysticks entries
- * (WineUtils.setJoystickRegistryKeys): on = "override" (visible), off = "disabled" (hidden).
+ * (WineUtils.setJoystickRegistryKeys, core.JoystickRegistry): on = no entry (visible, as the old Exclusive
+ * Input off wrote), off = "disabled" (hidden). "override" only where visibility is forced for the launch.
  *
- * <p>It is stored in the same two values older builds read, so a downgrade behaves the same: the
+ * <p>It is stored in the same two values older builds read, so a downgrade keeps the choice (an older
+ * build turns a stored "on" into "override", not into no entry): the
  * container's {@code exclusiveXInput} / {@code inputType} fields and the game's extras of the same
  * names (also what community configs carry). Reading maps the old combinations:
  * <ul>
- *   <li>Exclusive off: on (old builds wrote no entries, so Wine let DirectInput see the pad)</li>
+ *   <li>Exclusive off: on (old builds wrote no entries, and on writes none again)</li>
  *   <li>Exclusive on + DInput on: on</li>
  *   <li>Exclusive on + DInput off: off (the old default, so a new container starts off)</li>
  * </ul>

@@ -13,9 +13,18 @@ import java.util.Map;
  * in-game change (LiveWineRegistry, a .reg imported by regedit into the running registry) and the
  * reconnect that follows it.
  *
- * <p>Wine's DirectInput matches these entries by the pad's name ({@link ControllerIdentity#dinputNames});
- * "override" lets DirectInput see the pad, "disabled" hides it. Names of every other identity are
- * deleted, so a switch leaves no stale hide/show rule behind.
+ * <p>Wine's DirectInput matches these entries by the pad's name ({@link ControllerIdentity#dinputNames}).
+ * Three states, and they are not interchangeable (dlls/dinput device.c device_instance_is_disabled,
+ * joystick_hid.c):
+ * <ul>
+ *   <li>no entry: DirectInput sees the pad as its normal HID gamepad device (the {@code &IG_} one).
+ *       What "visible" writes - the old "Exclusive Input off", which wrote none.</li>
+ *   <li>"override": DirectInput sees the pad, but opens Wine's internal XInput HID device for it
+ *       instead ({@code &IG_} swapped for {@code &XI_}). Only where visibility is forced for the
+ *       launch (controller passthrough, the Classic DirectInput pad), as before.</li>
+ *   <li>"disabled": DirectInput does not see the pad.</li>
+ * </ul>
+ * Names not set are deleted, so a switch leaves no stale hide/show rule behind.
  */
 public final class JoystickRegistry {
     /** The key, relative to HKEY_CURRENT_USER. */
@@ -34,15 +43,33 @@ public final class JoystickRegistry {
         }
     }
 
+    /** {@link #desired(String, boolean, boolean)} without a forced visibility. */
     public static Desired desired(String identity, boolean dinputVisible) {
-        String value = dinputVisible ? "override" : "disabled";
+        return desired(identity, dinputVisible, false);
+    }
+
+    /**
+     * @param forced visibility is forced on for this launch (controller passthrough, the Classic
+     *               DirectInput pad): "override", as those launches have always had
+     */
+    public static Desired desired(String identity, boolean dinputVisible, boolean forced) {
+        String value = !dinputVisible ? "disabled" : forced ? "override" : null;
         Map<String, String> set = new LinkedHashMap<>();
-        for (String name : ControllerIdentity.dinputNames(identity)) set.put(name, value);
+        if (value != null) {
+            for (String name : ControllerIdentity.dinputNames(identity)) set.put(name, value);
+        }
         List<String> delete = new ArrayList<>();
         for (String name : ControllerIdentity.allDinputNames()) {
             if (!set.containsKey(name)) delete.add(name);
         }
         return new Desired(set, delete);
+    }
+
+    /** What a launch with these values writes, for a log line. */
+    public static String describe(boolean dinputVisible, boolean forced) {
+        if (!dinputVisible) return "\"disabled\" (DirectInput does not see the pad)";
+        if (forced) return "\"override\" (DirectInput opens Wine's XInput HID device for the pad)";
+        return "no entry (DirectInput sees the pad as its normal HID gamepad)";
     }
 
     /**
