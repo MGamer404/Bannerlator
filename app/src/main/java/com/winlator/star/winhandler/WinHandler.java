@@ -2256,7 +2256,7 @@ public class WinHandler {
         recomputeSharedSlots();
         Log.d("WinHandler", "Pinned device " + deviceId + " to slot " + slot
                 + (descriptor != null ? " (descriptor: " + descriptor + ")" : " (OSC)"));
-        ControllerLog.event(controllerLabel(deviceId) + " pinned to slot " + slot);
+        ControllerLog.slotTaken(slot, controllerLabel(deviceId) + " pinned to slot " + slot);
         return slot;
     }
 
@@ -2286,7 +2286,7 @@ public class WinHandler {
         recomputeSharedSlots();
         Log.d("WinHandler", "Device " + deviceId + " SHARING slot " + slot
                 + (descriptor != null ? " (descriptor: " + descriptor + ")" : " (OSC)"));
-        ControllerLog.event(controllerLabel(deviceId) + " sharing slot " + slot);
+        ControllerLog.slotTaken(slot, controllerLabel(deviceId) + " sharing slot " + slot);
         return slot;
     }
 
@@ -2305,7 +2305,7 @@ public class WinHandler {
                 recomputeSharedSlots();
                 Log.d("WinHandler", "Assigned device " + deviceId + " to slot " + slot
                         + (descriptor != null ? " (descriptor: " + descriptor + ")" : ""));
-                ControllerLog.event(controllerLabel(deviceId) + " took slot " + slot);
+                ControllerLog.slotTaken(slot, controllerLabel(deviceId) + " took slot " + slot);
                 return slot;
             }
         }

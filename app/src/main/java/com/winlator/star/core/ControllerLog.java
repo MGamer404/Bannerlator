@@ -66,6 +66,7 @@ public final class ControllerLog {
     private final Set<Integer> slotsUsed = new LinkedHashSet<>();
     private final Set<String> xinputImages = new LinkedHashSet<>();
     private final Set<Integer> xinputAttached = new LinkedHashSet<>();
+    private final Set<Integer> xinputNoController = new LinkedHashSet<>();
     private boolean xinputDirect;
     private boolean xinputWine;
     private boolean dinputVisible;
@@ -124,6 +125,16 @@ public final class ControllerLog {
         }
     }
 
+    /** A controller took {@code slot} (WinHandler): the slot is reported even if it left before the end. */
+    public static void slotTaken(int slot, String line) {
+        ControllerLog log = active;
+        if (log == null) return;
+        synchronized (log) {
+            if (slot >= 0 && slot < BannerinWriter.MAX_SLOTS) log.slotsUsed.add(slot);
+        }
+        event(line);
+    }
+
     /** A reconnect ended; a failed one is a WARN on the checklist. */
     public static void reconnect(String slots, boolean ok) {
         ControllerLog log = active;
@@ -171,7 +182,10 @@ public final class ControllerLog {
             "BANNERIN-XInput: |^\\s*fakeinput|^\\s*(Adding controller|Removing controller|Replacing stale controller"
                     + "|Could not attach|Hooking ioctl EVIOCG(ID|NAME)|Unhandled evdev ioctl|EVIOCSFF|EV_FF )");
     private static final Pattern XI_LOADED = Pattern.compile("BANNERIN-XInput: .* loaded into (.+?) \\(pid \\d+\\)");
+    /** The DLL opened the slot's file - on the game's first XInput call, for all four slots, held or not. */
     private static final Pattern XI_ATTACHED = Pattern.compile("BANNERIN-XInput: slot (\\d+) attached");
+    /** The game asked for a slot no controller holds. */
+    private static final Pattern XI_NO_CONTROLLER = Pattern.compile("BANNERIN-XInput: slot (\\d+): .*no controller on this slot");
     private static final Pattern DIGITS = Pattern.compile("\\d+");
 
     /** For {@code ProcessHelper.addDebugCallback}: keeps the guest's controller lines, drops the rest. */
@@ -182,10 +196,14 @@ public final class ControllerLog {
         if (log == null || line == null || !GUEST_LINE.matcher(line).find()) return;
         Matcher loaded = XI_LOADED.matcher(line);
         Matcher attached = XI_ATTACHED.matcher(line);
+        Matcher noController = XI_NO_CONTROLLER.matcher(line);
         synchronized (log) {
             if (loaded.find()) log.xinputImages.add(baseName(loaded.group(1)));
             if (attached.find()) {
                 try { log.xinputAttached.add(Integer.parseInt(attached.group(1))); } catch (NumberFormatException ignored) {}
+            }
+            if (noController.find()) {
+                try { log.xinputNoController.add(Integer.parseInt(noController.group(1))); } catch (NumberFormatException ignored) {}
             }
             String shape = DIGITS.matcher(line).replaceAll("#");
             int seen = log.shapes.containsKey(shape) ? log.shapes.get(shape) : 0;
@@ -244,10 +262,13 @@ public final class ControllerLog {
         out.append("Game: ").append(gameName != null ? gameName : "?").append('\n');
         out.append(String.format(Locale.ROOT, "Session length: %.0f s\n", (System.currentTimeMillis() - startMs) / 1000.0));
 
-        // Slots to report: every slot a controller held, plus any slot the app published to.
-        Set<Integer> slots = new LinkedHashSet<>(slotsUsed);
+        // Slots to report: every slot a controller held. Every slot file gets one neutral publish when it
+        // is prepared and Direct XInput opens all four, so neither of those makes a slot a player; input
+        // (button edges, a reader on its event node) or rumble aimed at it does.
+        Set<Integer> slots = new java.util.TreeSet<>(slotsUsed);
         for (int s = 0; s < BannerinWriter.MAX_SLOTS; s++) {
-            if (stat(s, BannerinWriter.STAT_PUBLISHES) > 0 || rumble[s] > 0) slots.add(s);
+            if (stat(s, BannerinWriter.STAT_EDGES) > 0 || stat(s, BannerinWriter.STAT_READER_ATTACHES) > 0
+                    || rumble[s] > 0) slots.add(s);
         }
 
         out.append("\n===== CHECKLIST =====\n");
@@ -336,8 +357,11 @@ public final class ControllerLog {
         }
 
         if (xinputDirect) {
-            if (xinputAttached.contains(s)) {
-                rows.add(pass(p + "XINPUT", "the game called XInput and Direct XInput connected to slot " + s));
+            if (xinputAttached.contains(s) && xinputNoController.contains(s)) {
+                rows.add(warn(p + "XINPUT", "the game called XInput, but Direct XInput found no controller on slot " + s
+                        + " when the game asked for it (it may have arrived later)"));
+            } else if (xinputAttached.contains(s)) {
+                rows.add(pass(p + "XINPUT", "the game called XInput and Direct XInput is reading this player's slot " + s));
             } else if (!xinputImages.isEmpty()) {
                 rows.add(warn(p + "XINPUT", "Direct XInput was loaded but never connected to slot " + s
                         + " (the game never asked for this player, or it uses DirectInput)"));
