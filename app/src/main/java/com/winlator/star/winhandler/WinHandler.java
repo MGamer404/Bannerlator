@@ -8,6 +8,8 @@ import android.view.MotionEvent;
 import androidx.preference.PreferenceManager;
 
 import com.winlator.star.XServerDisplayActivity;
+import com.winlator.star.core.BannerinXInput;
+import com.winlator.star.core.ControllerLog;
 import com.winlator.star.core.GyroCalibrator;
 import com.winlator.star.core.RumbleMotors;
 import com.winlator.star.core.StringUtils;
@@ -1261,6 +1263,7 @@ public class WinHandler {
                 int strong = receiveData.getShort() & 0xFFFF;
                 int weak = receiveData.getShort() & 0xFFFF;
                 int durationMs = receiveData.getShort() & 0xFFFF;
+                ControllerLog.rumble(slot);
                 triggerVibration(strong, weak, durationMs, slot);
                 break;
             }
@@ -1277,6 +1280,8 @@ public class WinHandler {
                 int pid = receiveData.getInt();
                 Log.i("WinHandler", "Direct XInput in pid " + pid + ": mode " + mode + " (asked " + requested + ")"
                         + (ok ? "" : " NOT applied") + ", flags " + flags + ", control gen " + gen);
+                ControllerLog.event("Direct XInput in pid " + pid + ": mode " + BannerinXInput.modeName(mode)
+                        + " (asked " + BannerinXInput.modeName(requested) + ")" + (ok ? " applied" : " NOT applied"));
                 XInputStatusListener statusListener = xinputStatusListener;
                 if (statusListener != null) statusListener.onXInputStatus(requested, mode, ok, gen, pid);
                 break;
@@ -2251,6 +2256,7 @@ public class WinHandler {
         recomputeSharedSlots();
         Log.d("WinHandler", "Pinned device " + deviceId + " to slot " + slot
                 + (descriptor != null ? " (descriptor: " + descriptor + ")" : " (OSC)"));
+        ControllerLog.event(controllerLabel(deviceId) + " pinned to slot " + slot);
         return slot;
     }
 
@@ -2280,6 +2286,7 @@ public class WinHandler {
         recomputeSharedSlots();
         Log.d("WinHandler", "Device " + deviceId + " SHARING slot " + slot
                 + (descriptor != null ? " (descriptor: " + descriptor + ")" : " (OSC)"));
+        ControllerLog.event(controllerLabel(deviceId) + " sharing slot " + slot);
         return slot;
     }
 
@@ -2298,10 +2305,12 @@ public class WinHandler {
                 recomputeSharedSlots();
                 Log.d("WinHandler", "Assigned device " + deviceId + " to slot " + slot
                         + (descriptor != null ? " (descriptor: " + descriptor + ")" : ""));
+                ControllerLog.event(controllerLabel(deviceId) + " took slot " + slot);
                 return slot;
             }
         }
         Log.w("WinHandler", "No slots available for device " + deviceId);
+        ControllerLog.event(controllerLabel(deviceId) + " got NO slot: all four are taken");
         return -1;
     }
 
@@ -2430,6 +2439,7 @@ public class WinHandler {
                 @Override public void onReconnected(boolean ok, int[] slots, int attempts) {
                     Log.i("WinHandler", "Reconnect of slots " + Arrays.toString(slots) + (ok ? " confirmed" : " NOT confirmed")
                             + " after " + attempts + " attempt(s)");
+                    ControllerLog.reconnect(Arrays.toString(slots), ok);
                     SlotReconnector.Listener l = reconnectListener;
                     if (l != null) l.onReconnected(ok, slots, attempts);
                 }
@@ -2510,10 +2520,24 @@ public class WinHandler {
         }
     }
 
+    /** A controller as the controller log names it: its Android name and VID:PID, or what kind of pad it is. */
+    private String controllerLabel(int deviceId) {
+        if (deviceId == OSC_DEVICE_ID) return "on-screen controls";
+        if (deviceId >= 0) {
+            android.view.InputDevice device = android.view.InputDevice.getDevice(deviceId);
+            if (device != null) {
+                return "\"" + device.getName() + "\" " + String.format(java.util.Locale.ROOT, "%04x:%04x",
+                        device.getVendorId(), device.getProductId());
+            }
+        }
+        return "device " + deviceId;
+    }
+
     private void releaseSlot(int deviceId) {
         Integer slot = deviceToSlot.remove(deviceId);
         if (slot == null)
             return;
+        ControllerLog.event(controllerLabel(deviceId) + " released slot " + slot);
 
         // Sibling-sub-device reuse: one physical controller enumerates several deviceIds
         // (gamepad + touchpad + motion), all sharing one slot via its descriptor. Only tear

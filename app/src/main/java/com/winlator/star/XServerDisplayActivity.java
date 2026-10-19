@@ -3286,6 +3286,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     if (!gamescopeMode) {
                         preloaderDialog.step(2, "Preparing Wine & graphics driver…");
                         setWineDisplayDriver();   // BEFORE setupWineSystemFiles starts the first wineserver
+                        // Controller input log (Log Manager, default off): this launch's recorder, before
+                        // the controller setup below starts filling it. Wine sessions only.
+                        com.winlator.star.core.ControllerLog.begin(preferences);
                         setupWineSystemFiles();
                         // Steam install-recipe robustness pass: a steamAppId-tagged game's installScript.vdf
                         // Registry + Copy Files land in this prefix before the game boots (covers shortcuts made
@@ -5527,6 +5530,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final Runnable teardown = new Runnable() {
             @Override
             public void run() {
+                // The controllers and their slots for the controller log, before anything is released.
+                if (winHandler != null) com.winlator.star.core.ControllerLog.pads(winHandler.getPlayerSlotAssignments(), true);
                 savePlaytimeData(); // Save on destroy
                 handler.removeCallbacks(savePlaytimeRunnable);
                 if (midiHandler != null) midiHandler.stop();
@@ -5580,6 +5585,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // the main thread. (Teardown above stays on-main; it's short.)
                 preloaderDialog.hint(getString(R.string.saving_on_exit));
                 new Thread(() -> {
+                    // Controller input log: first, because it is quick and the network steps below may be
+                    // cut short by a user who swipes the app away. No-op unless this launch began one.
+                    if (com.winlator.star.core.ControllerLog.isActive()) {
+                        try {
+                            ProcessHelper.removeDebugCallback(com.winlator.star.core.ControllerLog.GUEST_LINES);
+                            Context logCtx = getApplicationContext();
+                            String logGame = currentLogGameName();
+                            com.winlator.star.core.ControllerLog.finish(logCtx,
+                                    com.winlator.star.core.LogLocation.resolveGameLogDir(logCtx, logGame), logGame);
+                        } catch (Throwable t) {
+                            Log.w("XServerDisplayActivity", "controller log on exit errored", t);
+                        }
+                    }
                     try {
                         // Real-Steam launch: the guest (and the agent's own Steam_LogOff) is gone, so the
                         // account is free — bring the app's own CM session back FIRST and give it a bounded
@@ -8156,6 +8174,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         Log.i("XServerDisplayActivity", "DirectInput games can see the controller: "
                 + (dinputVisible ? "on" : "off") + " (" + dinputWhy + ")");
+        com.winlator.star.core.ControllerLog.setup("Controller type", com.winlator.star.core.ControllerIdentity.describe(padIdentity));
+        com.winlator.star.core.ControllerLog.setup("DirectInput games can see the controller", (dinputVisible ? "on" : "off") + " (" + dinputWhy + ")");
+        com.winlator.star.core.ControllerLog.setup("winebus", (com.winlator.star.core.ControllerIdentity.mapControllers(padIdentity)
+                ? "Map Controllers default (pads mapped as gamepads)" : "Map Controllers 0 (raw joystick, Classic DirectInput pad)")
+                + ", DisableHidraw 1");
         // What the in-game controller settings (Controls › Pad) start from.
         launchPadIdentity = padIdentity;
         launchDInputVisible = dinputVisible;
@@ -8456,6 +8479,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (sync == null) return;
             if (!sync.on) {
                 if (sync.detail != null) logSessionLine("xinput", "Direct XInput (BANNERIN) off: " + sync.detail);
+                com.winlator.star.core.ControllerLog.setup("Direct XInput", "off" + (sync.detail != null ? ": " + sync.detail : ""));
                 return;
             }
             StringBuilder line = new StringBuilder("Direct XInput (BANNERIN) on: ")
@@ -8502,8 +8526,39 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 line.append("; no override, Wine's builtin xinput stays in use");
             }
             logSessionLine("xinput", line.toString());
+            com.winlator.star.core.ControllerLog.setup("Direct XInput", line.toString());
         } catch (Throwable t) {
             Log.w("XServerDisplayActivity", "Direct XInput (BANNERIN) environment failed", t);
+        }
+    }
+
+    /** Controller input log (core.ControllerLog), when the Log Manager switch is on: the rest of the launch's
+     *  controller setup, the evdev layer's diagnostics (FAKE_EVDEV_LOG=1, written at attach / probe / loss)
+     *  and the guest's output, of which only the controller lines are kept. Launch worker thread, after
+     *  applyBannerinXInputEnv; before the guest starts, so the capture sees its first line. */
+    private void applyControllerLogEnv(EnvVars envVars) {
+        if (!com.winlator.star.core.ControllerLog.isActive()) return;
+        try {
+            com.winlator.star.core.BannerinXInput.Result sync = bxinputSync;
+            boolean direct = sync != null && sync.installed && sync.directOn;
+            boolean dinputVibration = com.winlator.star.core.DInputVibration.effective(container, shortcut);
+            com.winlator.star.core.ControllerLog.launchChoices(direct, !direct, launchDInputVisible, dinputVibration);
+            com.winlator.star.core.ControllerLog.setup("XInput source", (direct ? "Direct (BANNERIN)" : "Wine's XInput")
+                    + (sync != null && sync.installed && sync.switching && sync.forwardAvailable
+                            ? ", in-game switching available" : ", no in-game switching"));
+            com.winlator.star.core.ControllerLog.setup("DirectInput vibration", (dinputVibration ? "on" : "off")
+                    + (com.winlator.star.core.DInputVibration.envOverride(container, shortcut) != null
+                            ? " (" + com.winlator.star.core.DInputVibration.ENV + " in the env vars decides)" : ""));
+            com.winlator.star.core.ControllerLog.setup("Stick updates",
+                    com.winlator.star.core.StickPacing.forGame(container, shortcut).format()
+                            + (com.winlator.star.core.StickPacing.envOverrides(container, shortcut)
+                                    ? " (BANNERIN_AXIS_* in the env vars decide)" : ""));
+            com.winlator.star.core.ControllerLog.setup("Wine layer", container.getWineVersion()
+                    + (wineInfo != null && wineInfo.isArm64EC() ? " (arm64ec)" : ""));
+            if (!envVars.has("FAKE_EVDEV_LOG")) envVars.put("FAKE_EVDEV_LOG", "1");
+            ProcessHelper.addDebugCallback(com.winlator.star.core.ControllerLog.GUEST_LINES);
+        } catch (Throwable t) {
+            Log.w("XServerDisplayActivity", "controller log setup failed", t);
         }
     }
 
@@ -11174,6 +11229,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // of the user's wins and the log line can say whether DXVK_HDR is on.
             applyUnrealHdrEnv(envVars);
             applyBannerinXInputEnv(envVars);
+            applyControllerLogEnv(envVars);
             if (waylandMode) applyWaylandGpuSpoofEnv(envVars);
 
             // OpenGL safe mode (Wayland only, default ON): GALLIUM_THREAD=0 removes Mesa's
@@ -12757,6 +12813,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             Log.i("XServerDisplayActivity", "Rumble motors: "
                     + com.winlator.star.core.RumbleMotors.label(rumbleMotors) + " (" + rumbleMotorsSource() + "; "
                     + com.winlator.star.core.RumbleMotors.deviceNote() + ")");
+            com.winlator.star.core.ControllerLog.setup("Rumble motors", com.winlator.star.core.RumbleMotors.label(rumbleMotors)
+                    + " (" + rumbleMotorsSource() + ")");
             ds.setRumbleMotors(rumbleMotors);
             ds.onRumbleMotorsChanged = (motors) -> {
                 winHandler.setRumbleMotors(motors);
@@ -12767,6 +12825,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
                 Log.i("XServerDisplayActivity", "Rumble motors: "
                         + com.winlator.star.core.RumbleMotors.label(winHandler.getRumbleMotors()) + " (changed in-game)");
+                com.winlator.star.core.ControllerLog.event("in game: Rumble motors -> " + com.winlator.star.core.RumbleMotors.label(winHandler.getRumbleMotors()));
             };
 
             // Player Slots (manual per-device slot assignment) — Controls > Players sub-tab. Seeds the
@@ -15514,6 +15573,7 @@ return true;
             }
         }, controllerSaveTarget, launchPadIdentity, launchDInputVisible, launchDInputForcedWhy, direct, switchable, mode, flags);
         liveControllerSession.attach();
+        com.winlator.star.core.ControllerLog.pads(winHandler.getPlayerSlotAssignments(), false);
         noteGameShipsXInput();
     }
 

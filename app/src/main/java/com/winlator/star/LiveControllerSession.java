@@ -9,6 +9,7 @@ import com.winlator.star.container.Shortcut;
 import com.winlator.star.core.BannerinSessionControl;
 import com.winlator.star.core.BannerinXInput;
 import com.winlator.star.core.ControllerIdentity;
+import com.winlator.star.core.ControllerLog;
 import com.winlator.star.core.DInputVibration;
 import com.winlator.star.core.JoystickRegistry;
 import com.winlator.star.core.StickPacing;
@@ -197,7 +198,7 @@ final class LiveControllerSession {
         saveIdentity(next);
         boolean nextIsPad = ControllerIdentity.DINPUT_PAD.equals(next);
         boolean launchIsPad = ControllerIdentity.DINPUT_PAD.equals(launchIdentity);
-        Log.i(TAG, "Controller type -> " + next + (nextIsPad != launchIsPad ? " (next launch)" : ""));
+        logChange("Controller type -> " + next + (nextIsPad != launchIsPad ? " (next launch)" : ""));
         if (nextIsPad != launchIsPad) {
             // winebus reads "Map Controllers" once: the Classic DirectInput pad comes or goes at the next launch.
             addNote(NOTE_IDENTITY);
@@ -212,7 +213,7 @@ final class LiveControllerSession {
         if (dinputLockedReason != null || visible == dinputVisible) return;
         dinputVisible = visible;
         saveDInput(visible);
-        Log.i(TAG, "DirectInput games can see the controller -> " + (visible ? "on" : "off"));
+        logChange("DirectInput games can see the controller -> " + (visible ? "on" : "off"));
         markPending();
     }
 
@@ -220,7 +221,7 @@ final class LiveControllerSession {
         if (vibrationLockedReason != null || on == dinputVibration) return;
         dinputVibration = on;
         saveDInputVibration(on);
-        Log.i(TAG, "DirectInput vibration -> " + (on ? "on" : "off"));
+        logChange("DirectInput vibration -> " + (on ? "on" : "off"));
         markPending();
     }
 
@@ -228,7 +229,7 @@ final class LiveControllerSession {
         if (direct == xinputDirect) return;
         xinputDirect = direct;
         saveXInput(direct);
-        Log.i(TAG, "XInput source -> " + (direct ? "Direct" : "Wine") + (xinputSwitchable ? "" : " (next launch)"));
+        logChange("XInput source -> " + (direct ? "Direct" : "Wine") + (xinputSwitchable ? "" : " (next launch)"));
         if (!xinputSwitchable) {
             addNote(NOTE_XINPUT);
             publish();
@@ -245,8 +246,14 @@ final class LiveControllerSession {
         pacing = next;
         savePacing(next);
         BannerinSessionControl.writeSessionControl(pacing, xinputMode, xinputFlags, false);
-        Log.i(TAG, "Stick updates -> " + next.format() + " (live)");
+        logChange("Stick updates -> " + next.format() + " (live)");
         publish();
+    }
+
+    /** An in-game change: logcat, and the controller log when it is on. */
+    private static void logChange(String line) {
+        Log.i(TAG, line);
+        ControllerLog.event("in game: " + line);
     }
 
     private void markPending() {

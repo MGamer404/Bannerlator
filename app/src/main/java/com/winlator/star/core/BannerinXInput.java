@@ -168,6 +168,16 @@ public final class BannerinXInput {
     public static final int XINPUT_FLAG_FORWARD_AVAILABLE = 1;
     public static final int XINPUT_FLAG_HIDDEN = 2;
 
+    /** An xinput_mode for a log line. */
+    public static String modeName(int mode) {
+        switch (mode) {
+            case XINPUT_MODE_UNSET: return "unset (direct)";
+            case XINPUT_MODE_DIRECT: return "direct";
+            case XINPUT_MODE_FORWARD: return "forward (Wine's XInput)";
+            default: return "mode " + mode;
+        }
+    }
+
     /** "Allow in-game switching" for this launch: game extra > container. Default on. */
     public static boolean switchingEffective(Container container, Shortcut shortcut) {
         if (shortcut != null) {
