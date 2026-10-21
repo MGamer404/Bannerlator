@@ -11598,6 +11598,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // startEnvironmentComponents below, so this must sit here — after the path is known and
         // before the guest starts reading the slots.
         winHandler.preAssignConnectedControllers();
+        // Then the on-screen pad, so a game that only looks for controllers at startup finds it too.
+        seatOnScreenPadBeforeBoot();
         // What the guest will list at boot: one node per slot a controller holds, nothing else.
         Log.i("XServerDisplayActivity", "fake evdev nodes at boot: "
                 + java.util.Arrays.toString(devInputDir.list()) + ", slots held: " + winHandler.getUsedSlotsSnapshot());
@@ -13513,6 +13515,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         XServerDialogState.INSTANCE.setInputProfiles(profileNames);
         XServerDialogState.INSTANCE.setSelectedProfileIdx(selectedPosition);
+    }
+
+    /** Launch worker thread, before Wine boots: seats the on-screen pad on the main thread (its profile
+     *  and slot state live there) and waits for it, at most 2 s. */
+    private void seatOnScreenPadBeforeBoot() {
+        final CountDownLatch seated = new CountDownLatch(1);
+        runOnUiThread(() -> {
+            try {
+                inputControlsView.loadProfileElementsIfReady();
+                winHandler.seatOnScreenPadAtBoot();
+            } finally {
+                seated.countDown();
+            }
+        });
+        try {
+            if (!seated.await(2, TimeUnit.SECONDS))
+                Log.w("XServerDisplayActivity", "on-screen pad not seated before boot (main thread busy)");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private void showInputControls(ControlsProfile profile) {
