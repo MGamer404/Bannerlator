@@ -1,5 +1,5 @@
 {
   "name": "Wayland adapter",
-  "version": "pipetto-ahb-tsafe kgslpoll mali passthrough clientfence d2094e8",
-  "source": "The412Banner/bionic-vulkan-wrapper banner/wayland-adapter-v2 (Pipetto-crypto wrapper-25 lineage, X11 + Wayland WSI; Mali switches default off; pass-through dispatch + client render fences)"
+  "version": "pipetto-ahb-tsafe kgslpoll mali passthrough clientfence subgroups cccc812",
+  "source": "The412Banner/bionic-vulkan-wrapper banner/wayland-adapter-v2 (Pipetto-crypto wrapper-25 lineage, X11 + Wayland WSI; Mali switches default off; pass-through dispatch + client render fences; subgroup properties passed through on Mesa drivers)"
 }
