@@ -11,7 +11,7 @@ name: _build (reusable matrix build)
 #   - JDK: setup-java preinstalled toolchain
 #   - Gradle deps + build cache via gradle/actions/setup-gradle (build cache now
 #     actually active via org.gradle.caching=true in gradle.properties)
-#   - NDK+cmake, bannerin and bl-steam Rust caches: restored on every ref, SAVED ONLY ON MAIN
+#   - NDK, bannerin and bl-steam Rust caches: restored on every ref, SAVED ONLY ON MAIN
 #     (branches can read main's entries anyway; per-branch copies only filled the 10 GB limit);
 #     JavaSteam JARs cached (key = upstream commit);
 #     LSFG .so cached (key = source hash)
@@ -172,21 +172,24 @@ jobs:
         fi
 
     # Not every runner image has NDK 26.1.10909125. Restored everywhere, saved only on main: a
-    # 620 MB copy per branch pushed the repo's Actions cache over its 10 GB limit.
-    - name: Restore NDK + cmake
+    # 620 MB copy per branch pushed the repo's Actions cache over its 10 GB limit. cmake 3.22.1 is
+    # NOT cached: the image ships it root-owned, and extracting over it made tar exit 2 ("Failed to
+    # restore") on every run.
+    - name: Restore NDK
       id: cache-ndk
       uses: actions/cache/restore@v4
       with:
-        path: |
-          ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
-          ${{ env.ANDROID_SDK_ROOT }}/cmake/3.22.1
-        key: ndk-26.1.10909125-cmake-3.22.1
+        path: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
+        key: ndk-26.1.10909125-v2
 
     - name: Install NDK (only if the runner lacks it) + export ANDROID_NDK_HOME
       run: |
         SDK_ROOT="${ANDROID_SDK_ROOT}"
         mkdir -p "$SDK_ROOT"
-        if [ ! -f "$SDK_ROOT/ndk/26.1.10909125/source.properties" ]; then
+        MISSING=""
+        [ -f "$SDK_ROOT/ndk/26.1.10909125/source.properties" ] || MISSING="$MISSING ndk;26.1.10909125"
+        [ -x "$SDK_ROOT/cmake/3.22.1/bin/cmake" ] || MISSING="$MISSING cmake;3.22.1"
+        if [ -n "$MISSING" ]; then
           if [ ! -f "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
             curl -sL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o /tmp/cmdline-tools.zip
             unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-tools/
@@ -194,20 +197,19 @@ jobs:
             mv /tmp/cmdline-tools/cmdline-tools "$SDK_ROOT/cmdline-tools/latest" 2>/dev/null || true
             rm -f /tmp/cmdline-tools.zip
           fi
-          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1"
+          echo "Installing:$MISSING"
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install $MISSING
         else
-          echo "NDK already present (cache or runner image) — skipping sdkmanager install"
+          echo "NDK + cmake already present (cache or runner image) — skipping sdkmanager install"
         fi
         echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
-    - name: Save NDK + cmake (main only)
+    - name: Save NDK (main only)
       if: github.ref == 'refs/heads/main' && steps.cache-ndk.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
-        path: |
-          ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
-          ${{ env.ANDROID_SDK_ROOT }}/cmake/3.22.1
-        key: ndk-26.1.10909125-cmake-3.22.1
+        path: ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
+        key: ndk-26.1.10909125-v2
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
