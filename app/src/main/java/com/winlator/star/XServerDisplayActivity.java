@@ -8244,8 +8244,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // asset is replaced so a fresh APK restages the file into every container on next launch.
     private static final String BUNDLED_WFM_VERSION = "1.2.1";
 
-    // Version of the bundled winhandler.exe in app/src/main/assets/winhandler.exe: the prebuilt one from
-    // container_pattern_common.tzst (md5 3b550703…) with its two ShowWindow(hwnd, SW_RESTORE) calls in
+    // Version of the bundled winhandler.exe in app/src/main/assets/winhandler.exe: the prebuilt one that
+    // container_pattern_common.tzst used to carry (md5 3b550703…; bake-windows-exes.yml now bakes this
+    // asset into the template too) with its two ShowWindow(hwnd, SW_RESTORE) calls in
     // bringToFront changed to SW_SHOW (file offsets 0xd5c/0xd8c, 09 -> 05; md5 f64864e1…). The
     // SwitchToThisWindow(hwnd, TRUE) right after still restores a minimized window (Wine does that for an
     // iconic window), so the only behaviour change is that a maximized window is no longer
@@ -8285,18 +8286,28 @@ public class XServerDisplayActivity extends AppCompatActivity {
             File exeFile = new File(windowsDir, exeName);
             File marker = new File(windowsDir, markerName);
 
+            java.io.ByteArrayOutputStream bundledBytes = new java.io.ByteArrayOutputStream();
+            try (java.io.InputStream in = getAssets().open(exeName)) {
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = in.read(buf)) > 0) bundledBytes.write(buf, 0, n);
+            }
+            byte[] bundled = bundledBytes.toByteArray();
+
+            // The marker alone is not enough: applyGeneralPatches re-extracts the container pattern over
+            // drive_c\windows and can put an older copy back under an up-to-date marker. So the exe's
+            // bytes are compared with the bundled ones too (61 KB and 300 KB, on the launch worker).
             boolean upToDate = exeFile.isFile() && marker.isFile()
-                    && version.equals(FileUtils.readString(marker).trim());
+                    && version.equals(FileUtils.readString(marker).trim())
+                    && exeFile.length() == bundled.length
+                    && java.util.Arrays.equals(java.nio.file.Files.readAllBytes(exeFile.toPath()), bundled);
             if (upToDate) return;
 
             // Copy to a temp sibling then rename, so a crash mid-copy can't leave a truncated exe
             // that the guest would then try to run.
             File tmp = new File(windowsDir, exeName + ".tmp");
-            try (java.io.InputStream in = getAssets().open(exeName);
-                 java.io.FileOutputStream out = new java.io.FileOutputStream(tmp)) {
-                byte[] buf = new byte[65536];
-                int n;
-                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(tmp)) {
+                out.write(bundled);
             }
             if (!tmp.isFile() || tmp.length() == 0) {
                 Log.w("XServerDisplayActivity", "stageBundledWindowsExe: staged " + exeName + " empty, skipping");
