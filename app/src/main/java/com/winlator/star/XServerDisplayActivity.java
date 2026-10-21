@@ -8059,7 +8059,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     //                module-aaudio-sink (performance_mode/adaptive/buffer modargs). MUST bump so
     //                existing containers re-extract it — vc is frozen, so without this the old module
     //                lingers and the new default.pa args are rejected → silence (2026-08-10).
-    private static final String PATTERN_CONTENT_VERSION = "7";
+    //          "8" = AIO Graphics Test 2.2.0 + CursorTest.exe in drive_c/AIO Graphics Test v2; the v1
+    //                folder drive_c/AIO Graphics Test is dropped from the pattern and its exes are
+    //                deleted from existing containers via removeClassicAio() (2026-10-21).
+    private static final String PATTERN_CONTENT_VERSION = "8";
 
     private void setupWineSystemFiles() {
         String appVersion = String.valueOf(AppUtils.getVersionCode(this));
@@ -16483,6 +16486,7 @@ return true;
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "container_pattern_common.tzst", rootDir);
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "pulseaudio.tzst", new File(getFilesDir(), "pulseaudio"));
         removePaleMoonDesktopShortcut(container);
+        removeClassicAio(container);
         WineUtils.applySystemTweaks(this, wineInfo);
         container.putExtra("graphicsDriver", null);
         container.putExtra("desktopTheme", null);
@@ -16502,6 +16506,21 @@ return true;
         File desktop = new File(desktopDir, "Pale Moon.desktop");
         if (lnk.isFile()) lnk.delete();
         if (desktop.isFile()) desktop.delete();
+    }
+
+    // The old AIO Graphics Test v1 (drive_c/AIO Graphics Test) left the pattern with version "8"; the
+    // overlay extract can't remove it from containers that already have it, so delete its two exes here
+    // and the folder only when nothing else is left in it (an "AIO Results" folder a user saved stays).
+    // Its Start Menu entries go through WineStartMenuCreator, which removes what the last menu listed.
+    private void removeClassicAio(Container container) {
+        File dir = new File(container.getRootDir(), ".wine/drive_c/AIO Graphics Test");
+        if (!dir.isDirectory()) return;
+        for (String exe : new String[]{"AIO-Graphics-Test-32bit.exe", "AIO-Graphics-Test-64bit.exe"}) {
+            File f = new File(dir, exe);
+            if (f.isFile()) f.delete();
+        }
+        String[] left = dir.list();
+        if (left != null && left.length == 0) dir.delete();
     }
 
     /**
