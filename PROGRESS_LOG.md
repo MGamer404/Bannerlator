@@ -1,5 +1,11 @@
 # Star-Compose — Progress Log
 
+## 2026-10-21 — 🔧 CI: random audio-bundle failure fixed (branch `fix/ci-grep-pipefail`, not merged)
+> **Why:** run 39343716800 (`feat/wayland-adapter-v2-port`) failed on antutu only, at "Build the DirectAudio sink into the audio bundle": `audio bundle: 77 files before, 78 after` then `tar: stdout: write error`, exit 2. The bundle was correct. `_build.yml:446` ran `tar -tf … | grep -q 'module-directaudio-sink.so'` under `set -euo pipefail`; `grep -q` exits at the first match, tar gets a write error on the closed pipe, pipefail fails the step. Timing-dependent, so any flavor on any branch (main too) could hit it.
+> - **Fix (`37cd31de`):** `grep … >/dev/null` instead of `grep -q`, so the whole listing is read. Checked locally under pipefail: old form exit 141 with the match present, new form 0 (present) / 1 (missing).
+> - Other `| grep -q` in `_build.yml` (lines 116, 501) are in steps without pipefail, so not affected.
+> - **Next:** CI Build (artifacts only) on this branch, all 4 flavors green, then merge to main with the user's go. No app change, so no device test needed beyond the APKs building.
+
 ## 2026-10-19 — ✅ Controller input log + DirectInput visible = no entry merged to main (`3d0aacb`)
 > `feat/controller-log` fast-forwarded onto main (`5865486d` → `3d0aacb`, 3 commits; backup `refs/backup/20261019/main-before-controller-log`). In: Log Manager › "Controller input" (off by default) writing `controller.txt` per Wine game at exit (checklist per player, setup, controllers, session events, BANNERIN counters, guest controller lines); "DirectInput games can see the controller" On writes no Joysticks entry again (the old Exclusive Input off; "override" only when forced), which fixed Watch Dogs 2's controls. Device-proven on the Pocket FIT: Watch Dogs 2 controls with the switch On (`707fb16`), and `3d0aacb`'s controller.txt (only player 1, 5 pass / 0 warn, in-game DirectInput off → on reconnects logged). CI Build (artifacts only) 39269018185 green on `3d0aacb`. Not yet tested: other games / controller types with the no-entry change, and whether pre3's known issue (Wine XInput + DirectInput visible) still happens without "override". No release until the user says so.
 
