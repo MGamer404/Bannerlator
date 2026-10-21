@@ -1,5 +1,10 @@
 # Star-Compose — Progress Log
 
+## 2026-10-21 — 🔁 Adapter v2 rebased onto main `d52d0c9` and re-staged (branch `feat/wayland-adapter-v2-port`, not merged)
+> - **User (10-21):** "rebase v2 onto main and stage it". Backup of the old tip `1cbf8ff` at `refs/backup/20261021/wayland-adapter-v2-port-before-rebase`.
+> - Rebased all 22 commits (5 code + 17 log) onto main `d52d0c9` (AIO 2.2.0 template + CI pipefail fix); no code conflicts. The code diff against main has the same `git patch-id` as the tested branch's code diff against `117f8b5`, so the v2 changes are byte-identical; the new build adds main's template/Start Menu/PATTERN v8 changes on top. PROGRESS_LOG rebuilt as main's two new entries + the branch's six entries unchanged (a temporary union merge for the log had left a stray heading).
+> - **Next:** CI on the rebased head, stage the pubg APK in `/sdcard/Download/` (hash host + device), ask before installing.
+
 ## 2026-10-21 — ✅ AIO Graphics Test 2.2.0 + Cursor Test in the container template, v1 folder dropped; CI pipefail fix — both merged to main (`2215e96`)
 > - **Why:** new containers bake AIO 2.1.0 (`drive_c/AIO Graphics Test v2`, byte-identical to the 2.1.0 release) plus an old v1.6.1 build (`drive_c/AIO Graphics Test`, dated 06-22, not byte-identical to the published v1.6.1). 2.2.0 (released 10-21) adds the Vulkan IMMEDIATE→MAILBOX→FIFO fallback (standalone Vulkan exits "Present mode unsupported" on the Wayland adapter with 2.1.0), fullscreen for every test and CursorTest.exe.
 > - **User's decision (10-21):** (1) bake 2.2.0, (2) add CursorTest, (3) drop the v1.6.1 folder, (4) bump `PATTERN_CONTENT_VERSION` so existing containers get it; new branch off main, merge after green.
@@ -14,7 +19,7 @@
 > - Other `| grep -q` in `_build.yml` (lines 116, 501) are in steps without pipefail, so not affected.
 > - **CI 39528853825** (head `dd17a700`): standard, pubg, ludashi, antutu all ✅. Each log runs the new line, shows `77 files before, 78 after`, no `stdout: write error`, no `##[error]`. Skipped steps are the same three cache skips as main's green run 39285181118.
 > - **Next:** merge to main with the user's go. No app change, so nothing to device-test.
-## 2026-10-21 — ▶️ Adapter v2 A/B "before" test started on the installed build (branch `feat/wayland-adapter-v2-port`, not merged)
+
 ## 2026-10-21 — 🔎 A6xx Wayland jitter: reporter logs re-read (the 10-03 analysis was lost in the device wipe) (branch `feat/wayland-adapter-v2-port`, not merged)
 > - **Source:** BannerHub & Emulation Support Discord, #winlator-general thread "Wayland on A6xx logs" (`1555682320709845087`, opened by hotice77 10-02, 112 msgs) + the channel's Wayland posts since 10-01, read with BannerBot (read-only `dget`). Raw logs + thread text saved to `/sdcard/Documents/bannerlator-reports/a6xx-wayland-20261021/` (not in the repo: user data).
 > - **Reports:** hotice77 (Adreno 7c+ Gen 3, Android 14): jitter on Wayland growing with GPU load; with zero-copy on, jitter at any load. Tried 6 drivers (Qualcomm 863.1, Banners-Turnip, R9v2, WN 1.02b, Autotuner 26.1, Amaral 4.7.1.2), every present mode, TU_DEBUG variants: no change. AlwaysBored: `MESA_VK_WSI_DEBUG=sw` hid it at a big perf cost; later (3.1.5, Proton 11.0-2, Android 16, same 7c+ Gen 3) no jitter in Blasphemous/Hades/Nunholy, but frame time ~3× X11 and a hitch every 15–20 s with HDR on. Vermillion (S25 Ultra, Adreno 830): same judder only with the adapter driver (Turnip Gen8 V37), fine with the bundled V36; DS3 showed stale frames. Bobcelha (SD865 / RP5): smooth on Wayland (Saints Row 3, BL2).
