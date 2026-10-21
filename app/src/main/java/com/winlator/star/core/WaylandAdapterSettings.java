@@ -26,6 +26,7 @@ import java.util.Map;
  *   waylandUbwc         "" | 1 | 0                      → BANNER_WAYLAND_UBWC
  *   waylandModifiers    "" | 1 | 0                      → 0 = BANNER_WSI_NO_MODIFIERS=1
  *   waylandKgslShim     "" | 1 | 0                      → BANNER_KGSL_POLL_FIX
+ *   waylandSubgroups    "" | auto | 0                   → 0 = BANNER_WRAPPER_NO_SUBGROUPS=1
  * </pre>
  * "" = Default = don't inject (the launch behaves as it did before this existed).
  *
@@ -45,9 +46,11 @@ public final class WaylandAdapterSettings {
     public static final String KEY_UBWC = "waylandUbwc";
     public static final String KEY_MODIFIERS = "waylandModifiers";
     public static final String KEY_KGSL_SHIM = "waylandKgslShim";
+    /** Auto (""/auto) = the adapter reports the driver's subgroup support on Mesa drivers; 0 = hide it. */
+    public static final String KEY_SUBGROUPS = "waylandSubgroups";
     /** Every key this class owns, in dialog order (the editors blank these for a shortcut that inherits). */
     public static final List<String> KEYS = Arrays.asList(KEY_PROFILE, KEY_PRESENT, KEY_ASYNC_COPY, KEY_ZERO_COPY,
-            KEY_CLIENT_FENCE, KEY_UBWC, KEY_MODIFIERS, KEY_KGSL_SHIM);
+            KEY_CLIENT_FENCE, KEY_UBWC, KEY_MODIFIERS, KEY_KGSL_SHIM, KEY_SUBGROUPS);
 
     public static final String PROFILE_AUTO = "auto";
     public static final String PROFILE_SMOOTH = "smooth";
@@ -62,6 +65,7 @@ public final class WaylandAdapterSettings {
     public static final String ENV_UBWC = "BANNER_WAYLAND_UBWC";
     public static final String ENV_NO_MODIFIERS = "BANNER_WSI_NO_MODIFIERS";
     public static final String ENV_KGSL_SHIM = "BANNER_KGSL_POLL_FIX";
+    public static final String ENV_NO_SUBGROUPS = "BANNER_WRAPPER_NO_SUBGROUPS";
 
     public static String profileLabel(String profile) {
         switch (normalizeProfile(profile)) {
@@ -100,6 +104,7 @@ public final class WaylandAdapterSettings {
         public boolean probeUsed;              // Auto had a report to read
         public String presentMode;             // "mailbox" | "fifo" | null
         public Boolean asyncCopy, zeroCopy, clientFence, ubwc, modifiers, kgslShim;
+        public boolean subgroupsOff;          // Subgroups: Off (the adapter hides subgroup support)
         public final Map<String, Source> sources = new HashMap<>();
 
         private Source src(String key) { Source s = sources.get(key); return s == null ? Source.NONE : s; }
@@ -119,6 +124,7 @@ public final class WaylandAdapterSettings {
             if (ubwc != null) parts.add("UBWC " + (ubwc ? "on" : "off"));
             if (modifiers != null) parts.add("modifiers " + (modifiers ? "on" : "off"));
             if (kgslShim != null) parts.add("KGSL shim " + (kgslShim ? "on" : "off"));
+            if (subgroupsOff) parts.add("subgroups off");
             if (parts.isEmpty()) return "nothing changed (compositor and driver defaults)";
             return String.join(" · ", parts);
         }
@@ -214,6 +220,8 @@ public final class WaylandAdapterSettings {
         if ((v = pick(s, c, KEY_UBWC, e)) != null && parseFlag(v) != null) ubwc = parseFlag(v);
         if ((v = pick(s, c, KEY_MODIFIERS, e)) != null && parseFlag(v) != null) mods = parseFlag(v);
         if ((v = pick(s, c, KEY_KGSL_SHIM, e)) != null && parseFlag(v) != null) kgsl = parseFlag(v);
+        // Subgroups: only Off (0) changes anything; Auto is the adapter's own driver check.
+        if ((v = pick(s, c, KEY_SUBGROUPS, e)) != null) e.subgroupsOff = Boolean.FALSE.equals(parseFlag(v));
 
         // Env vars the user typed win; the compositor side reads the resolved value, so parse them here.
         if (userEnv != null) {
@@ -228,6 +236,7 @@ public final class WaylandAdapterSettings {
             if (userEnv.has(ENV_UBWC)) { ubwc = envOn(userEnv.get(ENV_UBWC), true); e.sources.put(KEY_UBWC, Source.ENV); }
             if (userEnv.has(ENV_NO_MODIFIERS)) { mods = !envOn(userEnv.get(ENV_NO_MODIFIERS), false); e.sources.put(KEY_MODIFIERS, Source.ENV); }
             if (userEnv.has(ENV_KGSL_SHIM)) { kgsl = envOn(userEnv.get(ENV_KGSL_SHIM), false); e.sources.put(KEY_KGSL_SHIM, Source.ENV); }
+            if (userEnv.has(ENV_NO_SUBGROUPS)) { e.subgroupsOff = envOn(userEnv.get(ENV_NO_SUBGROUPS), false); e.sources.put(KEY_SUBGROUPS, Source.ENV); }
         }
 
         e.presentMode = present;
@@ -271,6 +280,7 @@ public final class WaylandAdapterSettings {
             else envVars.put(ENV_NO_MODIFIERS, "1");
         }
         putFlag(envVars, e, KEY_KGSL_SHIM, ENV_KGSL_SHIM, e.kgslShim);
+        if (e.subgroupsOff && !e.fromEnv(KEY_SUBGROUPS)) envVars.put(ENV_NO_SUBGROUPS, "1");
     }
 
     private static void putFlag(EnvVars envVars, Effective e, String key, String env, Boolean value) {

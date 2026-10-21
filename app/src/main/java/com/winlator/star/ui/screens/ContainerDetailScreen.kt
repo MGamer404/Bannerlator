@@ -3514,6 +3514,16 @@ internal fun WaylandDriverSettingsDialog(
                         value = adapter[com.winlator.star.core.WaylandAdapterSettings.KEY_KGSL_SHIM] ?: "",
                         onChange = { setKey(com.winlator.star.core.WaylandAdapterSettings.KEY_KGSL_SHIM, it) }
                     )
+                    WaylandTriStateRow(
+                        label = "Subgroups",
+                        help = "Auto tells the game what subgroup operations your Mesa driver supports (DOOM Eternal and " +
+                            "other games that need them start). Off hides them, as older adapters did; try it if a game " +
+                            "shows glitches or crashes that it did not before.",
+                        options = if (perGame) listOf("" to defaultWord, "auto" to "Auto", "0" to "Off")
+                                  else listOf("" to "Auto", "0" to "Off"),
+                        value = adapter[com.winlator.star.core.WaylandAdapterSettings.KEY_SUBGROUPS] ?: "",
+                        onChange = { setKey(com.winlator.star.core.WaylandAdapterSettings.KEY_SUBGROUPS, it) }
+                    )
                 }
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
 
