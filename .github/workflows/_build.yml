@@ -11,7 +11,8 @@ name: _build (reusable matrix build)
 #   - JDK: setup-java preinstalled toolchain
 #   - Gradle deps + build cache via gradle/actions/setup-gradle (build cache now
 #     actually active via org.gradle.caching=true in gradle.properties)
-#   - NDK 26.1.10909125 comes with the runner image (no cache; installed only if missing);
+#   - NDK+cmake, bannerin and bl-steam Rust caches: restored on every ref, SAVED ONLY ON MAIN
+#     (branches can read main's entries anyway; per-branch copies only filled the 10 GB limit);
 #     JavaSteam JARs cached (key = upstream commit);
 #     LSFG .so cached (key = source hash)
 #   All three cache keys are SHARED across the matrix. First run after a key change:
@@ -170,8 +171,17 @@ jobs:
           gather_jar "kotlinx-io-core-jvm-*.jar"            "../app/libs/steam/kotlinx-io-core.jar"
         fi
 
-    # No cache for the NDK: the runner image ships 26.1.10909125, and a 620 MB cache entry per
-    # branch only pushed the repo's Actions cache over its 10 GB limit (evicting useful entries).
+    # Not every runner image has NDK 26.1.10909125. Restored everywhere, saved only on main: a
+    # 620 MB copy per branch pushed the repo's Actions cache over its 10 GB limit.
+    - name: Restore NDK + cmake
+      id: cache-ndk
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
+          ${{ env.ANDROID_SDK_ROOT }}/cmake/3.22.1
+        key: ndk-26.1.10909125-cmake-3.22.1
+
     - name: Install NDK (only if the runner lacks it) + export ANDROID_NDK_HOME
       run: |
         SDK_ROOT="${ANDROID_SDK_ROOT}"
@@ -186,9 +196,18 @@ jobs:
           fi
           yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1"
         else
-          echo "NDK already present on the runner — skipping sdkmanager install"
+          echo "NDK already present (cache or runner image) — skipping sdkmanager install"
         fi
         echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
+
+    - name: Save NDK + cmake (main only)
+      if: github.ref == 'refs/heads/main' && steps.cache-ndk.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
+          ${{ env.ANDROID_SDK_ROOT }}/cmake/3.22.1
+        key: ndk-26.1.10909125-cmake-3.22.1
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
@@ -256,8 +275,9 @@ jobs:
         echo "rustc=$(rustc -V | awk '{print $2}')" >> "$GITHUB_OUTPUT"
         rustc -V; cargo -V
 
-    - name: Cache bannerin target dirs
-      uses: actions/cache@v4
+    - name: Restore bannerin target dirs
+      id: cache-bannerin
+      uses: actions/cache/restore@v4
       with:
         path: |
           ~/.cargo/registry/index
@@ -283,6 +303,17 @@ jobs:
         cp app/src/main/cpp/bannerin/target/aarch64-linux-android/release/libbannerin.so \
           app/src/main/jniLibs/arm64-v8a/libbannerin.so
         test -s app/src/main/cpp/bannerin/target/aarch64-linux-android/release/libbannerin_guest.a
+
+    - name: Save bannerin target dirs (main only)
+      if: github.ref == 'refs/heads/main' && steps.cache-bannerin.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          app/src/main/cpp/bannerin/target
+          app/src/main/cpp/bannerin/loom/target
+        key: bannerin-${{ steps.bannerin-rust.outputs.rustc }}-${{ hashFiles('app/src/main/cpp/bannerin/**/Cargo.toml', 'app/src/main/cpp/bannerin/Cargo.lock') }}
 
     # --- BANNERIN-XInput: the replacement XInput DLLs (app/src/main/cpp/bannerin/xinput) -------------
     # Built from source with the pinned bylaws/llvm-mingw for x86_64, i386 and arm64ec, every DLL's
@@ -462,7 +493,7 @@ jobs:
     # every flavor exactly like the other prebuilt .so files. rustup/cargo are preinstalled on the
     # runner image (the version is pinned by RUST_TOOLCHAIN); only the Android target has to be added. The one C-compiling crate (`ring`,
     # via rustls) needs the NDK clang/llvm-ar exported below — everything else is pure Rust.
-    # Cache = cargo registry + the crate's target/ dir, keyed on rustc version + Cargo.lock, so a
+    # Cache = cargo registry + the crate's target/ dir (saved on main only), keyed on rustc version + Cargo.lock, so a
     # source-only change rebuilds just this crate on top of the cached dependency objects.
     - name: Rust toolchain (aarch64-linux-android target)
       id: rust
@@ -473,8 +504,9 @@ jobs:
         echo "rustc=$(rustc -V | awk '{print $2}')" >> "$GITHUB_OUTPUT"
         rustc -V; cargo -V
 
-    - name: Cache cargo registry + bl-steam-client target
-      uses: actions/cache@v4
+    - name: Restore cargo registry + bl-steam-client target
+      id: cache-blsteam
+      uses: actions/cache/restore@v4
       with:
         path: |
           ~/.cargo/registry/index
@@ -529,6 +561,17 @@ jobs:
       run: |
         cd app/src/main/cpp/bl-steam-client/rust
         cargo test --locked
+
+    - name: Save cargo registry + bl-steam-client target (main only)
+      if: github.ref == 'refs/heads/main' && steps.cache-blsteam.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          app/src/main/cpp/bl-steam-client/rust/target
+        key: blsteam-${{ steps.rust.outputs.rustc }}-${{ hashFiles('app/src/main/cpp/bl-steam-client/rust/Cargo.lock') }}
 
     - name: bl-steam-client dependency audit (cargo tree + licenses)
       run: |
