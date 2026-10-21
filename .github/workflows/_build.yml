@@ -11,7 +11,8 @@ name: _build (reusable matrix build)
 #   - JDK: setup-java preinstalled toolchain
 #   - Gradle deps + build cache via gradle/actions/setup-gradle (build cache now
 #     actually active via org.gradle.caching=true in gradle.properties)
-#   - NDK+cmake cached (key ndk-...); JavaSteam JARs cached (key = upstream commit);
+#   - NDK 26.1.10909125 comes with the runner image (no cache; installed only if missing);
+#     JavaSteam JARs cached (key = upstream commit);
 #     LSFG .so cached (key = source hash)
 #   All three cache keys are SHARED across the matrix. First run after a key change:
 #   the 3 jobs miss concurrently and each rebuilds in parallel (fine — free minutes;
@@ -38,6 +39,9 @@ permissions:
 
 env:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  # Pinned so the Rust cache keys (bannerin-/blsteam-<rustc>-…) survive runner image updates;
+  # a newer rustc on the image invalidated every cached target dir. Bump on purpose.
+  RUST_TOOLCHAIN: '1.99.1'
 
 jobs:
   build:
@@ -166,16 +170,9 @@ jobs:
           gather_jar "kotlinx-io-core-jvm-*.jar"            "../app/libs/steam/kotlinx-io-core.jar"
         fi
 
-    - name: Cache NDK + cmake
-      id: cache-ndk
-      uses: actions/cache@v4
-      with:
-        path: |
-          ${{ env.ANDROID_SDK_ROOT }}/ndk/26.1.10909125
-          ${{ env.ANDROID_SDK_ROOT }}/cmake/3.22.1
-        key: ndk-26.1.10909125-cmake-3.22.1
-
-    - name: Install NDK (only if not cached) + export ANDROID_NDK_HOME
+    # No cache for the NDK: the runner image ships 26.1.10909125, and a 620 MB cache entry per
+    # branch only pushed the repo's Actions cache over its 10 GB limit (evicting useful entries).
+    - name: Install NDK (only if the runner lacks it) + export ANDROID_NDK_HOME
       run: |
         SDK_ROOT="${ANDROID_SDK_ROOT}"
         mkdir -p "$SDK_ROOT"
@@ -189,7 +186,7 @@ jobs:
           fi
           yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1"
         else
-          echo "NDK already present (cache hit) — skipping sdkmanager install"
+          echo "NDK already present on the runner — skipping sdkmanager install"
         fi
         echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
@@ -253,6 +250,8 @@ jobs:
     - name: bannerin toolchain
       id: bannerin-rust
       run: |
+        rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target aarch64-linux-android,aarch64-unknown-linux-gnu
+        rustup default "$RUST_TOOLCHAIN"
         rustup target add aarch64-linux-android aarch64-unknown-linux-gnu
         echo "rustc=$(rustc -V | awk '{print $2}')" >> "$GITHUB_OUTPUT"
         rustc -V; cargo -V
@@ -461,13 +460,15 @@ jobs:
     # --- bl-steam-client: the native Rust Steam CM engine (libblsteam.so) --------------------
     # Cross-compiled with cargo for aarch64-linux-android and dropped into jniLibs so it ships in
     # every flavor exactly like the other prebuilt .so files. rustup/cargo are preinstalled on the
-    # runner image; only the Android target has to be added. The one C-compiling crate (`ring`,
+    # runner image (the version is pinned by RUST_TOOLCHAIN); only the Android target has to be added. The one C-compiling crate (`ring`,
     # via rustls) needs the NDK clang/llvm-ar exported below — everything else is pure Rust.
     # Cache = cargo registry + the crate's target/ dir, keyed on rustc version + Cargo.lock, so a
     # source-only change rebuilds just this crate on top of the cached dependency objects.
     - name: Rust toolchain (aarch64-linux-android target)
       id: rust
       run: |
+        rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target aarch64-linux-android
+        rustup default "$RUST_TOOLCHAIN"
         rustup target add aarch64-linux-android
         echo "rustc=$(rustc -V | awk '{print $2}')" >> "$GITHUB_OUTPUT"
         rustc -V; cargo -V
