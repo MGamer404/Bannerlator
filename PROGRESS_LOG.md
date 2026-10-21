@@ -1,5 +1,10 @@
 # Star-Compose — Progress Log
 
+## 2026-10-21 — ⏱️ CI build time: cache fixes (branch `fix/ci-cache-speed`, in progress)
+> - **Why:** build job 7.8 min (10-05, run 37311280932) → ~15 min (10-21, run 39586460461). Measured causes: (1) Rust caches keyed on the runner's rustc, which moved 1.99.0 → 1.99.1; main's entries are 1.99.0 and branches can only reuse main's, so every new branch rebuilds bannerin (87 s) + libblsteam (23 → 76 s) + bl-steam tests (14 → 42 s); (2) `Cache NDK + cmake` is never needed (the runner image has NDK 26.1.10909125, the log says "NDK already present" even on a miss) but each branch saves 620 MB, and the repo's Actions cache is at 9.54 / 10 GB, so entries get evicted; (3) branches only read main's Gradle cache (setup-gradle read-only off main) and main hasn't built since `117f8b5`.
+> - **User (10-21):** do all three on a new branch off main, report after a successful build with reduced times.
+> - **Plan:** drop the NDK cache step; pin Rust (`RUST_TOOLCHAIN` 1.99.1, `rustup default`) so the cache keys stay valid across runner updates; build on push to main (not `[skip ci]` / docs) so main's caches stay fresh. Measure: branch run 1 (cold) and run 2 (warm) against today's ~15 min.
+
 ## 2026-10-21 — ✅ Adapter v2 merged to main (`c3f7e606`, fast-forward)
 > - **User (10-21):** "first merge to main, then build it on a new branch". Backup `refs/backup/20261021/main-before-adapter-v2` (= `d52d0c9`).
 > - Fast-forward `d52d0c9` → `c3f7e606` (28 commits: v2 adapter `d2094e8` rebased, then the subgroup adapter `cccc812` + Subgroups switch). Code identical to the installed test build `97858fe4` (CI 39597141412 ✅ ×4; only PROGRESS_LOG differs).
