@@ -1,5 +1,11 @@
 # Star-Compose — Progress Log
 
+## 2026-10-21 — ✅ Adapter v2 merged to main (`c3f7e606`, fast-forward)
+> - **User (10-21):** "first merge to main, then build it on a new branch". Backup `refs/backup/20261021/main-before-adapter-v2` (= `d52d0c9`).
+> - Fast-forward `d52d0c9` → `c3f7e606` (28 commits: v2 adapter `d2094e8` rebased, then the subgroup adapter `cccc812` + Subgroups switch). Code identical to the installed test build `97858fe4` (CI 39597141412 ✅ ×4; only PROGRESS_LOG differs).
+> - **Device proof:** DOOM Eternal ran on the new adapter (`wayland_adapter/f0b41411dbda`, game log GPU "Wrapper(Adreno (TM) 750)", 0 FATAL) with zero-copy off. NOT done before merge: AIO/DiRT regression run for the subgroup change.
+> - **Open:** (1) with zero-copy ON the adapter hides BGRA surface formats (`banner_ahb_wsi_mesa242.py` "only what gralloc can hold") → DOOM Eternal black screen with sound; fix on a new branch. (2) First launch after an app (re)start froze white at "Initializing renderSystem media" twice (bundled 07:36, adapter 08:33), second launch fine; Mesa shader cache got 3 writes in the frozen run vs 284 in the good one → a hang, not shader compiling. Not root-caused.
+
 ## 2026-10-21 — 🧩 Adapter: subgroup properties passed through + gear switch "Subgroups: Auto / Off" (branch `feat/wayland-adapter-v2-port`, not merged)
 > - **Why:** DOOM Eternal (RUNE, Pocket FIT Adreno 750, Turnip v27, adapter `d2094e8`) quit ~10 s after start with a black screen. `WINEDEBUG=warn+seh` showed the game's own log: `FATAL ERROR: Please update your driver: Could not find support for required subgroup stages`, then int3 (exit 0x80000003).
 > - **Cause:** the adapter (Pipetto wrapper-25, commit `b63039a` 2025-02-15 "disable subgroup operations by Hugo", no reason given) sets `subgroupSupportedStages`/`subgroupSupportedOperations` to 0 in `WRAPPER_GetPhysicalDeviceProperties2` for every driver. Probed on device (small C loader, ICD + Android HAL): Turnip direct 0x3f/0x6ff, every bundled wrapper (adapter, wrapper, -original, -leegao, -legacy, -gamenative) 0x0/0x0, Proton's bundled Wayland Turnip 0x3f/0x6ff, Qualcomm v819 blob 0x30/0xbf. WinLite's `wrapper_wl` (Mesa 26.2.4) reports 0x3f/0x6ff — matches altgg's Discord report that a 26.2.4 wrapper runs the game.
