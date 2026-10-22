@@ -417,13 +417,14 @@ private fun XboxProfileTab(account: String, state: XboxLibraryState, modifier: M
     var cloud by remember { mutableStateOf(XboxMainActivity.cloudSaves(ctx)) }
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).verticalScroll(rememberScrollState()).padding(top = 12.dp)) {
         StoreSection(title = "Account") {
-            Text(account, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(account, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             Text("${state.games.size} PC games · ${state.games.count { it.gamePass }} through PC Game Pass · ${state.installedIds.size} installed",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         StoreSection(title = "Cloud saves (experimental)") {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Sync game saves with Xbox cloud", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                Text("Sync game saves with Xbox cloud", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface)
                 Switch(checked = cloud, onCheckedChange = { cloud = it; XboxMainActivity.prefs(ctx).edit().putBoolean(XboxMainActivity.PREF_CLOUD_SAVES, it).apply() })
             }
             Text("Off by default. Saves then stay on this device. Turning it on can overwrite your account's cloud saves; " +
@@ -453,7 +454,7 @@ private fun XboxLoginScreen(backendReady: Boolean, message: String?, onLoginClic
             Spacer(Modifier.height(8.dp))
             Text("Experimental. Use an account you can afford to lose.", style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
-            message?.let { Spacer(Modifier.height(8.dp)); Text(it, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center) }
+            message?.let { Spacer(Modifier.height(8.dp)); Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center) }
             Spacer(Modifier.height(24.dp))
             Button(onClick = onLoginClick, enabled = backendReady, shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.height(48.dp).steamFocusRing(RoundedCornerShape(8.dp))) { Text("Sign in with Microsoft") }
