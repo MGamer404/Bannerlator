@@ -328,6 +328,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // getWineStartCommand() to rewrite the launch target to run our agent (steam.exe) with the per-game
     // spec. Null ⇒ every non-RealSteam (or failed-prep) launch is byte-for-byte unchanged.
     private RealSteamLauncher.Plan realSteamPlan;
+    // Xbox store game (shortcut storeSource=xbox): the licensed launch prepared before Wine starts
+    // (XboxRuntime.prepare) — the materialised exe to run, its environment, and the lease/bridge to close.
+    private com.winlator.star.store.xbox.XboxRuntime.Launch xboxLaunch;
     /** EA launcher-chain title (EA Desktop) — set by maybeStageRealSteam(); drives the FEX preset clamp + overlay hints. */
     private boolean realSteamEaChain = false;
     // True while THIS activity has the app's own Steam CM session suspended for the in-container
@@ -3301,6 +3304,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                         applyGameRefreshRateUnlock();
                         applyColorCursorRegistry();
                         provisionEpicOverlay();
+                        stage[0] = "Preparing the Xbox game";
+                        prepareXboxLaunch();
                     } else {
                         preloaderDialog.step(2, "Preparing the Linux runtime…");
                     }
@@ -5491,6 +5496,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // one exit). Latch the first call; ignore the rest. exit() is always on the main thread.
     private volatile boolean exiting = false;
 
+    /** Ends the Xbox lease (removes the launch view) and the bridge, then the account service, and puts the
+     *  container's own system32 modules back. No-op when this is not an Xbox session. */
+    private void closeXboxSession() {
+        if (xboxLaunch == null) return;
+        xboxLaunch.close();
+        xboxLaunch = null;
+        com.winlator.star.store.xbox.XboxRuntime.INSTANCE.stop();
+        com.winlator.star.store.xbox.XboxRuntime.restoreSystem32(new File(imageFs.wineprefix, "drive_c/windows/system32"));
+    }
+
     private void exit() {
         eaRefusalHandler.removeCallbacks(eaRefusalWatchRunnable);
         if (exiting) return;
@@ -5510,8 +5525,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         ProcessHelper.resumeAllWineProcesses();
         // Epic EOS Phase 2: remove this game's short-lived Denuvo ownership token (.ovt)
         // from the wine prefix now that the session is ending. No-op for non-Epic games.
+        // Xbox with cloud saves on: the save helper's final upload needs the game ended first and our bridge and
+        // account service still up, so that session is closed after the sync, just before the teardown (below).
+        final boolean xboxSaveSync = xboxLaunch != null && com.winlator.star.store.xbox.XboxMainActivity.Companion.cloudSaves(this);
         try {
             if (shortcut != null) com.winlator.star.store.EpicLaunchArgs.cleanupOwnershipToken(this, shortcut);
+            if (!xboxSaveSync) closeXboxSession();
         } catch (Throwable ignored) {}
         installerWatchHandler.removeCallbacks(installerWatchRunnable);
         gameExitWatchHandler.removeCallbacks(gameExitWatchRunnable);
@@ -5719,7 +5738,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final com.winlator.star.linux.LinuxProgramLauncherComponent linuxLauncher = gamescopeMode && environment != null
                 ? environment.getComponent(com.winlator.star.linux.LinuxProgramLauncherComponent.class) : null;
         final File steamStopDir = linuxLiveDir;
-        if (linuxLauncher != null && steamStopDir != null && linuxLauncher.steamStopArmed(steamStopDir)) {
+        if (xboxSaveSync) {
+            final long teardownAt = android.os.SystemClock.uptimeMillis() + 1000;
+            final String exeName = xboxLaunch.getExe().getName();
+            preloaderDialog.hint(getString(R.string.xbox_saving_on_exit));
+            new Thread(() -> {
+                try {
+                    com.winlator.star.store.xbox.XboxSaveSync.finish(getApplicationContext(), exeName, 25000L);
+                } catch (Throwable t) {
+                    Log.w("XServerDisplayActivity", "Xbox save sync on exit failed", t);
+                } finally {
+                    try { closeXboxSession(); } catch (Throwable ignored) {}
+                    handler.postAtTime(teardown, teardownAt);
+                }
+            }, "xbox-save-sync").start();
+        } else if (linuxLauncher != null && steamStopDir != null && linuxLauncher.steamStopArmed(steamStopDir)) {
             final long teardownAt = android.os.SystemClock.uptimeMillis() + 1000;
             preloaderDialog.hint(getString(R.string.linux_steam_closing_saving_hint));
             new Thread(() -> {
@@ -11381,6 +11414,15 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 com.winlator.star.store.EpicGameFixes.applyPreLaunch(this, shortcut);
             }
 
+            // Xbox store game: the bridge port/key, service socket, save-sync mode and PlayFab token for the
+            // game's Xbox runtime modules, and those modules forced native (they sit next to the exe).
+            if (xboxLaunch != null) {
+                for (java.util.Map.Entry<String, String> e : xboxLaunch.getEnv().entrySet()) envVars.put(e.getKey(), e.getValue());
+                String overrides = envVars.has("WINEDLLOVERRIDES") ? envVars.get("WINEDLLOVERRIDES") : "";
+                String xbox = xboxLaunch.getOverrides();
+                envVars.put("WINEDLLOVERRIDES", overrides.isEmpty() ? xbox : xbox + ";" + overrides);
+            }
+
             // Real-Steam (VAC) launch (feature M3) — ENV injection. The staging + plan was built above by
             // maybeStageRealSteam() (before getWineStartCommand()). Merge the plan's WN_STEAM_* +
             // PROTON_DISABLE_LSTEAMCLIENT env HERE — after the container (5288) and shortcut/Epic env merges
@@ -15019,7 +15061,19 @@ return true;
             String execArgs = shortcut.getExtra("execArgs");
             execArgs = !execArgs.isEmpty() ? " " + execArgs : "";
 
-            if (shortcut.path.endsWith(".lnk")) {
+            if (xboxLaunch != null) {
+                // Xbox: run the licensed launch view's executable (inside imagefs, so on Z:), not the
+                // encrypted package file the shortcut points at.
+                String rel;
+                try {
+                    rel = imageFs.getRootDir().getCanonicalFile().toPath().relativize(xboxLaunch.getExe().getCanonicalFile().toPath()).toString();
+                } catch (java.io.IOException e) {
+                    rel = imageFs.getRootDir().toPath().relativize(xboxLaunch.getExe().toPath()).toString();
+                }
+                String win = "Z:\\" + rel.replace('/', '\\');
+                Log.i("BannerXbox", "start command exe: " + win + " (exists=" + xboxLaunch.getExe().isFile() + ")");
+                args += "/dir " + StringUtils.escapeDOSPath(FileUtils.getDirname(win)) + " \"" + FileUtils.getName(win) + "\"" + execArgs;
+            } else if (shortcut.path.endsWith(".lnk")) {
                 args += "\"" + shortcut.path + "\"" + execArgs;
             } else {
                 String exeDir = FileUtils.getDirname(shortcut.path);
@@ -16448,6 +16502,34 @@ return true;
     // Install the overlay component (idempotent CDN download) and write the OverlayPath pointer when
     // the toggle is on; strip the pointer when it's off so a disabled overlay leaves no stale key.
     // Runs on the background launch worker (sync file/reg/network I/O is ANR-safe there). Never throws.
+    /**
+     * Xbox store game (shortcut storeSource=xbox, xboxProductId=…): before Wine starts, sign the launch with
+     * the account service and materialise the licensed launch view inside imagefs (XboxRuntime.prepare).
+     * Runs on the launch worker; a failure stops the launch with the reason on the loading card.
+     */
+    private void prepareXboxLaunch() throws Exception {
+        File system32 = new File(imageFs.wineprefix, "drive_c/windows/system32");
+        if (shortcut == null || !"xbox".equals(shortcut.getExtra("storeSource"))) {
+            // An Xbox session that did not end cleanly may have left its modules in this container.
+            com.winlator.star.store.xbox.XboxRuntime.restoreSystem32(system32);
+            return;
+        }
+        String id = shortcut.getExtra("xboxProductId");
+        if (id == null || id.isEmpty()) throw new IllegalStateException("This Xbox shortcut has no product id; add the game again from the Xbox store.");
+        // Windows Runtime classes only the 32-bit registry view has (PropertySet: Xbox sign-in), added to the 64-bit view.
+        com.winlator.star.store.xbox.XboxWinRt.ensure(getApplicationContext(), new File(imageFs.wineprefix));
+        // What the game's MicrosoftGame.config declares (VC14), installed offline when this container lacks it.
+        com.winlator.star.store.xbox.XboxDependencies.ensure(getApplicationContext(), container, id, label -> {
+            preloaderDialog.step(2, label);
+            return kotlin.Unit.INSTANCE;
+        });
+        preloaderDialog.step(2, "Checking the Xbox license…");
+        xboxLaunch = com.winlator.star.store.xbox.XboxRuntime.INSTANCE.prepare(getApplicationContext(), id,
+                java.util.UUID.randomUUID().toString(), imageFs.getRootDir(),
+                system32,
+                com.winlator.star.store.xbox.XboxMainActivity.Companion.cloudSaves(this));
+    }
+
     private void provisionEpicOverlay() {
         if (shortcut == null || !"epic".equals(shortcut.getExtra("storeSource"))) return;
         File prefixDir = new File(ImageFs.find(this).wineprefix);
