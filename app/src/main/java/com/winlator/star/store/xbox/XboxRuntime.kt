@@ -31,12 +31,15 @@ object XboxRuntime {
         private val bridge: XboxBridge,
     ) : Closeable {
         @Volatile private var closed = false
+        /** Non-blocking (teardown may call it on the main thread): the backend children get up to 5 s to exit. */
         override fun close() {
             if (closed) return
             closed = true
-            runCatching { bridge.close() }
-            released(token)
-            XboxDiag.log(null, "launch released: $productId")
+            Thread({
+                runCatching { bridge.close() }
+                released(token)
+                XboxDiag.log(null, "launch released: $productId")
+            }, "xbox-launch-close").start()
         }
     }
 
