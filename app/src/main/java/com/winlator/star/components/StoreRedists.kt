@@ -115,7 +115,7 @@ object StoreRedists {
     }
 
     private fun xboxList(dirs: List<File>): List<DependencyDetector.Recommendation> {
-        val game = dirs.firstOrNull { File(it, "MicrosoftGame.config").isFile } ?: return emptyList()
+        val game = dirs.firstOrNull { com.winlator.star.store.xbox.XboxDependencies.configFile(it) != null } ?: return emptyList()
         return com.winlator.star.store.xbox.XboxDependencies.components(game)
             .map { (dependency, component) -> rec(component, "The Microsoft Store installs $dependency with this game") }
     }

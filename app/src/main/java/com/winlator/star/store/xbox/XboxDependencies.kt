@@ -17,9 +17,13 @@ object XboxDependencies {
     private val KNOWN = Regex("""<KnownDependency\s+Name="([A-Za-z0-9_.-]{1,40})"""")
     private const val INSTALLS_PREFS = "component_installs"
 
+    @JvmStatic fun configFile(folder: File): File? =
+        folder.listFiles().orEmpty().firstOrNull { it.isFile && it.name.equals("MicrosoftGame.config", ignoreCase = true) }
+
     /** The game's known dependencies (as named in the config) with their components; unknown ones are left out. */
     @JvmStatic fun components(gameFolder: File): List<Pair<String, String>> = runCatching {
-        val config = File(gameFolder, "MicrosoftGame.config").takeIf { it.isFile && it.length() < 1L shl 20 } ?: return emptyList()
+        // The name's case varies between games (MicrosoftGame.Config in Cyberpunk 2077).
+        val config = configFile(gameFolder)?.takeIf { it.length() < 1L shl 20 } ?: return emptyList()
         KNOWN.findAll(config.readText()).mapNotNull { m -> COMPONENTS[m.groupValues[1]]?.let { m.groupValues[1] to it } }.distinct().toList()
     }.getOrDefault(emptyList())
 
