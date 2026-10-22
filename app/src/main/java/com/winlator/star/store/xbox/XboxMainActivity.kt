@@ -107,6 +107,7 @@ class XboxMainActivity : ComponentActivity() {
     }
 
     private var account by mutableStateOf<String?>(null)
+    private var shownName by mutableStateOf("")
     private var startTab by mutableStateOf(1)
     private var message by mutableStateOf<String?>(null)
 
@@ -124,6 +125,7 @@ class XboxMainActivity : ComponentActivity() {
                     XboxStorefrontHost(
                         initialTab = startTab,
                         account = signedIn,
+                        shownName = shownName.ifBlank { XboxAccountStore.mask(signedIn) },
                         externalMessage = message,
                         onExternalMessageShown = { message = null },
                         onSignOut = { signOut() },
@@ -146,7 +148,14 @@ class XboxMainActivity : ComponentActivity() {
     }
 
     private fun refreshAccount() {
-        Thread { val name = XboxAccountStore.signedInAs(applicationContext); runOnUiThread { account = name } }.start()
+        Thread {
+            val app = applicationContext
+            val name = XboxAccountStore.signedInAs(app)
+            runOnUiThread { account = name; shownName = XboxAccountStore.displayName(app).orEmpty() }
+            // Accounts signed in before the gamertag was kept get it now.
+            if (name != null && XboxAccountStore.read(app)?.optString("gamertag").isNullOrBlank() && XboxAccountStore.refreshGamertag(app))
+                runOnUiThread { shownName = XboxAccountStore.displayName(app).orEmpty() }
+        }.start()
     }
 
     private fun signOut() {
@@ -232,6 +241,7 @@ fun rememberXboxLibrary(account: String, onMessage: (String) -> Unit): XboxLibra
 private fun XboxStorefrontHost(
     initialTab: Int,
     account: String,
+    shownName: String,
     externalMessage: String?,
     onExternalMessageShown: () -> Unit,
     onSignOut: () -> Unit,
@@ -252,9 +262,9 @@ private fun XboxStorefrontHost(
         onClose = onClose,
         counts = mapOf("library" to library.games.size),
         statusSlot = {
-            Text(account, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            Text(shownName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         },
-        railStatusSlot = { StoreAvatar(emptyList(), account, 36.dp) },
+        railStatusSlot = { StoreAvatar(emptyList(), shownName, 36.dp) },
         actions = {
             IconButton(onClick = { library.refresh(true) }, modifier = Modifier.steamFocusRing()) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Sync library", tint = MaterialTheme.colorScheme.primary)
@@ -277,7 +287,7 @@ private fun XboxStorefrontHost(
         when (XBOX_TABS[tab].key) {
             "store" -> XboxStoreTab(library, wide, ::open, mod)
             "library" -> XboxLibraryTab(library, wide, ::open, mod)
-            else -> XboxProfileTab(account, library, mod)
+            else -> XboxProfileTab(shownName, library, mod)
         }
     }
 }

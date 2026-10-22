@@ -61,7 +61,38 @@ internal object XboxAccountStore {
         File(dir(app), "$RECORD.tmp").delete()
     }
 
-    /** The signed-in account's name, or null when signed out. */
+    /**
+     * What the store shows for the signed-in account: its Xbox gamertag, else the sign-in email with the
+     * part before the @ masked. Never the full email. Null when signed out.
+     */
+    fun displayName(app: Context): String? {
+        val record = read(app) ?: return null
+        record.optString("gamertag").takeIf { it.isNotBlank() }?.let { return it }
+        return mask(record.optString("username")).takeIf { it.isNotBlank() }
+    }
+
+    fun mask(name: String): String {
+        val at = name.indexOf('@')
+        return if (at <= 0) name.take(1) + "•••" else name.take(1) + "•••" + name.substring(at)
+    }
+
+    /** Reads the account's gamertag from Xbox (`xodus-cli profile`) and keeps it in the record; false when it couldn't. */
+    fun refreshGamertag(app: Context, credentialGeneration: String? = null): Boolean = try {
+        val gamertag = Xodus.run(app, listOf("profile", "--json"), timeout = 30, credentialGeneration = credentialGeneration)
+            .optString("gamertag").trim()
+        require(gamertag.isNotEmpty() && gamertag.length <= 64 && gamertag.none { it.isISOControl() })
+        XboxCredentials.lifecycle(app, credentialGeneration) {
+            val record = read(app) ?: error("Xbox account missing")
+            record.put("gamertag", gamertag)
+            write(app, record)
+        }
+        true
+    } catch (e: Exception) {
+        XboxDiag.log(app, "gamertag unavailable: ${e.javaClass.simpleName}")
+        false
+    }
+
+    /** The signed-in account's name (its sign-in email; used as a cache key, not for display), or null when signed out. */
     fun signedInAs(app: Context): String? =
         read(app)?.optString("username")?.takeIf { it.isNotBlank() }
 

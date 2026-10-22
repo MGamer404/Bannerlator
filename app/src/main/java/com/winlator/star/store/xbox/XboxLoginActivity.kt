@@ -113,6 +113,7 @@ class XboxLoginActivity : ComponentActivity() {
                     record.put("username", account.getString("username"))
                     XboxAccountStore.write(this, record)
                 }
+                XboxAccountStore.refreshGamertag(applicationContext, accountGeneration)
                 XboxDiag.log(applicationContext, "sign-in complete")
                 runOnUiThread { setResult(RESULT_OK); finish() }
             } catch (e: Exception) {
