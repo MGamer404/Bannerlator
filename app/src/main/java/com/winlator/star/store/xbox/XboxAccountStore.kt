@@ -36,7 +36,7 @@ internal object XboxAccountStore {
             require(bytes.size in 13..8_000_000)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes, 0, 12))
-            JSONObject(String(cipher.doFinal(bytes, 12, bytes.size - 12), Charsets.UTF_8)).also { unavailable = false }
+            JSONObject(String(cipher.doFinal(bytes, 12, bytes.size - 12), Charsets.UTF_8)).also { unavailable = false; scrub(it) }
         } catch (e: Exception) {
             unavailable = true
             XboxDiag.log(app, "account record unreadable: ${e.javaClass.simpleName}")
@@ -44,7 +44,14 @@ internal object XboxAccountStore {
         }
     }
 
+    /** Keeps the account's sign-in name and gamertag out of every log the shared scrubber handles, as Steam's are. */
+    private fun scrub(record: JSONObject) {
+        com.winlator.star.store.SteamLogRedactor.registerSecret(record.optString("username"))
+        com.winlator.star.store.SteamLogRedactor.registerSecret(record.optString("gamertag"))
+    }
+
     fun write(app: Context, record: JSONObject) {
+        scrub(record)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
         val sealed = cipher.iv + cipher.doFinal(record.toString().toByteArray(Charsets.UTF_8))

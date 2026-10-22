@@ -21,7 +21,9 @@ object XboxDiag {
 
     fun file(): File = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Bannerlator/xbox_diag.txt")
 
-    @Synchronized fun log(app: Context?, line: String) {
+    @Synchronized fun log(app: Context?, message: String) {
+        // Lines are allow-listed where they are made; the shared scrubber is the backstop (account names, emails, tokens).
+        val line = com.winlator.star.store.SteamLogRedactor.redact(message)
         Log.i(TAG, line)
         runCatching {
             val f = file()
