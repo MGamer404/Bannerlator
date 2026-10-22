@@ -5522,6 +5522,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 xboxLaunch.close();
                 xboxLaunch = null;
                 com.winlator.star.store.xbox.XboxRuntime.INSTANCE.stop();
+                com.winlator.star.store.xbox.XboxRuntime.restoreSystem32(new File(imageFs.wineprefix, "drive_c/windows/system32"));
             }
         } catch (Throwable ignored) {}
         installerWatchHandler.removeCallbacks(installerWatchRunnable);
@@ -16486,13 +16487,18 @@ return true;
      * Runs on the launch worker; a failure stops the launch with the reason on the loading card.
      */
     private void prepareXboxLaunch() throws Exception {
-        if (shortcut == null || !"xbox".equals(shortcut.getExtra("storeSource"))) return;
+        File system32 = new File(imageFs.wineprefix, "drive_c/windows/system32");
+        if (shortcut == null || !"xbox".equals(shortcut.getExtra("storeSource"))) {
+            // An Xbox session that did not end cleanly may have left its modules in this container.
+            com.winlator.star.store.xbox.XboxRuntime.restoreSystem32(system32);
+            return;
+        }
         String id = shortcut.getExtra("xboxProductId");
         if (id == null || id.isEmpty()) throw new IllegalStateException("This Xbox shortcut has no product id; add the game again from the Xbox store.");
         preloaderDialog.step(2, "Checking the Xbox license…");
         xboxLaunch = com.winlator.star.store.xbox.XboxRuntime.INSTANCE.prepare(getApplicationContext(), id,
                 java.util.UUID.randomUUID().toString(), imageFs.getRootDir(),
-                new File(imageFs.wineprefix, "drive_c/windows/system32"),
+                system32,
                 com.winlator.star.store.xbox.XboxMainActivity.Companion.cloudSaves(this));
     }
 

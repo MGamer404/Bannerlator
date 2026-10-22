@@ -100,7 +100,7 @@ object XboxRuntime {
             check(launches.renew(token, id, account, sessionId) && synchronized(state) { generation == current }) { "Xbox launch was cancelled" }
             val exe = File(view.getString("exe"))
             check(exe.isFile) { "The Xbox launch view has no executable." }
-            stageModules(app, exe.parentFile!!, system32)
+            stageModules(app, system32)
             val bridge = XboxBridge(socket.path)
             val env = LinkedHashMap<String, String>()
             env["XODUS_SOCKET"] = socket.path
@@ -199,31 +199,40 @@ object XboxRuntime {
     val DLLS = listOf("xgameruntime.dll", "winhttp.dll", "windows.web.dll", "twinapi.appcore.dll", "libnghttp2.dll")
     val DLL_OVERRIDES: String = DLLS.filter { it != "libnghttp2.dll" }.joinToString(";") { it.removeSuffix(".dll") + "=n" }
 
-    /** Loaded by GDK and WinHTTP with LOAD_LIBRARY_SEARCH_SYSTEM32, so they must be in the prefix's system32. Wine has no builtins of these. */
-    private val SYSTEM32_DLLS = listOf("xgameruntime.dll", "libnghttp2.dll")
+    /** Suffix of the container's own copy of a module we replace in system32, put back after the session. */
+    private const val ORIGINAL = ".bannerlator-wine"
 
     /**
-     * Puts the modules next to the game's materialised executable (WINEDLLOVERRIDES=...=n makes Wine use those
-     * for winhttp / windows.web / twinapi.appcore, which have builtins), and xgameruntime.dll + libnghttp2.dll
-     * into the container's system32 (as DroidDeck does), replacing them only when the bytes differ.
+     * Installs the modules into the container's system32, as DroidDeck does: GDK loads xgameruntime.dll and WinHTTP
+     * loads libnghttp2.dll with LOAD_LIBRARY_SEARCH_SYSTEM32, and WinRT activates windows.web.dll by its system32
+     * path, so copies next to the exe are not found. The container's own winhttp / windows.web / twinapi.appcore
+     * are kept as <name>.bannerlator-wine and put back by [restoreSystem32] when the session ends.
      */
-    fun stageModules(app: Context, exeDir: File, system32: File) {
+    fun stageModules(app: Context, system32: File) {
+        check(system32.isDirectory) { "This container's Wine prefix has no system32 folder." }
         val source = windowsModules(app)
         for (name in DLLS) {
-            val target = File(exeDir, name)
-            if (target.exists() && !java.nio.file.Files.isSymbolicLink(target.toPath()) && name == "libnghttp2.dll") continue
-            if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
-            File(source, name).copyTo(target, overwrite = true)
-        }
-        check(system32.isDirectory) { "This container's Wine prefix has no system32 folder." }
-        for (name in SYSTEM32_DLLS) {
             val bytes = File(source, name).readBytes()
             val target = File(system32, name)
-            if (target.isFile && !java.nio.file.Files.isSymbolicLink(target.toPath()) && target.readBytes().contentEquals(bytes)) continue
+            if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
+            if (target.isFile && target.readBytes().contentEquals(bytes)) continue
+            val original = File(system32, name + ORIGINAL)
+            if (target.isFile && !original.exists()) check(target.renameTo(original)) { "Could not keep the container's $name." }
             val tmp = File(system32, "$name.xbox-tmp")
             tmp.writeBytes(bytes)
             check(tmp.renameTo(target)) { "Could not install $name into the container." }
-            XboxDiag.log(app, "staged $name into the container's system32")
+        }
+        XboxDiag.log(app, "Xbox modules staged in the container's system32")
+    }
+
+    /** Puts back the container's own modules that [stageModules] replaced. Safe to call for any container. */
+    @JvmStatic fun restoreSystem32(system32: File) {
+        for (name in DLLS) {
+            val original = File(system32, name + ORIGINAL)
+            if (!original.isFile) continue
+            val target = File(system32, name)
+            target.delete()
+            original.renameTo(target)
         }
     }
 }
