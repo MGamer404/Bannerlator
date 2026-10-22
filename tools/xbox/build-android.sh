@@ -57,7 +57,14 @@ export CXX_aarch64_linux_android="$tc/bin/aarch64-linux-android$api-clang++"
 export AR_aarch64_linux_android="$tc/bin/llvm-ar"
 export RANLIB_aarch64_linux_android="$tc/bin/llvm-ranlib"
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$tc/bin/aarch64-linux-android$api-clang"
-export CMAKE_TOOLCHAIN_FILE_aarch64_linux_android="$ndk/build/cmake/android.toolchain.cmake"
+# The NDK's CMake toolchain reads ANDROID_ABI / ANDROID_PLATFORM as CMake variables (not env vars) and
+# otherwise defaults to 32-bit ARM; a wrapper sets them for every cmake-built -sys crate (libz-ng-sys …).
+cat > "$cache/android-arm64.toolchain.cmake" <<CMAKE
+set(ANDROID_ABI arm64-v8a)
+set(ANDROID_PLATFORM android-$api)
+include("$ndk/build/cmake/android.toolchain.cmake")
+CMAKE
+export CMAKE_TOOLCHAIN_FILE_aarch64_linux_android="$cache/android-arm64.toolchain.cmake"
 export ANDROID_ABI=arm64-v8a ANDROID_PLATFORM="android-$api"
 cd "$source_dir"
 cargo build --locked --release --no-default-features --target aarch64-linux-android -p xodus-cli -p xodus-service
