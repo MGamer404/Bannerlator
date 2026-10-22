@@ -518,6 +518,8 @@ fun CatalogLibraryTile(
     modifier: Modifier = Modifier,
     /** Small text pill over the art's top-left corner ("Gen 2", "EOS"); null = none. */
     badgeText: String? = null,
+    /** Shown in place of the Play / Download button while the game downloads ("Downloading 34%"); null = the button. */
+    progressLabel: String? = null,
 ) {
     val shape = RoundedCornerShape(10.dp)
     Column(
@@ -567,7 +569,16 @@ fun CatalogLibraryTile(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            CatalogActionButton(
+            if (progressLabel != null) {
+                Text(
+                    text = progressLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                )
+            } else CatalogActionButton(
                 action = CatalogAction.Open(installed),
                 storeLabel = "",
                 onClick = onOpen,

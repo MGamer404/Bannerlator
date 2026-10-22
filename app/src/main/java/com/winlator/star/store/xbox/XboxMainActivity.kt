@@ -69,6 +69,7 @@ import com.winlator.star.store.StoreSectionHost
 import com.winlator.star.store.StoreSectionTab
 import com.winlator.star.store.catalogRail
 import com.winlator.star.store.download.DownloadRegistry
+import androidx.compose.runtime.collectAsState
 import com.winlator.star.store.download.DownloadsButton
 import com.winlator.star.store.download.Store
 import com.winlator.star.store.download.StoreSection
@@ -316,6 +317,7 @@ private fun XboxLibraryTab(state: XboxLibraryState, wide: Boolean, onOpen: (Xbox
             Spacer(Modifier.weight(1f))
             Text(state.statusText, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
+        val downloads by DownloadRegistry.entries.collectAsState()
         when {
             state.games.isEmpty() && state.syncing -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 StoreNotice(title = "Syncing your library", body = "Fetching the PC games your account owns or has through PC Game Pass…")
@@ -337,8 +339,13 @@ private fun XboxLibraryTab(state: XboxLibraryState, wide: Boolean, onOpen: (Xbox
             ) {
                 items(shown, key = { it.id }) { g ->
                     val installed = g.id in state.installedIds
+                    val download = downloads.firstOrNull { it.store == com.winlator.star.store.download.Store.XBOX && it.id == g.id }
+                        ?.takeIf { it.state == com.winlator.star.store.download.DownloadState.DOWNLOADING ||
+                            it.state == com.winlator.star.store.download.DownloadState.QUEUED ||
+                            it.state == com.winlator.star.store.download.DownloadState.PAUSED }
                     CatalogLibraryTile(item = XboxMainActivity.toCatalogItem(g, installed), installed = installed,
-                        onOpen = { onOpen(g) }, badgeText = if (g.gamePass) "Game Pass" else null)
+                        onOpen = { onOpen(g) }, badgeText = if (g.gamePass) "Game Pass" else null,
+                        progressLabel = download?.let { "Downloading ${it.pct}%" })
                 }
             }
         }
