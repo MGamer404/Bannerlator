@@ -60,6 +60,8 @@ class XboxGameDetailActivity : ComponentActivity() {
     private var progressLabel by mutableStateOf("")
     private var busy by mutableStateOf<String?>(null)
     private var status by mutableStateOf<String?>(null)
+    private var addToShortcuts by mutableStateOf<com.winlator.star.store.compose.AddToShortcutsRequest?>(null)
+    private var addResult by mutableStateOf<com.winlator.star.store.compose.AddShortcutResult?>(null)
 
     @OptIn(ExperimentalLayoutApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,6 +92,30 @@ class XboxGameDetailActivity : ComponentActivity() {
                         add(StoreGearItem("🔄", "Update / verify") { update(inst) })
                         add(StoreGearItem("🗑️", "Uninstall", danger = true, onClick = ::confirmUninstall))
                     }
+                }
+                addToShortcuts?.let { req ->
+                    com.winlator.star.store.compose.ContainerPickerDialog(
+                        gameName = req.gameName,
+                        containers = req.containers,
+                        onDismiss = { addToShortcuts = null },
+                        onSelected = { container ->
+                            addToShortcuts = null
+                            StarLaunchBridge.writeShortcutAsync(this@XboxGameDetailActivity, container, req.gameName, req.exePath,
+                                req.coverUrl, 0, null, "xbox:${game.id}", false) { success, message ->
+                                addResult = com.winlator.star.store.compose.AddShortcutResult(req.gameName, success, message)
+                            }
+                        },
+                    )
+                }
+                addResult?.let { result ->
+                    com.winlator.star.store.compose.AddResultDialog(
+                        result = result,
+                        onOpenShortcuts = {
+                            addResult = null
+                            com.winlator.star.store.compose.openShortcutsScreen(this@XboxGameDetailActivity)
+                        },
+                        onDismiss = { addResult = null },
+                    )
                 }
                 StoreDetailScaffold(
                     onBack = { finish() },
@@ -192,8 +218,11 @@ class XboxGameDetailActivity : ComponentActivity() {
 
     private fun addToGames() {
         val inst = installed ?: return
-        StarLaunchBridge.addToLauncher(this, game.title, File(inst.folder, inst.exe).path, game.posterUrl ?: game.heroUrl,
-            "xbox:${game.id}", false)
+        // The shared Compose flow (as on the Steam pages): container picker, then "Added to Shortcuts" with Open Shortcuts.
+        val exe = File(inst.folder, inst.exe).path
+        StarLaunchBridge.loadContainers(this) { containers ->
+            addToShortcuts = com.winlator.star.store.compose.AddToShortcutsRequest(game.title, exe, game.posterUrl ?: game.heroUrl, containers)
+        }
     }
 
     private fun confirmUninstall() {
