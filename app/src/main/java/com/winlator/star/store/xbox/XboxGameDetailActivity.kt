@@ -54,7 +54,7 @@ class XboxGameDetailActivity : ComponentActivity() {
     private lateinit var game: XboxGame
     private var installed by mutableStateOf<XboxInstallState.Installed?>(null)
     private var downloading by mutableStateOf(false)
-    private var progress by mutableStateOf(0)
+    private var progressPct by mutableStateOf(0)
     private var progressLabel by mutableStateOf("")
     private var busy by mutableStateOf<String?>(null)
     private var status by mutableStateOf<String?>(null)
@@ -76,7 +76,7 @@ class XboxGameDetailActivity : ComponentActivity() {
                 var tab by androidx.compose.runtime.remember { mutableStateOf(0) }
                 val inst = installed
                 val primary = when {
-                    downloading -> StorePrimaryAction.Progress(progressLabel.ifBlank { "Downloading… $progress%" }, progress / 100f)
+                    downloading -> StorePrimaryAction.Progress(progressLabel.ifBlank { "Downloading… $progressPct%" }, progressPct / 100f)
                     busy != null -> StorePrimaryAction.Progress(busy!!, 0f)
                     inst != null -> StorePrimaryAction.Button("Add to Games", ::addToGames)
                     game.access.isEmpty() -> StorePrimaryAction.Button("Not in your library", {}, enabled = false)
@@ -152,7 +152,7 @@ class XboxGameDetailActivity : ComponentActivity() {
                 val e = list.firstOrNull { it.key == key }
                 if (e != null && (e.state == DownloadState.DOWNLOADING || e.state == DownloadState.PAUSED || e.state == DownloadState.QUEUED)) {
                     downloading = true
-                    progress = e.pct
+                    progressPct = e.pct
                     progressLabel = if (e.installTotal > 0 && e.installDone > 0)
                         "${e.pct}%  (${formatDownloadSize(e.installDone)} / ${formatDownloadSize(e.installTotal)})" else "Downloading… ${e.pct}%"
                 } else {
