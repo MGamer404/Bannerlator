@@ -5496,6 +5496,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // one exit). Latch the first call; ignore the rest. exit() is always on the main thread.
     private volatile boolean exiting = false;
 
+    /** Ends the Xbox lease (removes the launch view) and the bridge, then the account service, and puts the
+     *  container's own system32 modules back. No-op when this is not an Xbox session. */
+    private void closeXboxSession() {
+        if (xboxLaunch == null) return;
+        xboxLaunch.close();
+        xboxLaunch = null;
+        com.winlator.star.store.xbox.XboxRuntime.INSTANCE.stop();
+        com.winlator.star.store.xbox.XboxRuntime.restoreSystem32(new File(imageFs.wineprefix, "drive_c/windows/system32"));
+    }
+
     private void exit() {
         eaRefusalHandler.removeCallbacks(eaRefusalWatchRunnable);
         if (exiting) return;
@@ -5515,15 +5525,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         ProcessHelper.resumeAllWineProcesses();
         // Epic EOS Phase 2: remove this game's short-lived Denuvo ownership token (.ovt)
         // from the wine prefix now that the session is ending. No-op for non-Epic games.
+        // Xbox with cloud saves on: the save helper's final upload needs the game ended first and our bridge and
+        // account service still up, so that session is closed after the sync, just before the teardown (below).
+        final boolean xboxSaveSync = xboxLaunch != null && com.winlator.star.store.xbox.XboxMainActivity.Companion.cloudSaves(this);
         try {
             if (shortcut != null) com.winlator.star.store.EpicLaunchArgs.cleanupOwnershipToken(this, shortcut);
-            if (xboxLaunch != null) {
-                // Ends the lease (removes the launch view) and the bridge, then the account service.
-                xboxLaunch.close();
-                xboxLaunch = null;
-                com.winlator.star.store.xbox.XboxRuntime.INSTANCE.stop();
-                com.winlator.star.store.xbox.XboxRuntime.restoreSystem32(new File(imageFs.wineprefix, "drive_c/windows/system32"));
-            }
+            if (!xboxSaveSync) closeXboxSession();
         } catch (Throwable ignored) {}
         installerWatchHandler.removeCallbacks(installerWatchRunnable);
         gameExitWatchHandler.removeCallbacks(gameExitWatchRunnable);
@@ -5731,7 +5738,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final com.winlator.star.linux.LinuxProgramLauncherComponent linuxLauncher = gamescopeMode && environment != null
                 ? environment.getComponent(com.winlator.star.linux.LinuxProgramLauncherComponent.class) : null;
         final File steamStopDir = linuxLiveDir;
-        if (linuxLauncher != null && steamStopDir != null && linuxLauncher.steamStopArmed(steamStopDir)) {
+        if (xboxSaveSync) {
+            final long teardownAt = android.os.SystemClock.uptimeMillis() + 1000;
+            final String exeName = xboxLaunch.getExe().getName();
+            preloaderDialog.hint(getString(R.string.xbox_saving_on_exit));
+            new Thread(() -> {
+                try {
+                    com.winlator.star.store.xbox.XboxSaveSync.finish(getApplicationContext(), exeName, 25000L);
+                } catch (Throwable t) {
+                    Log.w("XServerDisplayActivity", "Xbox save sync on exit failed", t);
+                } finally {
+                    try { closeXboxSession(); } catch (Throwable ignored) {}
+                    handler.postAtTime(teardown, teardownAt);
+                }
+            }, "xbox-save-sync").start();
+        } else if (linuxLauncher != null && steamStopDir != null && linuxLauncher.steamStopArmed(steamStopDir)) {
             final long teardownAt = android.os.SystemClock.uptimeMillis() + 1000;
             preloaderDialog.hint(getString(R.string.linux_steam_closing_saving_hint));
             new Thread(() -> {
