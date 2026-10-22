@@ -25,6 +25,11 @@ class BannerlatorApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        // The Xbox sign-in window runs in its own process (":xboxlogin", isolated WebView data). None of
+        // the start-up work below belongs there; the xinput restore in particular must never run beside a
+        // live game session in the main process.
+        if (com.winlator.star.store.xbox.XboxLoginActivity.isLoginProcess()) return
+
         // Crash reporting first and on its own: it must be installed before anything below can throw,
         // and it must not be inside the try/catch that swallows perf-init failures. It chains to the
         // handler already in place, so the perf safety nets installed just after still run.
