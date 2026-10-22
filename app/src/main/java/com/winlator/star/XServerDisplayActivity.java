@@ -11419,7 +11419,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (xboxLaunch != null) {
                 for (java.util.Map.Entry<String, String> e : xboxLaunch.getEnv().entrySet()) envVars.put(e.getKey(), e.getValue());
                 String overrides = envVars.has("WINEDLLOVERRIDES") ? envVars.get("WINEDLLOVERRIDES") : "";
-                String xbox = com.winlator.star.store.xbox.XboxRuntime.INSTANCE.getDLL_OVERRIDES();
+                String xbox = xboxLaunch.getOverrides();
                 envVars.put("WINEDLLOVERRIDES", overrides.isEmpty() ? xbox : xbox + ";" + overrides);
             }
 

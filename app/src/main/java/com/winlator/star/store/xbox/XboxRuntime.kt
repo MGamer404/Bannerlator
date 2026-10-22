@@ -27,6 +27,8 @@ object XboxRuntime {
         val exe: File,
         /** Environment for the game process (bridge port/key, service socket, save sync, PlayFab token). */
         val env: Map<String, String>,
+        /** WINEDLLOVERRIDES entries forcing this launch's staged modules native. */
+        val overrides: String,
         private val token: String,
         private val bridge: XboxBridge,
         private val viewRoot: File? = null,
@@ -106,7 +108,12 @@ object XboxRuntime {
             check(launches.renew(token, id, account, sessionId) && synchronized(state) { generation == current }) { "Xbox launch was cancelled" }
             val exe = File(view.getString("exe"))
             check(exe.isFile) { "The Xbox launch view has no executable." }
-            stageModules(app, system32)
+            // Proton builds whose wintypes.dll predates Windows.Foundation.Collections.PropertySet (Proton 10) get
+            // Xodus Nexus' wintypes for the session; Xbox sign-in needs that class.
+            val compat = COMPAT_DLLS.filter { needsCompat(it, system32) }
+            stageModules(app, system32, compat)
+            if (compat.isNotEmpty()) XboxWinRt.require(app, system32.parentFile!!.parentFile!!.parentFile!!, PROPERTY_SET, "wintypes.dll")
+            val overrides = (DLLS + compat).filter { it != "libnghttp2.dll" }.joinToString(";") { it.removeSuffix(".dll") + "=n" }
             // The view's root mirrors the install folder; game.exe is relative to both.
             val viewRoot = File(exe.path.removeSuffix(game.exe).trimEnd('/')).takeIf { exe.path.endsWith(game.exe) }
             val localAppData = File(system32.parentFile?.parentFile, "users/xuser/AppData/Local")
@@ -128,7 +135,7 @@ object XboxRuntime {
                 com.winlator.star.store.SteamLogRedactor.registerSecret(header.substringAfterLast(';'))
             }
             XboxDiag.log(app, "launch prepared: $id view=${directory.name} bridge=127.0.0.1:${bridge.port}")
-            return Launch(id, exe, env, token, bridge, viewRoot, File(game.folder), viewFiles)
+            return Launch(id, exe, env, overrides, token, bridge, viewRoot, File(game.folder), viewFiles)
         } catch (e: Exception) {
             XboxDiag.log(app, "launch prepare failed: ${e.javaClass.simpleName}")
             released(token); throw e
@@ -195,7 +202,7 @@ object XboxRuntime {
         val marker = File(dir, ".version")
         if (version.isNotEmpty() && runCatching { marker.readText() }.getOrNull() == version) return dir
         dir.mkdirs()
-        for (name in DLLS) {
+        for (name in DLLS + COMPAT_DLLS) {
             val target = File(dir, name)
             val tmp = File(dir, "$name.tmp")
             app.assets.open("xbox/windows/$name").use { input -> tmp.outputStream().use { input.copyTo(it) } }
@@ -207,7 +214,25 @@ object XboxRuntime {
 
     /** The Xbox runtime modules; all but libnghttp2 are Wine builtins overridden to native. */
     val DLLS = listOf("xgameruntime.dll", "winhttp.dll", "windows.web.dll", "twinapi.appcore.dll", "libnghttp2.dll")
-    val DLL_OVERRIDES: String = DLLS.filter { it != "libnghttp2.dll" }.joinToString(";") { it.removeSuffix(".dll") + "=n" }
+    /** Staged only for containers whose own copy lacks what Xbox games need (see [needsCompat]). */
+    val COMPAT_DLLS = listOf("wintypes.dll")
+    private const val PROPERTY_SET = "Windows.Foundation.Collections.PropertySet"
+
+    /** True when the container's own [name] lacks the class the Xbox runtime needs from it. */
+    private fun needsCompat(name: String, system32: File): Boolean = when (name) {
+        // The container's own copy: the kept original if an earlier session staged ours and did not end cleanly.
+        "wintypes.dll" -> runCatching { (File(system32, name + ORIGINAL).takeIf { it.isFile } ?: File(system32, name)).readBytes() }.getOrNull()
+            ?.let { indexOf(it, PROPERTY_SET.toByteArray(Charsets.UTF_16LE)) < 0 } ?: true
+        else -> false
+    }
+
+    private fun indexOf(data: ByteArray, needle: ByteArray): Int {
+        outer@ for (i in 0..data.size - needle.size) {
+            for (j in needle.indices) if (data[i + j] != needle[j]) continue@outer
+            return i
+        }
+        return -1
+    }
 
     /** Suffix of the container's own copy of a module we replace in system32, put back after the session. */
     private const val ORIGINAL = ".bannerlator-wine"
@@ -218,10 +243,10 @@ object XboxRuntime {
      * path, so copies next to the exe are not found. The container's own winhttp / windows.web / twinapi.appcore
      * are kept as <name>.bannerlator-wine and put back by [restoreSystem32] when the session ends.
      */
-    fun stageModules(app: Context, system32: File) {
+    fun stageModules(app: Context, system32: File, compat: List<String> = emptyList()) {
         check(system32.isDirectory) { "This container's Wine prefix has no system32 folder." }
         val source = windowsModules(app)
-        for (name in DLLS) {
+        for (name in DLLS + compat) {
             val bytes = File(source, name).readBytes()
             val target = File(system32, name)
             if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
@@ -232,12 +257,12 @@ object XboxRuntime {
             tmp.writeBytes(bytes)
             check(tmp.renameTo(target)) { "Could not install $name into the container." }
         }
-        XboxDiag.log(app, "Xbox modules staged in the container's system32")
+        XboxDiag.log(app, "Xbox modules staged in the container's system32" + if (compat.isEmpty()) "" else " (+ ${compat.joinToString()} for this Proton)")
     }
 
     /** Puts back the container's own modules that [stageModules] replaced. Safe to call for any container. */
     @JvmStatic fun restoreSystem32(system32: File) {
-        for (name in DLLS) {
+        for (name in DLLS + COMPAT_DLLS) {
             val original = File(system32, name + ORIGINAL)
             if (!original.isFile) continue
             val target = File(system32, name)

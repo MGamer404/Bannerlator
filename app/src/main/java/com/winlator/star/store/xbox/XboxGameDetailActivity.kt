@@ -98,6 +98,9 @@ class XboxGameDetailActivity : ComponentActivity() {
                         gameName = req.gameName,
                         containers = req.containers,
                         onDismiss = { addToShortcuts = null },
+                        // Proton older than 11 lacks Windows' PropertySet; Xbox sign-in then uses a compatibility module.
+                        note = { c -> Regex("""Proton-(\d+)""").find(c.wineVersion.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
+                            ?.takeIf { it < 11 }?.let { "Older Proton: Xbox sign-in uses a compatibility module. Proton 11 recommended." } },
                         onSelected = { container ->
                             addToShortcuts = null
                             StarLaunchBridge.writeShortcutAsync(this@XboxGameDetailActivity, container, req.gameName, req.exePath,

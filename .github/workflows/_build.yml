@@ -679,7 +679,7 @@ jobs:
         rm -rf app/src/main/assets/xbox && mkdir -p app/src/main/assets/xbox/windows
         cp "$O"/windows/*.dll app/src/main/assets/xbox/windows/
         cp "$O"/version "$O"/LICENSE.* "$O"/*.lock.json app/src/main/assets/xbox/
-        test "$(ls app/src/main/assets/xbox/windows/*.dll | wc -l)" = 5
+        test "$(ls app/src/main/assets/xbox/windows/*.dll | wc -l)" = 6
         ls -l app/src/main/jniLibs/arm64-v8a/libxodus_*.so app/src/main/assets/xbox app/src/main/assets/xbox/windows
 
     - name: Restore Galaxy Performance SDK jar (optional, from secret)

@@ -18,6 +18,18 @@ object XboxWinRt {
     private val NATIVE_KEY = Regex("""^\[Software\\\\Microsoft\\\\WindowsRuntime\\\\ActivatableClassId\\\\([^\]\\]+)\]""")
     private val DLL_PATH = Regex("""^"DllPath"="C:\\\\windows\\\\system32\\\\([^"\\]+)"""", RegexOption.IGNORE_CASE)
 
+    /** Registers [cls] in the 64-bit view as [dll] in system32, when it is not registered there. */
+    fun require(app: Context, prefix: File, cls: String, dll: String) {
+        val systemReg = File(prefix, "system.reg")
+        val present = runCatching { systemReg.readLines() }.getOrNull()?.any { NATIVE_KEY.find(it)?.groupValues?.get(1) == cls } ?: return
+        if (present) return
+        WineRegistryEditor(systemReg).use { editor ->
+            editor.setCreateKeyIfNotExist(true)
+            editor.setStringValue(ROOT + cls, "DllPath", "C:\\windows\\system32\\$dll")
+        }
+        XboxDiag.log(app, "registered $cls ($dll) in the 64-bit view")
+    }
+
     @JvmStatic fun ensure(app: Context, prefix: File) {
         val systemReg = File(prefix, "system.reg")
         val system32 = File(prefix, "drive_c/windows/system32")
