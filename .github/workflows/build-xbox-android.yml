@@ -52,6 +52,14 @@ jobs:
           ~/.cargo/git/db
         key: xbox-android-${{ hashFiles('tools/xbox/**') }}-${{ github.run_id }}
 
+    # The APK build (_build.yml) restores this key instead of building the backend again.
+    - name: Save the built backend for the APK build
+      uses: actions/cache/save@v4
+      with:
+        path: build-xbox/out
+        key: xbox-out-${{ hashFiles('tools/xbox/**') }}
+      continue-on-error: true
+
     - name: Upload the backend
       uses: actions/upload-artifact@v4
       with:

@@ -68,8 +68,10 @@ internal object Xodus {
                 put("XDG_CACHE_HOME", File(home, ".cache").path)
                 put("XDG_RUNTIME_DIR", runtime.path)
                 put("TMPDIR", tmp.path)
-                // OpenSSL (native-tls) reads Android's system CA store; its files are hashed PEMs.
-                put("SSL_CERT_DIR", "/system/etc/security/cacerts")
+                // OpenSSL (native-tls) and the rustls verifier read Android's CA store (hashed PEM files);
+                // Android 14+ keeps the updatable one in the Conscrypt APEX.
+                put("SSL_CERT_DIR", listOf("/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts")
+                    .firstOrNull { File(it).isDirectory } ?: "/system/etc/security/cacerts")
                 put("XODUS_LOG", "off"); put("RUST_LOG", "off")
                 put("DROIDDECK_XBOX_CREDENTIAL_SOCKET", credentials.name)
             }
