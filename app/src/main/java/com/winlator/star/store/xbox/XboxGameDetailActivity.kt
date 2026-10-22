@@ -38,6 +38,8 @@ import com.winlator.star.store.download.StorePrimaryAction
 import com.winlator.star.store.download.StoreSection
 import com.winlator.star.store.download.StoreStatusText
 import com.winlator.star.store.download.formatDownloadSize
+import com.winlator.star.store.download.formatDownloadSpeed
+import com.winlator.star.store.download.formatEta
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -153,8 +155,10 @@ class XboxGameDetailActivity : ComponentActivity() {
                 if (e != null && (e.state == DownloadState.DOWNLOADING || e.state == DownloadState.PAUSED || e.state == DownloadState.QUEUED)) {
                     downloading = true
                     progressPct = e.pct
-                    progressLabel = if (e.installTotal > 0 && e.installDone > 0)
-                        "${e.pct}%  (${formatDownloadSize(e.installDone)} / ${formatDownloadSize(e.installTotal)})" else "Downloading… ${e.pct}%"
+                    progressLabel = listOf(
+                        if (e.installTotal > 0) "${e.pct}%  ·  ${formatDownloadSize((e.installTotal - e.installDone).coerceAtLeast(0))} to go" else "Downloading… ${e.pct}%",
+                        formatDownloadSpeed(e.speedBps), formatEta(e.etaSeconds),
+                    ).filter { it.isNotEmpty() }.joinToString("  ·  ")
                 } else {
                     if (downloading) refresh()
                     downloading = false

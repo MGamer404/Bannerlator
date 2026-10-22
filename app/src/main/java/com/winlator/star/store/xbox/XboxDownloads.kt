@@ -82,9 +82,13 @@ object XboxDownloads {
                         when (progress.optString("phase")) {
                             "complete" -> complete = true
                             "downloading", "download", "transfer" -> {
+                                // After a resume the backend counts only what is still to fetch: completedBytes of totalBytes remaining.
                                 val done = progress.optLong("completedBytes"); val total = progress.optLong("totalBytes").takeIf { it > 0 } ?: game.sizeBytes
                                 val pct = if (total > 0) ((done * 100) / total).toInt().coerceIn(0, 99) else 0
-                                StoreDownloadHooks.tick(Store.XBOX, game.id, pct, installDone = done, installTotal = total)
+                                val rate = progress.optLong("bytesPerSecond").coerceAtLeast(0L)
+                                val eta = if (rate > 0 && total > done) (total - done) / rate else -1L
+                                StoreDownloadHooks.tick(Store.XBOX, game.id, pct, installDone = done, installTotal = total,
+                                    speedBps = rate, etaSeconds = eta)
                             }
                             else -> Unit
                         }
