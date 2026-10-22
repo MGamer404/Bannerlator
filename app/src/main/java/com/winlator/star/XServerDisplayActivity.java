@@ -16516,6 +16516,8 @@ return true;
         }
         String id = shortcut.getExtra("xboxProductId");
         if (id == null || id.isEmpty()) throw new IllegalStateException("This Xbox shortcut has no product id; add the game again from the Xbox store.");
+        // Windows Runtime classes only the 32-bit registry view has (PropertySet: Xbox sign-in), added to the 64-bit view.
+        com.winlator.star.store.xbox.XboxWinRt.ensure(getApplicationContext(), new File(imageFs.wineprefix));
         // What the game's MicrosoftGame.config declares (VC14), installed offline when this container lacks it.
         com.winlator.star.store.xbox.XboxDependencies.ensure(getApplicationContext(), container, id, label -> {
             preloaderDialog.step(2, label);
