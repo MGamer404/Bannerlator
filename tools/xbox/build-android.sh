@@ -42,7 +42,7 @@ if ! [ -f "$ossl/lib/libssl.a" ]; then
     echo "23c666d0edf20f14249b3d8f0368acaee9ab585b09e1de82107c66e1f3ec9533  $cache/openssl.tgz" | sha256sum -c -
     rm -rf "$cache/openssl-src" && mkdir -p "$cache/openssl-src"
     tar -xzf "$cache/openssl.tgz" -C "$cache/openssl-src" --strip-components=1
-    (cd "$cache/openssl-src" && ./Configure android-arm64 -D__ANDROID_API__="$api" no-shared no-tests no-docs \
+    (cd "$cache/openssl-src" && ./Configure android-arm64 -D__ANDROID_API__="$api" no-shared no-tests \
         --prefix="$ossl" --libdir=lib && make -j"$(nproc)" build_libs >/dev/null && make install_dev >/dev/null)
 fi
 export AARCH64_LINUX_ANDROID_OPENSSL_DIR="$ossl" AARCH64_LINUX_ANDROID_OPENSSL_STATIC=1 OPENSSL_STATIC=1
