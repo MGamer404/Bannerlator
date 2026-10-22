@@ -60,7 +60,7 @@ object XboxRuntime {
      * Prepares an installed game for a session. [imagefsRoot] is the session's imagefs root; the launch view
      * goes under its xbox-views (not tmp: the session clears imagefs/tmp after this runs). Blocks up to ~3 minutes (service start + licensed preparation).
      */
-    fun prepare(app: Context, id: String, sessionId: String, imagefsRoot: File, cloudSaves: Boolean): Launch {
+    fun prepare(app: Context, id: String, sessionId: String, imagefsRoot: File, system32: File, cloudSaves: Boolean): Launch {
         val game = XboxInstallState.get(app, id) ?: error("This Xbox game is not installed.")
         check(File(game.folder, game.exe).isFile) { "This Xbox game's files are missing. Reinstall it." }
         session = sessionId
@@ -100,7 +100,7 @@ object XboxRuntime {
             check(launches.renew(token, id, account, sessionId) && synchronized(state) { generation == current }) { "Xbox launch was cancelled" }
             val exe = File(view.getString("exe"))
             check(exe.isFile) { "The Xbox launch view has no executable." }
-            stageModules(app, exe.parentFile!!)
+            stageModules(app, exe.parentFile!!, system32)
             val bridge = XboxBridge(socket.path)
             val env = LinkedHashMap<String, String>()
             env["XODUS_SOCKET"] = socket.path
@@ -111,6 +111,12 @@ object XboxRuntime {
             // its uploads can overwrite a real account's cloud copies.
             env["XODUS_SAVE_SYNC"] = if (cloudSaves) "auto" else "off"
             view.optString("playfab").takeIf { it.isNotBlank() && it != "null" }?.let { env["XODUS_XSTS_PLAYFAB"] = it }
+            // The Wine env is logged at launch (ProcessHelper); keep the bridge key and the Xbox token out of it.
+            com.winlator.star.store.SteamLogRedactor.registerSecret(bridge.key)
+            env["XODUS_XSTS_PLAYFAB"]?.let { header ->
+                com.winlator.star.store.SteamLogRedactor.registerSecret(header)
+                com.winlator.star.store.SteamLogRedactor.registerSecret(header.substringAfterLast(';'))
+            }
             XboxDiag.log(app, "launch prepared: $id view=${directory.name} bridge=127.0.0.1:${bridge.port}")
             return Launch(id, exe, env, token, bridge)
         } catch (e: Exception) {
@@ -193,18 +199,31 @@ object XboxRuntime {
     val DLLS = listOf("xgameruntime.dll", "winhttp.dll", "windows.web.dll", "twinapi.appcore.dll", "libnghttp2.dll")
     val DLL_OVERRIDES: String = DLLS.filter { it != "libnghttp2.dll" }.joinToString(";") { it.removeSuffix(".dll") + "=n" }
 
+    /** Loaded by GDK and WinHTTP with LOAD_LIBRARY_SEARCH_SYSTEM32, so they must be in the prefix's system32. Wine has no builtins of these. */
+    private val SYSTEM32_DLLS = listOf("xgameruntime.dll", "libnghttp2.dll")
+
     /**
-     * Puts the modules next to the game's materialised executable. With WINEDLLOVERRIDES=...=n Wine looks in
-     * the application's own folder first, so the container's prefix is never touched and the copies go away
-     * with the launch view.
+     * Puts the modules next to the game's materialised executable (WINEDLLOVERRIDES=...=n makes Wine use those
+     * for winhttp / windows.web / twinapi.appcore, which have builtins), and xgameruntime.dll + libnghttp2.dll
+     * into the container's system32 (as DroidDeck does), replacing them only when the bytes differ.
      */
-    fun stageModules(app: Context, exeDir: File) {
+    fun stageModules(app: Context, exeDir: File, system32: File) {
         val source = windowsModules(app)
         for (name in DLLS) {
             val target = File(exeDir, name)
             if (target.exists() && !java.nio.file.Files.isSymbolicLink(target.toPath()) && name == "libnghttp2.dll") continue
             if (java.nio.file.Files.isSymbolicLink(target.toPath())) target.delete()
             File(source, name).copyTo(target, overwrite = true)
+        }
+        check(system32.isDirectory) { "This container's Wine prefix has no system32 folder." }
+        for (name in SYSTEM32_DLLS) {
+            val bytes = File(source, name).readBytes()
+            val target = File(system32, name)
+            if (target.isFile && !java.nio.file.Files.isSymbolicLink(target.toPath()) && target.readBytes().contentEquals(bytes)) continue
+            val tmp = File(system32, "$name.xbox-tmp")
+            tmp.writeBytes(bytes)
+            check(tmp.renameTo(target)) { "Could not install $name into the container." }
+            XboxDiag.log(app, "staged $name into the container's system32")
         }
     }
 }

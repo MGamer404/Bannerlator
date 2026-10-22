@@ -16492,6 +16492,7 @@ return true;
         preloaderDialog.step(2, "Checking the Xbox license…");
         xboxLaunch = com.winlator.star.store.xbox.XboxRuntime.INSTANCE.prepare(getApplicationContext(), id,
                 java.util.UUID.randomUUID().toString(), imageFs.getRootDir(),
+                new File(imageFs.wineprefix, "drive_c/windows/system32"),
                 com.winlator.star.store.xbox.XboxMainActivity.Companion.cloudSaves(this));
     }
 
