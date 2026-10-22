@@ -40,7 +40,8 @@ object XboxRuntime {
             closed = true
             Thread({
                 // Before the lease ends (which removes the view): keep what the game wrote there.
-                if (viewRoot != null && installRoot != null) runCatching { XboxViewSaves.persist(viewRoot, installRoot, viewFiles) }
+                val view = viewRoot; val install = installRoot
+                if (view != null && install != null) runCatching { XboxViewSaves.persist(view, install, viewFiles) }
                 runCatching { bridge.close() }
                 released(token)
                 XboxDiag.log(null, "launch released: $productId")
