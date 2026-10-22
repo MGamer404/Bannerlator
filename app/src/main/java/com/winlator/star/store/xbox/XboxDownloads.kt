@@ -94,7 +94,7 @@ object XboxDownloads {
                     if (job.cancelled.get()) return@use
                     val code = process.process.exitValue()
                     XboxDiag.log(app, "download ${game.id} exited $code complete=$complete")
-                    check(code == 0 && complete) { "Xbox download did not complete. Try again to resume with fresh licenses." }
+                    check(code == 0 && complete) { process.lastError?.let(::explain) ?: "Xbox download did not complete. Try again to resume with fresh licenses." }
                 }
                 if (job.cancelled.get()) {
                     if (job.deleteOnCancel) folder.deleteRecursively()
@@ -118,6 +118,12 @@ object XboxDownloads {
                 jobs.remove(game.id)
             }
         }
+    }
+
+    private fun explain(error: String): String = when {
+        error.startsWith("Package was not found") -> "Microsoft found no PC package of this game for your account."
+        error.startsWith("not enough free disk space") -> "Not enough free space for this game."
+        else -> "Xbox: $error"
     }
 
     /** Stops a download: asks the backend to pause (it keeps verified checkpoints), then ends it. */

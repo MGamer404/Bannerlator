@@ -24,6 +24,9 @@ internal object Xodus {
 
     class Child(val process: Process, private val credentials: XboxCredentials, private val runtimeDirectory: File? = null,
                 private val launchDirectory: File? = null) : Closeable {
+        /** The backend's last known error message (see [KNOWN_ERRORS]), for the user. */
+        @Volatile var lastError: String? = null
+
         @Synchronized fun send(frame: JSONObject) {
             process.outputStream.write((frame.toString() + "\n").toByteArray())
             process.outputStream.flush()
@@ -106,10 +109,19 @@ internal object Xodus {
             check(readError == null && !reader.isAlive) { "Xbox returned an invalid response." }
             val code = child.process.exitValue()
             XboxDiag.log(app, "backend ${args.firstOrNull { !it.startsWith("-") }.orEmpty()} exited $code")
-            check(code == 0) { "Xbox request failed. Check your account and network connection." }
+            check(code == 0) { child.lastError ?: "Xbox request failed. Check your account and network connection." }
             return JSONObject(output.toString("UTF-8"))
         }
     }
+
+    /** Xodus' fixed error texts (crates/xodus-cli: package.rs, package_plan.rs, license.rs, streaming.rs); none carry tokens. */
+    private val KNOWN_ERRORS = Regex("(Package was not found, is it owned by the user\\?|No \\.msixvc file found|" +
+        "Package selection requires a Store product ID|Invalid STS token|Uns?pp?orted (user )?token|Failed to get exchange MS token|" +
+        "Microsoft returned an unsupported content-licensing user ticket\\.|Store product identity mismatch|Too many Store packages|" +
+        "Store bundle (contains too many products|exceeds resolver limits)|Circular or excessively deep Store bundle|" +
+        "Selected package is not a unique supported member of this Store offer|Invalid Store product or market|" +
+        "Store metadata is too large|unexpected number of content keys [0-9]{1,4}|not enough free disk space on [^:]{1,200}: need [0-9]+ bytes, have [0-9]+ bytes.*|" +
+        "Cannot start this download: .{1,120}|Unable to prepare download checkpoints: .{1,120}|Cannot read (cached )?package-file metadata: .{1,120})")
 
     /** Copies the backend's allow-listed diagnostic lines (no tokens, no names) into the Xbox log. */
     fun diagnostics(app: Context, child: Child): Thread = Thread({
@@ -117,7 +129,10 @@ internal object Xodus {
             child.process.errorStream.bufferedReader().useLines { lines -> lines.forEach { line ->
                 if (line.matches(Regex("NEXUS_CREDENTIAL_ERROR_V1 [a-z-]{1,48}|NEXUS_LIBRARY_DIAGNOSTIC_V1 [a-z-]{1,48} [0-9]{1,3} [0-9]{1,6}|NEXUS_SESSION_DIAGNOSTIC_V1 [a-z-]{1,64}|Account library unavailable \\([a-z-]{1,64}\\); credentials and installed games are unchanged\\.|Account library timed out; installed games are unchanged\\.")))
                     XboxDiag.log(app, "backend: $line")
-                else if (line.length in 1..200 && line.all { it in ' '..'~' } && (line.startsWith("error") || line.startsWith("Error") || line.contains("panicked")))
+                else if (line.length <= 300 && line.matches(KNOWN_ERRORS)) {
+                    child.lastError = line
+                    XboxDiag.log(app, "backend error: $line")
+                } else if (line.length in 1..200 && line.all { it in ' '..'~' } && (line.startsWith("error") || line.startsWith("Error") || line.contains("panicked")))
                     XboxDiag.log(app, "backend error class: " + line.substringBefore(':').take(80))
             } }
         }
