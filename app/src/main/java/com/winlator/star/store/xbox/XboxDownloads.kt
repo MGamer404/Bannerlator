@@ -69,8 +69,11 @@ object XboxDownloads {
                 folder.mkdirs()
                 var complete = false
                 var sequence = -1L
+                // Ceiling of the backend's adaptive request window, from the shared store speed tier (6/16/32/96).
+                val window = com.winlator.star.store.StoreDownloadTier.config(app).maxNetworkWindow
+                XboxDiag.log(app, "download window ceiling $window")
                 Xodus.start(app, listOf("streaming", game.id, folder.path, "--market", game.market,
-                    "--progress-json", "--control-stdin", "--selected-content-id", contentId)).use { process ->
+                    "--progress-json", "--control-stdin", "--selected-content-id", contentId, "--parallel", window.toString())).use { process ->
                     job.child = process
                     val diagnostics = Xodus.diagnostics(app, process)
                     if (job.cancelled.get()) process.process.destroy()
