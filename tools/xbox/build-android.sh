@@ -67,6 +67,12 @@ CMAKE
 export CMAKE_TOOLCHAIN_FILE_aarch64_linux_android="$cache/android-arm64.toolchain.cmake"
 export ANDROID_ABI=arm64-v8a ANDROID_PLATFORM="android-$api"
 cd "$source_dir"
+# libz-ng-sys builds with cmake and does not rebuild when the toolchain file changes; a cached copy from
+# before the arm64 toolchain wrapper is the wrong architecture. Clean it once per toolchain revision.
+if [ ! -f "$CARGO_TARGET_DIR/.cmake-toolchain-v2" ]; then
+    cargo clean --release --target aarch64-linux-android -p libz-ng-sys || true
+    mkdir -p "$CARGO_TARGET_DIR" && touch "$CARGO_TARGET_DIR/.cmake-toolchain-v2"
+fi
 cargo build --locked --release --no-default-features --target aarch64-linux-android -p xodus-cli -p xodus-service
 
 for binary in xodus-cli xodus-service; do
