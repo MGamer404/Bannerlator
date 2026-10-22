@@ -29,6 +29,9 @@ object XboxRuntime {
         val env: Map<String, String>,
         private val token: String,
         private val bridge: XboxBridge,
+        private val viewRoot: File? = null,
+        private val installRoot: File? = null,
+        private val viewFiles: Set<String> = emptySet(),
     ) : Closeable {
         @Volatile private var closed = false
         /** Non-blocking (teardown may call it on the main thread): the backend children get up to 5 s to exit. */
@@ -36,6 +39,8 @@ object XboxRuntime {
             if (closed) return
             closed = true
             Thread({
+                // Before the lease ends (which removes the view): keep what the game wrote there.
+                if (viewRoot != null && installRoot != null) runCatching { XboxViewSaves.persist(viewRoot, installRoot, viewFiles) }
                 runCatching { bridge.close() }
                 released(token)
                 XboxDiag.log(null, "launch released: $productId")
@@ -101,6 +106,10 @@ object XboxRuntime {
             val exe = File(view.getString("exe"))
             check(exe.isFile) { "The Xbox launch view has no executable." }
             stageModules(app, system32)
+            // The view's root mirrors the install folder; game.exe is relative to both.
+            val viewRoot = File(exe.path.removeSuffix(game.exe).trimEnd('/')).takeIf { exe.path.endsWith(game.exe) }
+            val localAppData = File(system32.parentFile?.parentFile, "users/xuser/AppData/Local")
+            val viewFiles = viewRoot?.let { runCatching { XboxViewSaves.prepare(app, it, localAppData) }.getOrDefault(emptySet()) } ?: emptySet()
             val bridge = XboxBridge(socket.path)
             val env = LinkedHashMap<String, String>()
             env["XODUS_SOCKET"] = socket.path
@@ -118,7 +127,7 @@ object XboxRuntime {
                 com.winlator.star.store.SteamLogRedactor.registerSecret(header.substringAfterLast(';'))
             }
             XboxDiag.log(app, "launch prepared: $id view=${directory.name} bridge=127.0.0.1:${bridge.port}")
-            return Launch(id, exe, env, token, bridge)
+            return Launch(id, exe, env, token, bridge, viewRoot, File(game.folder), viewFiles)
         } catch (e: Exception) {
             XboxDiag.log(app, "launch prepare failed: ${e.javaClass.simpleName}")
             released(token); throw e
