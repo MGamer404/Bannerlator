@@ -66,6 +66,19 @@ include("$ndk/build/cmake/android.toolchain.cmake")
 CMAKE
 export CMAKE_TOOLCHAIN_FILE_aarch64_linux_android="$cache/android-arm64.toolchain.cmake"
 export ANDROID_ABI=arm64-v8a ANDROID_PLATFORM="android-$api"
+# reqwest 0.13's default TLS verifier on Android needs the Java platform (JNI) and panics in a plain
+# executable; tools/xbox/android-verifier replaces it (same crate name and version) via [patch.crates-io].
+# This changes Cargo.lock for that one entry, so the build below runs without --locked.
+rm -rf "$source_dir/vendor-android" && mkdir -p "$source_dir/vendor-android"
+cp -r "$repo/tools/xbox/android-verifier" "$source_dir/vendor-android/rustls-platform-verifier"
+python3 - "$source_dir/Cargo.toml" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+line = 'rustls-platform-verifier = { path = "vendor-android/rustls-platform-verifier" }'
+if line not in s:
+    s = s.replace('[patch.crates-io]', '[patch.crates-io]\n' + line, 1) if '[patch.crates-io]' in s else s + '\n[patch.crates-io]\n' + line + '\n'
+    open(p, 'w').write(s)
+PY
 cd "$source_dir"
 # libz-ng-sys builds with cmake and does not rebuild when the toolchain file changes; a cached copy from
 # before the arm64 toolchain wrapper is the wrong architecture. Clean it once per toolchain revision.
@@ -73,7 +86,8 @@ if [ ! -f "$CARGO_TARGET_DIR/.cmake-toolchain-v2" ]; then
     cargo clean --release --target aarch64-linux-android -p libz-ng-sys || true
     mkdir -p "$CARGO_TARGET_DIR" && touch "$CARGO_TARGET_DIR/.cmake-toolchain-v2"
 fi
-cargo build --locked --release --no-default-features --target aarch64-linux-android -p xodus-cli -p xodus-service
+cargo build --release --no-default-features --target aarch64-linux-android -p xodus-cli -p xodus-service
+grep -A2 'name = "rustls-platform-verifier"' Cargo.lock
 
 for binary in xodus-cli xodus-service; do
     so="lib${binary//-/_}.so"
