@@ -16495,6 +16495,11 @@ return true;
         }
         String id = shortcut.getExtra("xboxProductId");
         if (id == null || id.isEmpty()) throw new IllegalStateException("This Xbox shortcut has no product id; add the game again from the Xbox store.");
+        // What the game's MicrosoftGame.config declares (VC14), installed offline when this container lacks it.
+        com.winlator.star.store.xbox.XboxDependencies.ensure(getApplicationContext(), container, id, label -> {
+            preloaderDialog.step(2, label);
+            return kotlin.Unit.INSTANCE;
+        });
         preloaderDialog.step(2, "Checking the Xbox license…");
         xboxLaunch = com.winlator.star.store.xbox.XboxRuntime.INSTANCE.prepare(getApplicationContext(), id,
                 java.util.UUID.randomUUID().toString(), imageFs.getRootDir(),
