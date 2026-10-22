@@ -58,7 +58,7 @@ object XboxRuntime {
 
     /**
      * Prepares an installed game for a session. [imagefsRoot] is the session's imagefs root; the launch view
-     * goes under its tmp/xbox-views. Blocks up to ~3 minutes (service start + licensed preparation).
+     * goes under its xbox-views (not tmp: the session clears imagefs/tmp after this runs). Blocks up to ~3 minutes (service start + licensed preparation).
      */
     fun prepare(app: Context, id: String, sessionId: String, imagefsRoot: File, cloudSaves: Boolean): Launch {
         val game = XboxInstallState.get(app, id) ?: error("This Xbox game is not installed.")
@@ -80,7 +80,7 @@ object XboxRuntime {
             val socket = service(app, account, current, credentials)
             check(synchronized(state) { generation == current }) { "Xbox launch was cancelled" }
             val market = game.market.takeIf { it.matches(Regex("[A-Z]{2}")) } ?: Xodus.market()
-            val directory = views.create(File(imagefsRoot, "tmp"))
+            val directory = views.create(imagefsRoot)
             val process = try {
                 Xodus.start(app, listOf("run", game.folder, "droiddeck:prepare", "--exe", game.exe,
                     "--materialize-chain", "--market", market), launchDirectory = directory, credentialGeneration = credentials)

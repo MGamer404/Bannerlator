@@ -15042,8 +15042,14 @@ return true;
             if (xboxLaunch != null) {
                 // Xbox: run the licensed launch view's executable (inside imagefs, so on Z:), not the
                 // encrypted package file the shortcut points at.
-                String rel = imageFs.getRootDir().toPath().relativize(xboxLaunch.getExe().toPath()).toString();
+                String rel;
+                try {
+                    rel = imageFs.getRootDir().getCanonicalFile().toPath().relativize(xboxLaunch.getExe().getCanonicalFile().toPath()).toString();
+                } catch (java.io.IOException e) {
+                    rel = imageFs.getRootDir().toPath().relativize(xboxLaunch.getExe().toPath()).toString();
+                }
                 String win = "Z:\\" + rel.replace('/', '\\');
+                Log.i("BannerXbox", "start command exe: " + win + " (exists=" + xboxLaunch.getExe().isFile() + ")");
                 args += "/dir " + StringUtils.escapeDOSPath(FileUtils.getDirname(win)) + " \"" + FileUtils.getName(win) + "\"" + execArgs;
             } else if (shortcut.path.endsWith(".lnk")) {
                 args += "\"" + shortcut.path + "\"" + execArgs;
