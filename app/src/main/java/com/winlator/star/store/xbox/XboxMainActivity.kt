@@ -345,7 +345,7 @@ private fun XboxLibraryTab(state: XboxLibraryState, wide: Boolean, onOpen: (Xbox
                             it.state == com.winlator.star.store.download.DownloadState.PAUSED }
                     CatalogLibraryTile(item = XboxMainActivity.toCatalogItem(g, installed), installed = installed,
                         onOpen = { onOpen(g) }, badgeText = if (g.gamePass) "Game Pass" else null,
-                        progressLabel = download?.let { "Downloading ${it.pct}%" })
+                        progressLabel = download?.let { "Downloading ${it.pct}%" }, artOnly = true)
                 }
             }
         }

@@ -520,8 +520,49 @@ fun CatalogLibraryTile(
     badgeText: String? = null,
     /** Shown in place of the Play / Download button while the game downloads ("Downloading 34%"); null = the button. */
     progressLabel: String? = null,
+    /** The tile is just the 2:3 art: title and status sit on a fade at its bottom, no button (tap opens the game). */
+    artOnly: Boolean = false,
 ) {
     val shape = RoundedCornerShape(10.dp)
+    if (artOnly) {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .steamFocusRing(shape)
+                .clip(shape)
+                .border(1.dp, MaterialTheme.colorScheme.outline, shape)
+                .clickable(onClick = onOpen),
+        ) {
+            CatalogArt(candidates = item.tallArt(), title = item.title, modifier = Modifier.fillMaxWidth(), aspectRatio = 2f / 3f)
+            if (!badgeText.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.9f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(badgeText, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface)
+                }
+            }
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
+                    .padding(start = 8.dp, end = 8.dp, top = 22.dp, bottom = 7.dp),
+            ) {
+                Text(item.title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                    color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                val status = progressLabel ?: if (installed) "Installed" else null
+                if (status != null) Text(status, style = MaterialTheme.typography.labelSmall,
+                    color = if (progressLabel != null) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.8f), maxLines = 1)
+            }
+        }
+        return
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
