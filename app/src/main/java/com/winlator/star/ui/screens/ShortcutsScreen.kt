@@ -5718,8 +5718,7 @@ internal fun ShortcutSettingsDialogScreen(
     // The 9 power-user perf toggles live in a collapsed "Performance" section to keep this dialog short.
     var perfExpanded by rememberSaveable { mutableStateOf(false) }
 
-    // Audio driver. DirectAudio only loads on the arm64ec Proton builds in
-    // DirectAudioSupport.SUPPORTED_BUILD_TOKENS (8 tokens as of driver v1.3.2); a shortcut
+    // Audio driver. DirectAudio only loads on layers DirectAudioSupport.isSupported accepts; a shortcut
     // can't override the Wine version (container-only), so support is fixed by the container's layer.
     // Grey the option out off those layers and coerce a stale saved pick back to the default so the
     // dropdown never shows an unselectable value as selected.
@@ -7847,7 +7846,7 @@ internal fun ShortcutSettingsDialogScreen(
                         }
                         if (!directAudioSupported && directAudioEntry != null) {
                             Text(
-                                "DirectAudio requires Proton ${com.winlator.star.core.DirectAudioSupport.SUPPORTED_LABEL}",
+                                com.winlator.star.core.DirectAudioSupport.UNSUPPORTED_NOTE,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.5.sp,
                                 modifier = Modifier.padding(start = 4.dp, top = 2.dp)

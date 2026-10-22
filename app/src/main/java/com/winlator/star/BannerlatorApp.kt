@@ -24,6 +24,7 @@ class BannerlatorApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.winlator.star.core.DirectAudioSupport.init(this)
 
         // The Xbox sign-in window runs in its own process (":xboxlogin", isolated WebView data). None of
         // the start-up work below belongs there; the xinput restore in particular must never run beside a

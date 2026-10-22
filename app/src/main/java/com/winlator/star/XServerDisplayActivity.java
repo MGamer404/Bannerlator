@@ -2963,8 +2963,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             Log.d("XServerDisplayActivity", "XInput Disabled from Shortcut: " + xinputDisabledFromShortcut);
         }
 
-        // DirectAudio's winedirectaudio.drv only loads on the arm64ec Proton builds listed in
-        // DirectAudioSupport.SUPPORTED_BUILD_TOKENS (8 tokens as of driver v1.3.2); on
+        // DirectAudio's winedirectaudio.drv only loads on layers DirectAudioSupport.isSupported accepts; on
         // any other layer it does nothing / breaks audio. The editors grey it out and coerce it on save,
         // but a container/shortcut written before this gate (or whose layer was swapped elsewhere) can
         // still arrive here as "directaudio" — the last place it could be applied to the guest registry.
@@ -4989,83 +4988,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (DirectAudioSupport.isMicEnabledInEnv(container.getEnvVars())) return true;
         if (shortcut != null && DirectAudioSupport.isMicEnabledInEnv(shortcut.getExtra("envVars"))) return true;
         return false;
-    }
-
-    // Map a Proton layer name to the bundled DirectAudio asset set, or null if the build is unsupported.
-    // The driver is BUILD-SPECIFIC (a driver built against Wine major X only initializes on Wine X), but
-    // device-proven interchangeable WITHIN the Wine-11 point-release family (11.0-1/-3/-5): the same
-    // complete 3-file set drives any arm64ec 11.0-x layer. Wine 10 (10.0-4/10.0-34) has its own ABI, its own set.
-    private static String directAudioAssetDir(String layerName) {
-        if (layerName == null) return null;
-        if (layerName.contains("11.0-")) return "wine11";   // any arm64ec Wine-11 point release
-        if (layerName.contains("10.0-4")) return "wine10";  // the arm64ec Wine-10 build we ship for
-        if (layerName.contains("10.0-34")) return "wine10"; // Wine-10 family (same major as 10.0-4) -> same set
-        return null;                                         // not a supported build -> leave its own driver
-    }
-
-    // Deliver the bundled, BUILD-MATCHED DirectAudio driver into the shared Proton layer at launch, so a
-    // user's dormant/old winedirectaudio.drv auto-upgrades to the APK's bundled driver before the guest
-    // loads it (version = assets/directaudio/<build>/version.txt, v1.3.2 at time of writing).
-    // The shared-layer copy is the one Wine actually loads, so overlaying it upgrades EVERY container on
-    // that layer. Per-build dispatch (wine11 for any 11.0-x, wine10 for 10.0-4; arm64ec only), version-gated
-    // by a per-layer marker, page-size aware (4KB -> sdk28, 16KB -> sdk35). Copies the COMPLETE 3-file set -
-    // BOTH PE arches (aarch64-windows + i386-windows) plus the shared aarch64-unix unixlib - because which
-    // PE actually loads is decided by the GUEST GAME's bitness (64-bit -> aarch64, 32-bit/wow64 -> i386),
-    // not the Proton build; shipping both closes the latent 32-bit gap the old aarch64-only overlay left.
-    // Idempotent + best-effort (any failure just leaves the existing driver); metadata only, no GPU probing.
-    private void overlayDirectAudioDriver() {
-        try {
-            if (container == null) return;
-            com.winlator.star.contents.ContentProfile prof =
-                    contentsManager.getProfileByEntryName(container.getWineVersion());
-            if (prof == null) return;
-            java.io.File layer = com.winlator.star.contents.ContentsManager.getInstallDir(this, prof);
-            java.io.File unixDir  = new java.io.File(layer, "lib/wine/aarch64-unix");     // shared unixlib
-            java.io.File winDir   = new java.io.File(layer, "lib/wine/aarch64-windows");  // 64-bit (arm64ec) guest PE
-            java.io.File win32Dir = new java.io.File(layer, "lib/wine/i386-windows");     // 32-bit (wow64) guest PE
-            // ABI gate: these two dirs exist only on an arm64ec Proton layer, and the name carries the build.
-            if (!unixDir.isDirectory() || !winDir.isDirectory()) return;
-            String build = directAudioAssetDir(layer.getName());
-            if (build == null) return;   // not one of the supported builds -> leave its own driver
-
-            String base = "directaudio/" + build + "/";
-            String want = FileUtils.readString(this, base + "version.txt");
-            if (want == null) return;
-            want = want.trim();
-            // Per-layer marker records "<build> <version>"; re-overlay if either changes. The pre-existing
-            // bare-version marker (old aarch64-only overlay, e.g. "1.3.1") can never match the newer
-            // "<build> <version>" tag, so those layers get a one-time re-overlay that finally
-            // delivers the i386 PE.
-            java.io.File marker = new java.io.File(unixDir, ".directaudio_bundled");
-            String tag = build + " " + want;
-            String have = marker.isFile() ? FileUtils.readString(marker) : null;
-            if (have != null && tag.equals(have.trim())) return;   // already current for this build
-
-            String sdk = (android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE) >= 16384)
-                    ? "sdk35" : "sdk28";
-            String src = base + sdk + "/";
-            // Complete set: unixlib + both PE arches. The i386 PE goes to i386-windows/ if the layer has it.
-            assetToFile(src + "winedirectaudio.so",          new java.io.File(unixDir,  "winedirectaudio.so"));
-            assetToFile(src + "winedirectaudio-aarch64.drv", new java.io.File(winDir,   "winedirectaudio.drv"));
-            if (win32Dir.isDirectory())
-                assetToFile(src + "winedirectaudio-i386.drv", new java.io.File(win32Dir, "winedirectaudio.drv"));
-            FileUtils.writeString(marker, tag);
-            android.util.Log.i("DirectAudio", "overlaid bundled driver v" + want + " (" + build + "/" + sdk + ") -> " + layer.getName());
-        } catch (Throwable t) {
-            android.util.Log.w("DirectAudio", "driver overlay failed (keeping existing)", t);
-        }
-    }
-
-    // Copy an APK asset to a file, then make it readable+executable (Wine dlopen's the .so). Overwrites.
-    private void assetToFile(String assetPath, java.io.File dst) throws java.io.IOException {
-        try (java.io.InputStream in = getAssets().open(assetPath);
-             java.io.FileOutputStream out = new java.io.FileOutputStream(dst)) {
-            byte[] buf = new byte[65536];
-            int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-        }
-        dst.setReadable(true, false);
-        dst.setExecutable(true, false);
     }
 
     // Write the live-config "mailbox" the winedirectaudio.drv watcher polls, so an in-game cog SAVE
@@ -11583,7 +11505,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // stream open. Resolve the cog preset to concrete env here (LOW_LATENCY + a real per-preset
             // buffer) so the menu actually controls the driver. The Wine "Audio" registry driver is set
             // by changeWineAudioDriver(); route changes are handled inside the driver.
-            overlayDirectAudioDriver();   // ensure a supported layer (any 11.0-x / 10.0-4) has the bundled driver before the guest loads it
+            DirectAudioSupport.installDriver(this, container.getWineVersion());   // newest driver build on the layer before the guest loads it
             applyDirectAudioConfig(envVars);
         }
 
