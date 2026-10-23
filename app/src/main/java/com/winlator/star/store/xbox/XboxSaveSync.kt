@@ -32,7 +32,7 @@ object XboxSaveSync {
      * finish its final upload.
      */
     @JvmStatic fun finish(app: Context, exeName: String, timeoutMs: Long, saveRoot: File?, since: Long, containerTimeoutMs: Long) {
-        if (saveRoot != null) waitForContainerUploads(app, saveRoot, since, containerTimeoutMs)
+        if (saveRoot != null) waitForContainerUploads(app, exeName, saveRoot, since, containerTimeoutMs)
         val helpers = commandLines().filter { it.second.contains(HELPER) }.map { it.first }
         if (helpers.isEmpty()) {
             XboxDiag.log(app, "save sync on exit: no save helper running")
@@ -55,17 +55,31 @@ object XboxSaveSync {
             .map { File(it, "index") }
             .filter { it.isFile && it.lastModified() >= since && runCatching { it.readLines() }.getOrDefault(emptyList()).any { l -> l.trim() == "dirty 1" } }
 
-    private fun waitForContainerUploads(app: Context, saveRoot: File, since: Long, timeoutMs: Long) {
+    private fun gameRunning(exeName: String): Boolean = commandLines().any { (_, cmd) ->
+        !cmd.contains(HELPER) && cmd.contains(exeName, ignoreCase = true) && !cmd.contains("winhandler", true) && !cmd.contains("explorer", true)
+    }
+
+    /**
+     * The upload runs inside the game, so this only helps while the game runs. A game that exits by itself right after
+     * its last save (BALL x PIT saves on close, then exits ~1.5 s into the upload) leaves that save dirty; the runtime
+     * uploads it when the game next starts.
+     */
+    private fun waitForContainerUploads(app: Context, exeName: String, saveRoot: File, since: Long, timeoutMs: Long) {
         val dirty = dirtyContainers(saveRoot, since)
         if (dirty.isEmpty()) return
         val start = System.currentTimeMillis()
         var left = dirty
-        while (left.isNotEmpty() && System.currentTimeMillis() - start < timeoutMs) {
+        var running = gameRunning(exeName)
+        while (left.isNotEmpty() && running && System.currentTimeMillis() - start < timeoutMs) {
             Thread.sleep(250)
             left = dirtyContainers(saveRoot, since)
+            running = gameRunning(exeName)
         }
         val seconds = "%.1f".format((System.currentTimeMillis() - start) / 1000.0)
-        if (left.isEmpty()) XboxDiag.log(app, "save sync on exit: ${dirty.size} save(s) uploaded in $seconds s")
-        else XboxDiag.log(app, "save sync on exit: ${left.size} save(s) not uploaded after $seconds s; they upload at the next launch")
+        when {
+            left.isEmpty() -> XboxDiag.log(app, "save sync on exit: ${dirty.size} save(s) uploaded in $seconds s")
+            !running -> XboxDiag.log(app, "save sync on exit: the game closed before ${left.size} save(s) finished uploading; they upload at the next launch")
+            else -> XboxDiag.log(app, "save sync on exit: ${left.size} save(s) not uploaded after $seconds s; they upload at the next launch")
+        }
     }
 }
