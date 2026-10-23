@@ -682,6 +682,16 @@ jobs:
         test "$(ls app/src/main/assets/xbox/windows/*.dll | wc -l)" = 6
         ls -l app/src/main/jniLibs/arm64-v8a/libxodus_*.so app/src/main/assets/xbox app/src/main/assets/xbox/windows
 
+    # bxsaveup.exe (app/src/main/cpp/xbox-saveup): uploads an Xbox game's pending container saves after the game
+    # exited (store/xbox/XboxSaveSync on the shutdown screen). x86_64, like the Nexus modules it loads. Built
+    # with the llvm-mingw cached for BANNERIN-XInput above; not under tools/xbox so the backend cache key is kept.
+    - name: Build the Xbox save uploader into assets
+      run: |
+        set -euo pipefail
+        "$HOME/.cache/llvm-mingw-bylaws-20250920/bin/x86_64-w64-mingw32-clang" -std=gnu11 -O2 -Wall -Wextra -Werror -s \
+          -o app/src/main/assets/xbox/bxsaveup.exe app/src/main/cpp/xbox-saveup/bxsaveup.c
+        ls -l app/src/main/assets/xbox/bxsaveup.exe
+
     - name: Restore Galaxy Performance SDK jar (optional, from secret)
       # Decodes the proprietary Samsung jar from the encrypted secret into the git-ignored
       # drop-point so app/build.gradle bundles it. No secret => no jar => feature dormant.

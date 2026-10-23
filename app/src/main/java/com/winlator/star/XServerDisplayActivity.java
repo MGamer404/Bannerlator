@@ -5691,10 +5691,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             final String exeName = xboxLaunch.getExe().getName();
             final long savesSince = xboxLaunch.getPreparedAt();
             final File saveRoot = new File(imageFs.wineprefix, "drive_c/users/xuser/AppData/Local/XodusGameSave");
+            final com.winlator.star.store.xbox.XboxSaveSync.Uploader uploader = winHandler == null ? null
+                    : new com.winlator.star.store.xbox.XboxSaveSync.Uploader(new File(imageFs.wineprefix), imageFs.getRootDir(),
+                            xboxLaunch.getProductId(), path -> winHandler.execRaw(path, ""));
             preloaderDialog.hint(getString(R.string.xbox_saving_on_exit));
             new Thread(() -> {
                 try {
-                    com.winlator.star.store.xbox.XboxSaveSync.finish(getApplicationContext(), exeName, 25000L, saveRoot, savesSince, 20000L);
+                    com.winlator.star.store.xbox.XboxSaveSync.finish(getApplicationContext(), exeName, 25000L, saveRoot, savesSince, 30000L, uploader);
                 } catch (Throwable t) {
                     Log.w("XServerDisplayActivity", "Xbox save sync on exit failed", t);
                 } finally {
