@@ -5,6 +5,7 @@
     import android.util.Log;
 
     import com.winlator.star.core.FileUtils;
+    import com.winlator.star.core.ImageUtils;
     import com.winlator.star.core.StringUtils;
 
 import java.io.IOException;
@@ -63,12 +64,12 @@ import java.nio.file.Files;
                             for (File iconDir : iconDirs) {
                                 iconFile = new File(iconDir, value+".png");
                                 if (iconFile.isFile()){
-                                    icon = BitmapFactory.decodeFile(iconFile.getPath());
+                                    icon = ImageUtils.decodeCoverArt(iconFile.getPath());
                                     break;
                                 } else {
                                     File iconIfNotFound = new File("/data/user/0/com.winlator.star/files/imagefs/home/xuser/.cache/wallpaper.bmp");
                                     if (iconIfNotFound.isFile()) {
-                                        icon = BitmapFactory.decodeFile(iconIfNotFound.getPath());
+                                        icon = ImageUtils.decodeCoverArt(iconIfNotFound.getPath());
                                     } else {
                                         icon = null;
                                     }
@@ -105,7 +106,7 @@ import java.nio.file.Files;
             if (customCoverArtPath != null && !customCoverArtPath.isEmpty()) {
                 File customCoverArtFile = new File(customCoverArtPath);
                 if (customCoverArtFile.isFile()) {
-                    this.coverArt = BitmapFactory.decodeFile(customCoverArtFile.getPath());
+                    this.coverArt = ImageUtils.decodeCoverArt(customCoverArtFile.getPath());
                     return; // Exit if custom cover art is loaded
                 }
             }
@@ -113,7 +114,7 @@ import java.nio.file.Files;
             // Fallback to standard cover art location
             File defaultCoverArtFile = new File(COVER_ART_DIR, this.name + ".png");
             if (defaultCoverArtFile.isFile()) {
-                this.coverArt = BitmapFactory.decodeFile(defaultCoverArtFile.getPath());
+                this.coverArt = ImageUtils.decodeCoverArt(defaultCoverArtFile.getPath());
             }
         }
 
@@ -209,6 +210,7 @@ import java.nio.file.Files;
 
         // Save the custom cover art to the default cover art directory
         public void saveCustomCoverArt(Bitmap coverArt) {
+            coverArt = ImageUtils.fitCoverArt(coverArt);
             try {
                 File coverArtDir = new File(container.getRootDir(), COVER_ART_DIR); // Ensure the path is relative to the container's root directory
                 if (!coverArtDir.exists()) {

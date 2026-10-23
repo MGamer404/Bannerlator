@@ -4,6 +4,7 @@ package com.winlator.star.ui.screens
 
 import com.winlator.star.core.PresetScope
 import com.winlator.star.core.PresetOverrides
+import com.winlator.star.core.ImageUtils
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -1197,7 +1198,7 @@ internal fun ShortcutActionDialogs(actions: ShortcutActions) {
                                             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
                                             conn.connectTimeout = 15000
                                             conn.readTimeout = 20000
-                                            val full = BitmapFactory.decodeStream(conn.inputStream)
+                                            val full = ImageUtils.fitCoverArt(BitmapFactory.decodeStream(conn.inputStream))
                                             conn.disconnect()
                                             if (full != null) {
                                                 sc.saveCustomCoverArt(full)
@@ -9672,7 +9673,7 @@ private fun downloadBitmapOrNull(url: String): Bitmap? = try {
     conn.setRequestProperty("User-Agent", "Mozilla/5.0")
     val bmp = if (conn.responseCode in 200..299) BitmapFactory.decodeStream(conn.inputStream) else null
     conn.disconnect()
-    bmp
+    ImageUtils.fitCoverArt(bmp)
 } catch (_: Exception) { null }
 
 /**
@@ -10813,15 +10814,12 @@ internal fun ScannedGameRow(
 }
 
 /**
- * A picked image (a file, or an online image the art picker offered), a file scaled down to at most 1200 px on its long side (a phone photo would otherwise be
- * tens of MB in memory and on disk); null when it cannot be read. Blocking - call off the main thread.
+ * A picked image (a file, or an online image the art picker offered), scaled down to at most
+ * [ImageUtils.COVER_ART_MAX] px on its long side (a phone photo would otherwise be tens of MB in memory and
+ * on disk); null when it cannot be read. Blocking - call off the main thread.
  */
 private fun loadPickedArt(path: String): Bitmap? = if (path.startsWith("http")) downloadBitmapOrNull(path) else try {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(path, bounds)
-    var sample = 1
-    while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1200) sample *= 2
-    BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+    ImageUtils.decodeCoverArt(path)
 } catch (_: Exception) {
     null
 }

@@ -13,6 +13,37 @@ import java.io.IOException;
 import java.io.InputStream;
 
 public abstract class ImageUtils {
+    /**
+     * Longest side, in pixels, a game's cover or tile icon is kept at. Tiles are drawn far smaller;
+     * full-size store art (1440x2160 Xbox posters) overflowed the GPU image cache and made the Games
+     * screen and side menu stutter.
+     */
+    public static final int COVER_ART_MAX = 1200;
+
+    /** {@code bitmap} scaled down so its longer side is at most {@link #COVER_ART_MAX}; unchanged when it fits. */
+    public static Bitmap fitCoverArt(Bitmap bitmap) {
+        if (bitmap == null) return null;
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        int longest = Math.max(width, height);
+        if (longest <= COVER_ART_MAX) return bitmap;
+        float scale = (float) COVER_ART_MAX / longest;
+        return Bitmap.createScaledBitmap(bitmap, Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)), true);
+    }
+
+    /** A cover or icon file decoded with its longer side at most {@link #COVER_ART_MAX}; null when it cannot be read. */
+    public static Bitmap decodeCoverArt(String path) {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(path, bounds);
+        int longest = Math.max(bounds.outWidth, bounds.outHeight);
+        int sample = 1;
+        while (longest / sample > COVER_ART_MAX) sample *= 2;
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sample;
+        return BitmapFactory.decodeFile(path, options);
+    }
+
     private static int calculateInSampleSize(BitmapFactory.Options options, int maxSize) {
         final int height = options.outHeight;
         final int width = options.outWidth;

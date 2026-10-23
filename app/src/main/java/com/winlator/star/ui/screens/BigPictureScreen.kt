@@ -9,6 +9,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
+import com.winlator.star.core.ImageUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
@@ -1920,7 +1921,7 @@ internal fun loadCover(s: Shortcut): ImageBitmap? {
     val custom = s.customCoverArtPath
     if (!custom.isNullOrEmpty()) {
         val f = File(custom)
-        if (f.exists()) BitmapFactory.decodeFile(custom)?.let { return it.asImageBitmap() }
+        if (f.exists()) ImageUtils.decodeCoverArt(custom)?.let { return it.asImageBitmap() }
     }
     return try {
         val arr = JSONArray(StarLaunchBridge.sgdbFetchGridsJson(s.name))

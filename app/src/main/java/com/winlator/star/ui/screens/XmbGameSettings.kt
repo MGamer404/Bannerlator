@@ -739,7 +739,7 @@ private fun iconPickerMenu(xmb: XmbScope, s: Shortcut): XmbMenu {
 
 /** Decodes an image file and writes it as the game's icon PNG, the way the editor's icon picker does. */
 internal fun xmbApplyIconFile(s: Shortcut, f: File): Boolean = runCatching {
-    val bitmap = android.graphics.BitmapFactory.decodeFile(f.absolutePath) ?: return false
+    val bitmap = com.winlator.star.core.ImageUtils.decodeCoverArt(f.absolutePath) ?: return false
     s.iconFile?.let { out ->
         out.parentFile?.mkdirs()
         java.io.FileOutputStream(out).use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }

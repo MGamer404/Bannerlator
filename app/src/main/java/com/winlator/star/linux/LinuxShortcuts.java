@@ -7,6 +7,7 @@ import android.util.Log;
 import com.winlator.star.container.Container;
 import com.winlator.star.container.Shortcut;
 import com.winlator.star.core.FileUtils;
+import com.winlator.star.core.ImageUtils;
 
 import java.io.File;
 
@@ -190,14 +191,14 @@ public final class LinuxShortcuts {
             String cover = writeCoverArt(context);
             if (!cover.isEmpty()) {
                 shortcut.setCustomCoverArtPath(cover);
-                shortcut.setCoverArt(BitmapFactory.decodeFile(cover));
+                shortcut.setCoverArt(ImageUtils.decodeCoverArt(cover));
             }
         }
 
         if (shortcut.icon != null || shortcut.container == null) return;
         if (!writeIcon(context, shortcut.container)) return;
         addIconLine(shortcut.file);
-        shortcut.icon = BitmapFactory.decodeFile(iconFile(shortcut.container).getPath());
+        shortcut.icon = ImageUtils.decodeCoverArt(iconFile(shortcut.container).getPath());
     }
 
     /**
