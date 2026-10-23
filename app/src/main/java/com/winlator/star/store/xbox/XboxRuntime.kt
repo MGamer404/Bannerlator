@@ -35,6 +35,8 @@ object XboxRuntime {
         private val installRoot: File? = null,
         private val viewFiles: Set<String> = emptySet(),
     ) : Closeable {
+        /** Wall-clock time the launch was prepared: saves changed after it belong to this session. */
+        val preparedAt: Long = System.currentTimeMillis()
         @Volatile private var closed = false
         /** Non-blocking (teardown may call it on the main thread): the backend children get up to 5 s to exit. */
         override fun close() {
