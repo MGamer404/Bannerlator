@@ -1,5 +1,11 @@
 # Star-Compose — Progress Log
 
+## 2026-10-23 — Xbox: use Nexus' xgameruntime when a game ships Microsoft's (fix/xbox-bundled-xgameruntime, CI)
+> - **Why:** Cyberpunk 2077 ships Microsoft's xgameruntime.dll beside cpLauncher.exe; Wine loads it before Nexus' staged system32 copy, it needs Windows Gaming Services → `GameServicesScarlett::InitializeEventHandlers` assert → exit. Hand swap in the install reached the main menu (see the Cyberpunk entry below). User: "yes, I quit it. go ahead on a new branch".
+> - **Built `907a79a0`:** XboxRuntime.prepare → `useStagedRuntime(view, exe dir, system32)`: when the exe's folder in the launch view has xgameruntime.dll (case-insensitive), that view entry is replaced by a symlink to the staged system32 copy (only inside the view; install untouched; a link keeps Nexus' chunk check readable; XboxViewSaves ignores links). Diag line: "the game ships its own xgameruntime.dll: this launch uses Xodus Nexus' instead". APK CI 39931277855.
+> - **Device state before test:** install's original xgameruntime.dll put back (sha 1daae004…), Cyberpunk shortcut restored from /data/local/tmp/cp-debug-bak/ (no debug env).
+> - **Test plan:** stage APK → user's yes → install → launch Cyberpunk normally → expect the diag line, title + quick BREACHING (saves already synced), main menu.
+
 ## 2026-10-23 — Cyberpunk 2077 (Xbox) launcher crashes at start — debug (no code change yet)
 > - **Report:** user: "now start trying cyberpunk the same" (same root debug approach as Forza). Product BX3M8L83BBRW, v2.5.1.0, 83 GB, exe `cpLauncher.exe`, container 1 (Proton-11.0-9.1-arm64ec-14, FEXCore PERFORMANCE_TSO, Wayland, 960x544, dxvk 2.4.1 gplasync + vkd3d 3.0.1).
 > - **User's own launch (04:19:31 → released 04:21:08, build e11273ff):** the game's crash reporter wrote `cpLauncher.exe-20261023-041941-308-312.txt` in the install folder: `EXCEPTION_ACCESS_VIOLATION (0xC0000005) write to 0x6FF5370042`, uptime 0 s, IsGame=false (still in the launcher). wine_debug.log (+warn,+err,+fixme) ends without an error: class {834366da-2d43-4fe3-8dcd-42ff2274bd0d} and {0134a8b2-3407-4b45-ad25-e9f7c92a80bc} not registered, NetworkInformation + EasClientDeviceInformation semi-stubs, then the pad is unplugged (exit).
