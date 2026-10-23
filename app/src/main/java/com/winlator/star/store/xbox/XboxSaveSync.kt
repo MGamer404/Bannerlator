@@ -28,17 +28,17 @@ object XboxSaveSync {
             if (cmd.isEmpty()) null else pid to String(cmd).replace('\u0000', ' ')
         }
 
-    /**
-     * Container saves first: waits up to [containerTimeoutMs] while an index under [saveRoot] (XodusGameSave) changed
-     * since [since] is still dirty. Then ends the game ([exeName]) and waits up to [timeoutMs] for the save helper to
-     * finish its final upload.
-     */
     /** Starts a Windows program in the running session (winhandler.exe's EXEC); false when it could not be sent. */
     fun interface SessionExec { fun run(windowsPath: String): Boolean }
 
     /** What the uploader needs: the session's prefix, the imagefs root (Z:), the game, and a way to start it. */
     class Uploader(val prefix: File, val imagefsRoot: File, val productId: String, val exec: SessionExec)
 
+    /**
+     * Container saves first: waits up to [containerTimeoutMs] while an index under [saveRoot] (XodusGameSave) changed
+     * since [since] is still dirty. Then ends the game ([exeName]) and waits up to [timeoutMs] for the save helper to
+     * finish its final upload.
+     */
     @JvmStatic fun finish(app: Context, exeName: String, timeoutMs: Long, saveRoot: File?, since: Long, containerTimeoutMs: Long,
                           uploader: Uploader?) {
         if (saveRoot != null) waitForContainerUploads(app, exeName, saveRoot, since, containerTimeoutMs, uploader)
@@ -47,8 +47,8 @@ object XboxSaveSync {
             XboxDiag.log(app, "save sync on exit: no save helper running")
             return
         }
-        val games = commandLines().filter { (_, cmd) -> !cmd.contains(HELPER) && cmd.contains(exeName, ignoreCase = true) && !cmd.contains("winhandler", true) && !cmd.contains("explorer", true) }
-        games.forEach { (pid, _) -> runCatching { Os.kill(pid, OsConstants.SIGKILL) } }
+        val games = gameProcesses(exeName)
+        games.forEach { pid -> runCatching { Os.kill(pid, OsConstants.SIGKILL) } }
         val start = System.currentTimeMillis()
         while (helpers.any { File("/proc/$it").exists() } && System.currentTimeMillis() - start < timeoutMs) Thread.sleep(250)
         val seconds = (System.currentTimeMillis() - start) / 1000.0
@@ -64,9 +64,19 @@ object XboxSaveSync {
             .map { File(it, "index") }
             .filter { it.isFile && it.lastModified() >= since && runCatching { it.readLines() }.getOrDefault(emptyList()).any { l -> l.trim() == "dirty 1" } }
 
-    private fun gameRunning(exeName: String): Boolean = commandLines().any { (_, cmd) ->
-        !cmd.contains(HELPER) && cmd.contains(exeName, ignoreCase = true) && !cmd.contains("winhandler", true) && !cmd.contains("explorer", true)
-    }
+    /**
+     * The game's own processes: the program path (argv[0]) ends with [exeName]. Not a substring of the whole command
+     * line, which also matches the Xodus backend's "run … --exe <exe>" (alive for the whole session) and winhandler.
+     */
+    private fun gameProcesses(exeName: String): List<Int> =
+        File("/proc").listFiles().orEmpty().mapNotNull { dir ->
+            val pid = dir.name.toIntOrNull() ?: return@mapNotNull null
+            val cmd = runCatching { File(dir, "cmdline").readBytes() }.getOrNull() ?: return@mapNotNull null
+            val argv0 = String(cmd, 0, cmd.indexOf(0.toByte()).let { if (it < 0) cmd.size else it })
+            pid.takeIf { argv0.endsWith("\\$exeName", ignoreCase = true) || argv0.endsWith("/$exeName", ignoreCase = true) }
+        }
+
+    private fun gameRunning(exeName: String): Boolean = gameProcesses(exeName).isNotEmpty()
 
     /**
      * The upload runs inside the game, so this only helps while the game runs. A game that exits by itself right after
