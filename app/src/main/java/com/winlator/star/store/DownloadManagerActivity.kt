@@ -1,5 +1,6 @@
 package com.winlator.star.store
 
+import com.winlator.star.R
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
@@ -317,12 +318,26 @@ class DownloadManagerActivity : ComponentActivity() {
      *  removes it from the live registry), dismiss the spinner, and toast the real outcome. */
     private fun uninstall(entry: DownloadEntry) {
         uninstallingName = entry.name
+        // A Steam game found in another Steam client's library: those files and that manifest are the client's.
+        val imported = entry.store == Store.STEAM &&
+            entry.id.toIntOrNull()?.let { SteamLibraryImport.isImported(this, it) } == true
         StoreUninstaller.run(
             installDir = entry.installPath,
             mark = {
                 if (entry.store == Store.STEAM) {
-                    entry.id.toIntOrNull()?.let { SteamRepository.getInstance().database.markUninstalled(it) }
+                    entry.id.toIntOrNull()?.let {
+                        if (imported) SteamLibraryImport.releaseImported(this, it)
+                        else SteamAppManifest.removeFor(entry.installPath, it)
+                        SteamRepository.getInstance().database.markUninstalled(it)
+                    }
                 }
+            },
+            // A Steam game whose folder another game (a demo / server) also uses is kept.
+            keepFolder = {
+                val steamId = if (entry.store == Store.STEAM) entry.id.toIntOrNull() else null
+                val path = entry.installPath
+                imported || steamId != null && !path.isNullOrEmpty() &&
+                    SteamInstallPaths.folderSharedWithOtherGame(this, File(path), steamId)
             },
         ) { ok ->
             // Clear the durable-library row (also drops the live registry entry) AND the store's
@@ -331,7 +346,11 @@ class DownloadManagerActivity : ComponentActivity() {
             DownloadRegistry.removeLibraryEntry(entry.key)
             purgeNativeInstall(entry)
             uninstallingName = null
-            uninstallResult = if (ok) "${entry.name} uninstalled" else "Couldn't fully remove ${entry.name}"
+            uninstallResult = when {
+                imported -> getString(R.string.steam_lib_uninstall_kept, entry.name)
+                ok -> "${entry.name} uninstalled"
+                else -> "Couldn't fully remove ${entry.name}"
+            }
         }
     }
 

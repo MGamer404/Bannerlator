@@ -391,6 +391,9 @@ fun rememberSteamLibrary(): SteamLibraryState {
                     // walk over every owned app, so it goes on a worker rather than the event thread.
                     Thread({ SteamLibraryArt.refreshFromSnapshot(appCtx) }, "SteamArtRefresh")
                         .apply { isDaemon = true }.start()
+                    // Games another Steam client installed into a library folder become "installed"
+                    // here once the library rows exist (off-thread; re-reads when it found any).
+                    SteamLibraryImport.importInstalledAsync(appCtx) { load() }
                     load()
                 }
                 event.startsWith("SteamStatus:") -> {
@@ -417,7 +420,11 @@ fun rememberSteamLibrary(): SteamLibraryState {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) load()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                load()
+                // Cheap (nothing to scan without a library folder) and single-flight; re-reads on a find.
+                SteamLibraryImport.importInstalledAsync(appCtx) { load() }
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -585,14 +592,26 @@ fun SteamLibraryTab(
 
     fun uninstall(game: SteamGame) {
         uninstallingName = game.name
+        // Found in another Steam client's library: those files and that manifest are the client's.
+        val imported = SteamLibraryImport.isImported(ctx, game.appId)
         StoreUninstaller.run(
             installDir = game.installDir,
-            mark = { runCatching { SteamRepository.getInstance().database.markUninstalled(game.appId) } },
+            mark = {
+                if (imported) SteamLibraryImport.releaseImported(ctx, game.appId)
+                else SteamAppManifest.removeFor(game.installDir, game.appId)
+                runCatching { SteamRepository.getInstance().database.markUninstalled(game.appId) }
+            },
+            // Another game (a demo / server sharing this installdir) still uses the folder: keep it.
+            keepFolder = { imported || SteamInstallPaths.folderSharedWithOtherGame(ctx.applicationContext, java.io.File(game.installDir), game.appId) },
         ) { ok ->
             uninstallingName = null
-            if (ok) StorefrontLog.i(StorefrontLog.LIBRARY, "uninstalled app ${game.appId} (${game.name})")
+            if (ok) StorefrontLog.i(StorefrontLog.LIBRARY, "uninstalled app ${game.appId} (${game.name})" + if (imported) ", files kept (another client's library)" else "")
             else StorefrontLog.w(StorefrontLog.LIBRARY, "uninstall INCOMPLETE for app ${game.appId} (${game.name}) — files remain at ${game.installDir}")
-            onMessage(if (ok) "${game.name} uninstalled" else "Couldn't fully remove ${game.name}")
+            onMessage(when {
+                imported -> ctx.getString(R.string.steam_lib_uninstall_kept, game.name)
+                ok -> "${game.name} uninstalled"
+                else -> "Couldn't fully remove ${game.name}"
+            })
             state.reload()
         }
     }
