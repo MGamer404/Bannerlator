@@ -30,10 +30,11 @@ typedef HRESULT (WINAPI *UninitializeApiImpl_t)( void );
 static const GUID XUSER = { 0x01acd177, 0x91f9, 0x4763, { 0xa3, 0x8e, 0xcc, 0xbb, 0x55, 0xce, 0x32, 0xe0 } };
 static const GUID XGAMESAVE = { 0x704c3f58, 0xe629, 0x4cc2, { 0xb1, 0x97, 0x30, 0x51, 0x1b, 0x99, 0x6f, 0xe2 } };
 
-/* vtable slots: IUnknown 0-2, then the IDL order */
+/* vtable slots: IUnknown 0-2, then the order of x_user_vtbl (xuser.c) and x_game_save_vtbl (xgamesave.c):
+ * DuplicateHandle 3, CloseHandle 4, Compare 5, GetMaxUsers 6, AddAsync 7, AddResult 8; InitializeProvider 3, CloseProvider 6 */
 typedef void (WINAPI *XUserCloseHandle_t)( void *, void * );                       /* IXUserImpl 4 */
-typedef HRESULT (WINAPI *XUserAddAsync_t)( void *, UINT32, XAsyncBlock * );         /* IXUserImpl 6 */
-typedef HRESULT (WINAPI *XUserAddResult_t)( void *, XAsyncBlock *, void ** );       /* IXUserImpl 7 */
+typedef HRESULT (WINAPI *XUserAddAsync_t)( void *, UINT32, XAsyncBlock * );         /* IXUserImpl 7 */
+typedef HRESULT (WINAPI *XUserAddResult_t)( void *, XAsyncBlock *, void ** );       /* IXUserImpl 8 */
 typedef HRESULT (WINAPI *XGameSaveInitializeProvider_t)( void *, void *, const char *, BOOLEAN, void ** ); /* IXGameSaveImpl 3 */
 typedef void (WINAPI *XGameSaveCloseProvider_t)( void *, void * );                  /* IXGameSaveImpl 6 */
 typedef ULONG (WINAPI *Release_t)( void * );
@@ -95,11 +96,11 @@ int main( void )
     if (FAILED(hr = query( &XUSER, &XUSER, &xuser )) || FAILED(hr = query( &XGAMESAVE, &XGAMESAVE, &xsave )))
     { say( "error query %#lx", hr ); return 4; }
 
-    if (FAILED(hr = ((XUserAddAsync_t)SLOT( xuser, 6 ))( xuser, 1 /* AddDefaultUserSilently */, &async )))
+    if (FAILED(hr = ((XUserAddAsync_t)SLOT( xuser, 7 ))( xuser, 1 /* AddDefaultUserSilently */, &async )))
     { say( "error user-add %#lx", hr ); return 5; }
     for (i = 0; i < 300; i++)
     {
-        hr = ((XUserAddResult_t)SLOT( xuser, 7 ))( xuser, &async, &user );
+        hr = ((XUserAddResult_t)SLOT( xuser, 8 ))( xuser, &async, &user );
         if (hr != E_PENDING_) break;
         Sleep( 100 );
     }
