@@ -1,5 +1,11 @@
 # Star-Compose — Progress Log
 
+## 2026-10-23 — Cyberpunk 2077 (Xbox) launcher crashes at start — debug (no code change yet)
+> - **Report:** user: "now start trying cyberpunk the same" (same root debug approach as Forza). Product BX3M8L83BBRW, v2.5.1.0, 83 GB, exe `cpLauncher.exe`, container 1 (Proton-11.0-9.1-arm64ec-14, FEXCore PERFORMANCE_TSO, Wayland, 960x544, dxvk 2.4.1 gplasync + vkd3d 3.0.1).
+> - **User's own launch (04:19:31 → released 04:21:08, build e11273ff):** the game's crash reporter wrote `cpLauncher.exe-20261023-041941-308-312.txt` in the install folder: `EXCEPTION_ACCESS_VIOLATION (0xC0000005) write to 0x6FF5370042`, uptime 0 s, IsGame=false (still in the launcher). wine_debug.log (+warn,+err,+fixme) ends without an error: class {834366da-2d43-4fe3-8dcd-42ff2274bd0d} and {0134a8b2-3407-4b45-ad25-e9f7c92a80bc} not registered, NetworkInformation + EasClientDeviceInformation semi-stubs, then the pad is unplugged (exit).
+> - **Also seen in xbox_diag:** user launched Forza at 04:12 (18 s) and 04:15 (2 min 18 s), then uninstalled Forza at 04:18:41.
+> - **Debug launch 1 (plan):** shortcut backup /data/local/tmp/cp-debug-bak/, add `envVars=WINEDEBUG=+seh,+loaddll,+module` for one launch, launch from Games, map 0x6FF5370042 to its module, then restore the shortcut and bring Termux forward.
+
 ## 2026-10-23 — Forza Horizon 5 (Xbox) closes after the splash — debug (no code change yet)
 > - **Report (user):** FH5 (9NNX1VVR3KNQ, 147.9 GB, finished downloading 10-22 19:23) shows the splash and closes. Launch 10-22 20:27:48 → released 20:28:06 (18 s), device build e11273ff (same code as main). No Android crash; wine_debug.log (Log Manager level +warn,+err,+fixme) has no error at the exit; the game wrote an unreadable 44 KB file 'ForzaHorizon5.exe:4' (alternate-data-stream name) in its install.
 > - **Ruled out:** the 'NVIDIA GeForce GTX 480 / 2048 MB' in dxwrapperConfig is the WineD3D path only; with dxvk+vkd3d the device name comes from graphicsDriverConfig gpuName=Device (real Adreno 750 / Turnip), maxDeviceMemory=0. Shortcut overrides: screenSize=960x544 (below FH5's 1280x720 minimum), renderer=opengl, presentMode=fifo, container 1 Proton 11.0-9.1.
