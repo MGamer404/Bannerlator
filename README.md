@@ -79,7 +79,7 @@ Before any **stable release** is published, all changes are **manually debugged 
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) · `Bannerlator Bionic AnTuTu` (antutu) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) · `com.antutu.ABenchMark` (antutu) |
-| **Version** | Bannerlator **V 3.1.7-pre3** — built from Star **marcescence** (`versionName 3.1.7-pre3`, `versionCode 101`) |
+| **Version** | Bannerlator **V 3.1.7-pre4** — built from Star **marcescence** (`versionName 3.1.7-pre4`, `versionCode 102`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
@@ -111,6 +111,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [🤖 AI Disclaimer](#-ai-disclaimer)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
+- [🟩 Xbox / PC Game Pass store, Steam accounts & Wayland adapter by default (3.1.7-pre4)](#-xbox--pc-game-pass-store-steam-accounts--wayland-adapter-by-default-317-pre4)
 - [🎮 BANNERIN controllers, in-game controller settings & DirectInput vibration (3.1.7-pre3)](#-bannerin-controllers-in-game-controller-settings--directinput-vibration-317-pre3)
 - [⚙️ Every setting in Deck, full-screen XMB & Open with (3.1.7-pre2)](#️-every-setting-in-deck-full-screen-xmb--open-with-317-pre2)
 - [🎮 The full Deck style, Windows components & Remove (3.1.7-pre1)](#-the-full-deck-style-windows-components--remove-317-pre1)
@@ -133,6 +134,16 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📄 License](#-license)
 
 ---
+
+## 🟩 Xbox / PC Game Pass store, Steam accounts & Wayland adapter by default (3.1.7-pre4)
+
+**[3.1.7-pre4](https://github.com/The412Banner/Bannerlator/releases/tag/3.1.7-pre4) adds an Xbox store and is a smaller update (about 126 MB from 3.1.7-pre3 or 3.1.6, instead of about 550 MB).**
+
+- **Xbox / PC Game Pass store** — sign in with Microsoft (the app shows your gamertag, never your email), browse owned games and PC Game Pass, download with resume, add to your games and play with a licensed launch through **Xodus** and **Xodus Nexus**. Cloud saves sync while you play and when you quit (off by default).
+- **Steam** (by **MGamer404**) — switch between saved accounts, extra library folders, sort by Steam rating, Goldberg fixes and a Steam Cloud setting for Goldberg launches.
+- **Wayland** — the bundled adapter is the default, with profiles (Auto, Smooth, Fast, Compatibility) and smoother frames under GPU load.
+- **DirectAudio** — support detected from the layer's files; driver 1.4.0, newest wins.
+- **Fixes** — the on-screen controller is seen by games that check only at start; large store art no longer makes the Games screen and side menu stutter; Direct XInput is on for new containers.
 
 ## 🎮 BANNERIN controllers, in-game controller settings & DirectInput vibration (3.1.7-pre3)
 
@@ -790,6 +801,10 @@ This build stands on a long chain of prior work — its direct lineage, plus the
 | **JavaSteam** | [JavaSteam](https://github.com/Longi94/JavaSteam) (`in.dragonbra:javasteam`) by **Longi94** — the Steam **connection-manager client** the built-in Steam store logs in and talks to Steam with, and — via the **`javasteam-depotdownloader`** fork by **joshuatam** — the **entire depot-download engine** Bannerlator's Steam store is built on. |
 | **Goldberg Steam Emu / gbe_fork** | [Goldberg Steam Emu](https://mr_goldberg.gitlab.io/goldberg_emulator/) by **Mr_Goldberg**, and **gbe_fork** by **[Detanup01](https://github.com/Detanup01/gbe_fork)** — the Steam emulator Bannerlator's **Goldberg auto-patch** installs (Regular / Experimental / ColdClient tiers) for offline / emulated play of games you own. |
 | **Pluvia** | [Pluvia](https://github.com/oxters168/Pluvia) — an Android Steam client whose patterns were **referenced alongside GameNative** while building the Steam store's login / session handling. |
+| **Xodus** (imLinguin, Vidi0, ChristopherHX and contributors) | [Xodus](https://github.com/xodus-gaming/xodus) (GPL-3.0, Rust) — the Xbox / Microsoft Store client the **Xbox store** (3.1.7-pre4) runs on: sign-in, library, licences and downloads, built for Android here. |
+| **Dominik Svoboda (domsvoboda)** | [Xodus Nexus](https://github.com/domsvoboda/xodus-nexus) (MIT; Wine modules LGPL-2.1) — the Xbox runtime, sign-in, saves and launch view Xbox games run with. |
+| **Kurt Himebauch (xXJSONDeruloXx)** | **DroidDeck**'s Xbox work (DroidDeck #1156, #1164, #1170) — the Android build recipe and launch flow Bannerlator's Xbox store follows. |
+| **[MGamer404](https://github.com/MGamer404)** | Steam account switching, extra library folders, rating sort, Goldberg fixes and the Goldberg Steam Cloud setting ([#613](https://github.com/The412Banner/Bannerlator/pull/613)–[#617](https://github.com/The412Banner/Bannerlator/pull/617)); the Xbox store's container-launch approach, from his `xbox-container` fork ([#623](https://github.com/The412Banner/Bannerlator/pull/623)). |
 | **The412Banner** | Full Jetpack Compose UI migration, in-game overlay rewrite, controller-support restore (SDL2 SoName fix + four event files), Box64 edit-dialog fix, theme system, and CI/release infrastructure. **In 2.3**, building on JavaSteam / GameNative / Goldberg, the original engineering is Bannerlator's own: the **cross-store Download Manager**, the **four storefront integrations** (Steam / Epic / GOG / Amazon), the multi-week **Steam session-hardening** work, the depot **OOM fix**, the **Goldberg auto-patch** integration, the store **Material-3 restyle**, and the store-log **credential redaction** (`StoreLog.redactUrl`). **In 2.4**, the **fullscreen aspect-ratio pipeline** (Off/Fit/Stretch/Fill/Integer across all three renderers), the **in-app File-Manager import picker** replacing SAF (with image thumbnails + percent/ETA import progress), the **DLC picker**, the **true-size depot install fix**, **per-game persistence** of scaling / fullscreen / HUD position, and the **container wallpaper picker**. **In 2.5**, the **Mali / BCn hardening** — wiring leegao's bcn_layer (shader-v3) + ETC2-Milestone-2 wrapper into the **"Wrapper + bcn_layer"** and experimental **"Wrapper-gamenative"** drivers, the **BCn Layer Settings** UI, and the **in-game logging overhaul** (copy-logs button, selectable log location, co-located DXVK/VKD3D logs, scrollable debug-channels dialog). **In 2.5.1**, the **SurfaceFlinger colour + crash fix** and per-container / per-game **"Correct SurfaceFlinger colours"** toggle (ASurfaceRenderer R/B-swap fix + GPU converter, ported from GameNative #1620 / #1644), the in-game **FEX runtime indicator** (arm64ec / x86-64 · FEXCore / wowbox64 / Box64 · unixlib / DLL, read live from `/proc/<pid>/maps`), the **FEXCore unixlib (`.so`) auto-match** at launch (per-game version sync + uninstall cleanup), and **18 new Environment Variable presets** (DXVK / VKD3D / Wine / Mesa). **In 2.5.2**, the **Community Configs** system — the in-app catalog browser, per-uploaded-config cards with live upvotes / downloads / comments, the surgical config-apply engine, and the smart inline installer for DXVK / VKD3D / FEXCore + Turnip drivers — plus **two new Proton 11.0-1 x86-64 compatibility layers** (SDK 28 / SDK 35) built and published to the downloadable catalog. Also maintains the [Nightlies WCP Hub](https://github.com/The412Banner/Nightlies) and [Banners-Turnip](https://github.com/The412Banner/Banners-Turnip). |
 
 ### Upstream stack
