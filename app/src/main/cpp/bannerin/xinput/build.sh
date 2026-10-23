@@ -140,6 +140,8 @@ check_dll() { # check_dll <arch> <dll name> <file> <def>
       lc="$(llvm-readobj --coff-load-config "$f")"
       grep -q 'CHPEMetadata' <<<"$lc" || die "$f has no CHPE metadata"
       grep -q 'Arm64X' <<<"$lc" || die "$f has no ARM64X dynamic relocations"
+      # One TLS directory serves both views and would list native ARM64 callbacks (see src/notls.c).
+      llvm-readobj --file-headers "$f" | grep -q 'TLSTableRVA: 0x[1-9a-fA-F]' && die "$f has a TLS directory"
       fmt="$fmt/$hyb/$machine"
       ;;
   esac
@@ -179,11 +181,13 @@ print("\n".join(p for p in out if not (p in seen or seen.add(p))))
 '
 }
 
-link_arm64x() { # link_arm64x <out> <def> <ec obj> <native obj> <native inputs file>
+# notls-*.o (src/notls.c) come before the CRT so the image gets no TLS directory: an ARM64X image has
+# one for both views and it would list native ARM64 callbacks, which an x64 process runs as x86.
+link_arm64x() { # link_arm64x <out> <def> <ec obj> <native obj> <native inputs file> <ec notls obj> <native notls obj>
   local nat=()
   mapfile -t nat <"$5"
   arm64ec-w64-mingw32-clang -shared -s -Wl,--no-insert-timestamp -Wl,-marm64xpe "-Wl,--Xlink=-defarm64native:$2" \
-    -o "$1" "$3" "$4" "$2" "${nat[@]}" -lkernel32
+    -o "$1" "$3" "$6" "$4" "$7" "$2" "${nat[@]}" -lkernel32
 }
 
 CFLAGS_COMMON="-std=gnu11 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -I$HERE/src"
@@ -198,10 +202,13 @@ dlls() {
     if [ "$arch" = arm64x ]; then
       arm64ec-w64-mingw32-clang $CFLAGS_COMMON -DBXI_HYBRID=1 -c "$HERE/src/xinput.c" -o "$tmp/xinput-arm64ec.o"
       aarch64-w64-mingw32-clang $CFLAGS_COMMON -DBXI_HYBRID=1 -c "$HERE/src/xinput.c" -o "$tmp/xinput-aarch64.o"
+      arm64ec-w64-mingw32-clang $CFLAGS_COMMON -c "$HERE/src/notls.c" -o "$tmp/notls-arm64ec.o"
+      aarch64-w64-mingw32-clang $CFLAGS_COMMON -c "$HERE/src/notls.c" -o "$tmp/notls-aarch64.o"
       native_link_inputs "$tmp" >"$tmp/native-inputs"
       say "native view links with: $(xargs -n1 basename <"$tmp/native-inputs" | tr '\n' ' ')"
       for name in $DLLS; do
-        link_arm64x "$out/$arch/$name.dll" "$HERE/def/$name.def" "$tmp/xinput-arm64ec.o" "$tmp/xinput-aarch64.o" "$tmp/native-inputs"
+        link_arm64x "$out/$arch/$name.dll" "$HERE/def/$name.def" "$tmp/xinput-arm64ec.o" "$tmp/xinput-aarch64.o" "$tmp/native-inputs" \
+          "$tmp/notls-arm64ec.o" "$tmp/notls-aarch64.o"
         check_dll "$arch" "$name" "$out/$arch/$name.dll" "$HERE/def/$name.def"
       done
       continue
