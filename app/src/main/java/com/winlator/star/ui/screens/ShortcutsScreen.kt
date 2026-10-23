@@ -6673,24 +6673,7 @@ internal fun ShortcutSettingsDialogScreen(
                             }
                         }
 
-                        if (xboxShipsRuntime) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Use the app's Xbox runtime", fontSize = 14.sp)
-                                    Text(
-                                        "This game ships Microsoft's own Xbox runtime, which needs Windows' Gaming Services. " +
-                                                "Turn off only to try the game's own.",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                Switch(checked = xboxNexusRuntime, onCheckedChange = { xboxNexusRuntime = it })
-                            }
-                        }
+                        if (xboxShipsRuntime) XboxRuntimeRow(xboxNexusRuntime) { xboxNexusRuntime = it }
 
                         // Screen size
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -10919,4 +10902,25 @@ private fun loadPickedArt(path: String): Bitmap? = if (path.startsWith("http")) 
     BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
 } catch (_: Exception) {
     null
+}
+
+/** The classic editor's "Use the app's Xbox runtime" row (its own function: the editor's body is at the JVM method size limit). */
+@Composable
+private fun XboxRuntimeRow(checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Use the app's Xbox runtime", fontSize = 14.sp)
+            Text(
+                "This game ships Microsoft's own Xbox runtime, which needs Windows' Gaming Services. " +
+                        "Turn off only to try the game's own.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
 }
