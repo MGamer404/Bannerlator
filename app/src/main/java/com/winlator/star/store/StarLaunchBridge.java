@@ -18,6 +18,7 @@ import com.winlator.star.container.Container;
 import com.winlator.star.container.ContainerManager;
 import com.winlator.star.container.Shortcut;
 import com.winlator.star.core.FileUtils;
+import com.winlator.star.core.ImageUtils;
 import com.winlator.star.core.WinePath;
 
 import org.json.JSONArray;
@@ -615,7 +616,7 @@ public final class StarLaunchBridge {
             }
             conn.disconnect();
             if (bmp == null) Log.w(TAG, "Cover art decode returned null for " + url);
-            return bmp;
+            return ImageUtils.fitCoverArt(bmp);
         } catch (Exception e) {
             Log.w(TAG, "downloadBitmap failed: " + e.getMessage());
             return null;

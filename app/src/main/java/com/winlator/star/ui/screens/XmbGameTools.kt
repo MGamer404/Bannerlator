@@ -49,6 +49,7 @@ import com.winlator.star.container.Shortcut
 import com.winlator.star.core.CopyGameToDriveC
 import com.winlator.star.core.CustomSaveVault
 import com.winlator.star.core.FileUtils
+import com.winlator.star.core.ImageUtils
 import com.winlator.star.core.GameSaveBackup
 import com.winlator.star.core.StorageRoots
 import com.winlator.star.store.StarLaunchBridge
@@ -794,7 +795,7 @@ private fun xmbDownloadBitmap(url: String, connectTimeout: Int, readTimeout: Int
     conn.connectTimeout = connectTimeout
     conn.readTimeout = readTimeout
     try {
-        BitmapFactory.decodeStream(conn.inputStream)
+        ImageUtils.fitCoverArt(BitmapFactory.decodeStream(conn.inputStream))
     } finally {
         conn.disconnect()
     }
