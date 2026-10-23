@@ -6591,89 +6591,11 @@ internal fun ShortcutSettingsDialogScreen(
                             }
                         }
 
-                        // Epic Online Services (EOS) auth toggle — only for Epic-origin shortcuts.
-                        // When ON, the launcher injects real-Epic auth args (-EpicPortal + a fresh
-                        // exchange code) so EOS-requiring titles authenticate against the user's
-                        // logged-in Epic account. Harmless for non-EOS Epic games.
-                        if (isEpicShortcut) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Epic Online Services (EOS) auth", fontSize = 14.sp)
-                                    Text(
-                                        "Sign EOS games in with your Epic account",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                Switch(checked = epicEosEnabled, onCheckedChange = { epicEosEnabled = it })
-                            }
-                            // Force the ownership-token (-epicovt) path for Denuvo EOS games
-                            // the auto-detector misses (obfuscated exes). Default OFF.
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Force Denuvo ownership token", fontSize = 14.sp)
-                                    Text(
-                                        "Force the ownership token for Denuvo games we don't auto-detect",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                // Sub-option of EOS auth: only meaningful when EOS auth is on.
-                                Switch(checked = epicOvtForce, onCheckedChange = { epicOvtForce = it },
-                                       enabled = epicEosEnabled)
-                            }
-                            // Launch offline: skip the online EOS auth exchange (drops the -AUTH_* args)
-                            // but keep the game's Epic identity/portal args. Default OFF.
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Launch offline", fontSize = 14.sp)
-                                    Text(
-                                        "Skip Epic sign-in for this game (no online features)",
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                // Sub-option of EOS auth: offline has nothing to skip when EOS auth is off.
-                                Switch(checked = epicOffline, onCheckedChange = { epicOffline = it },
-                                       enabled = epicEosEnabled)
-                            }
-                            // Epic Friends Overlay (Phase 3): provision Epic's real EOS overlay into the
-                            // prefix; the game's own EOS SDK renders it on Shift+F3. Default OFF.
-                            // Dark-launched: hidden behind FeatureFlags.EPIC_OVERLAY_ENABLED so no shortcut
-                            // can be set to epicOverlay=1 through the UI until the DXVK wrapper lands.
-                            if (com.winlator.star.FeatureFlags.EPIC_OVERLAY_ENABLED) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("Epic Friends Overlay", fontSize = 14.sp)
-                                        Text(
-                                            "Experimental — in-game Epic overlay on Shift+F3 (a draggable pill " +
-                                                    "can summon it too). Needs the container to allow full services.",
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    Spacer(Modifier.width(8.dp))
-                                    Switch(checked = epicOverlayEnabled, onCheckedChange = { epicOverlayEnabled = it })
-                                }
-                            }
-                        }
-
-                        if (xboxShipsRuntime) XboxRuntimeRow(xboxNexusRuntime) { xboxNexusRuntime = it }
+                        StoreOptionRows(
+                            isEpicShortcut, epicEosEnabled, { epicEosEnabled = it }, epicOvtForce, { epicOvtForce = it },
+                            epicOffline, { epicOffline = it }, epicOverlayEnabled, { epicOverlayEnabled = it },
+                            xboxShipsRuntime, xboxNexusRuntime, { xboxNexusRuntime = it },
+                        )
 
                         // Screen size
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -10923,4 +10845,102 @@ private fun XboxRuntimeRow(checked: Boolean, onChange: (Boolean) -> Unit) {
         Spacer(Modifier.width(8.dp))
         Switch(checked = checked, onCheckedChange = onChange)
     }
+}
+
+/**
+ * The classic editor's store rows: Epic (EOS sign-in, ownership token, offline, overlay) and Xbox (the app's runtime).
+ * Its own function: the editor's body is at the JVM method size limit.
+ */
+@Composable
+private fun StoreOptionRows(
+    isEpicShortcut: Boolean,
+    epicEosEnabled: Boolean, onEpicEos: (Boolean) -> Unit,
+    epicOvtForce: Boolean, onEpicOvtForce: (Boolean) -> Unit,
+    epicOffline: Boolean, onEpicOffline: (Boolean) -> Unit,
+    epicOverlayEnabled: Boolean, onEpicOverlay: (Boolean) -> Unit,
+    xboxShipsRuntime: Boolean, xboxNexusRuntime: Boolean, onXboxNexusRuntime: (Boolean) -> Unit,
+) {
+    // Epic Online Services (EOS) auth toggle — only for Epic-origin shortcuts.
+    // When ON, the launcher injects real-Epic auth args (-EpicPortal + a fresh
+    // exchange code) so EOS-requiring titles authenticate against the user's
+    // logged-in Epic account. Harmless for non-EOS Epic games.
+    if (isEpicShortcut) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Epic Online Services (EOS) auth", fontSize = 14.sp)
+                Text(
+                    "Sign EOS games in with your Epic account",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(checked = epicEosEnabled, onCheckedChange = onEpicEos)
+        }
+        // Force the ownership-token (-epicovt) path for Denuvo EOS games
+        // the auto-detector misses (obfuscated exes). Default OFF.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Force Denuvo ownership token", fontSize = 14.sp)
+                Text(
+                    "Force the ownership token for Denuvo games we don't auto-detect",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            // Sub-option of EOS auth: only meaningful when EOS auth is on.
+            Switch(checked = epicOvtForce, onCheckedChange = onEpicOvtForce,
+                   enabled = epicEosEnabled)
+        }
+        // Launch offline: skip the online EOS auth exchange (drops the -AUTH_* args)
+        // but keep the game's Epic identity/portal args. Default OFF.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Launch offline", fontSize = 14.sp)
+                Text(
+                    "Skip Epic sign-in for this game (no online features)",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            // Sub-option of EOS auth: offline has nothing to skip when EOS auth is off.
+            Switch(checked = epicOffline, onCheckedChange = onEpicOffline,
+                   enabled = epicEosEnabled)
+        }
+        // Epic Friends Overlay (Phase 3): provision Epic's real EOS overlay into the
+        // prefix; the game's own EOS SDK renders it on Shift+F3. Default OFF.
+        // Dark-launched: hidden behind FeatureFlags.EPIC_OVERLAY_ENABLED so no shortcut
+        // can be set to epicOverlay=1 through the UI until the DXVK wrapper lands.
+        if (com.winlator.star.FeatureFlags.EPIC_OVERLAY_ENABLED) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Epic Friends Overlay", fontSize = 14.sp)
+                    Text(
+                        "Experimental — in-game Epic overlay on Shift+F3 (a draggable pill " +
+                                "can summon it too). Needs the container to allow full services.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Switch(checked = epicOverlayEnabled, onCheckedChange = onEpicOverlay)
+            }
+        }
+    }
+
+    if (xboxShipsRuntime) XboxRuntimeRow(xboxNexusRuntime, onXboxNexusRuntime)
 }
