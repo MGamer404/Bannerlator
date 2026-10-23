@@ -16694,7 +16694,8 @@ return true;
         xboxLaunch = com.winlator.star.store.xbox.XboxRuntime.INSTANCE.prepare(getApplicationContext(), id,
                 java.util.UUID.randomUUID().toString(), imageFs.getRootDir(),
                 system32,
-                com.winlator.star.store.xbox.XboxMainActivity.Companion.cloudSaves(this));
+                com.winlator.star.store.xbox.XboxMainActivity.Companion.cloudSaves(this),
+                !"0".equals(shortcut.getExtra(com.winlator.star.store.xbox.XboxRuntime.NEXUS_RUNTIME_EXTRA)));
     }
 
     private void provisionEpicOverlay() {

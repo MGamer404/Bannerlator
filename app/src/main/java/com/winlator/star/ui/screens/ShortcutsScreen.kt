@@ -5312,6 +5312,13 @@ internal fun ShortcutSettingsDialogScreen(
     // Epic Friends Overlay (Phase 3) — provision Epic's real EOS overlay into the prefix so the game's
     // own EOS SDK renders friends/notifications on Shift+F3. Default OFF (opt-in per game).
     var epicOverlayEnabled by remember { mutableStateOf(shortcut.getExtra("epicOverlay", "0") == "1") }
+    // Xbox game whose install ships Microsoft's xgameruntime.dll: use the app's (Xodus Nexus) instead. Default ON.
+    val xboxShipsRuntime = remember {
+        shortcut.getExtra("storeSource") == "xbox" && shortcut.getExtra("xboxProductId").let { id ->
+            !id.isNullOrEmpty() && runCatching { com.winlator.star.store.xbox.XboxRuntime.shipsOwnRuntime(context, id) }.getOrDefault(false)
+        }
+    }
+    var xboxNexusRuntime by remember { mutableStateOf(shortcut.getExtra(com.winlator.star.store.xbox.XboxRuntime.NEXUS_RUNTIME_EXTRA, "1") != "0") }
 
     // Async-loaded state
     var isArm64EC by remember { mutableStateOf(false) }
@@ -6126,6 +6133,7 @@ internal fun ShortcutSettingsDialogScreen(
             if (isEpicShortcut) putExtra("epicOvtForce", if (epicOvtForce) "1" else "0")
             if (isEpicShortcut) putExtra("epicOffline", if (epicOffline) "1" else "0")
             if (isEpicShortcut) putExtra("epicOverlay", if (epicOverlayEnabled) "1" else "0")
+            if (xboxShipsRuntime) putExtra(com.winlator.star.store.xbox.XboxRuntime.NEXUS_RUNTIME_EXTRA, if (xboxNexusRuntime) "1" else "0")
             putExtra("screenSize", screenSize)
             // #413: "" (Container Default) -> null -> putExtra removes the key, so launch re-inherits the
             // container each time (true inherit, not a snapshot). "0"/"1"/"2" store the Center/Top/Bottom override.
@@ -6662,6 +6670,25 @@ internal fun ShortcutSettingsDialogScreen(
                                     Spacer(Modifier.width(8.dp))
                                     Switch(checked = epicOverlayEnabled, onCheckedChange = { epicOverlayEnabled = it })
                                 }
+                            }
+                        }
+
+                        if (xboxShipsRuntime) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Use the app's Xbox runtime", fontSize = 14.sp)
+                                    Text(
+                                        "This game ships Microsoft's own Xbox runtime, which needs Windows' Gaming Services. " +
+                                                "Turn off only to try the game's own.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Switch(checked = xboxNexusRuntime, onCheckedChange = { xboxNexusRuntime = it })
                             }
                         }
 
