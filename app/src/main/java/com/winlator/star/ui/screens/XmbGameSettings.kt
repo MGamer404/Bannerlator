@@ -201,6 +201,14 @@ private fun generalRows(xmb: XmbScope, p: XmbPrefs, host: XmbGameHost): List<Xmb
         }
     }
 
+    if (s.getExtra("storeSource") == "xbox" && s.getExtra("xboxProductId").let { id ->
+            !id.isNullOrEmpty() && runCatching { com.winlator.star.store.xbox.XboxRuntime.shipsOwnRuntime(xmb.context, id) }.getOrDefault(false) }) {
+        val key = com.winlator.star.store.xbox.XboxRuntime.NEXUS_RUNTIME_EXTRA
+        rows += XmbRow.Header("hXbox", "Xbox")
+        rows += XmbRow.Toggle(key, "Use the app's Xbox runtime", Icons.Filled.Layers, p.ex(key, "1") != "0",
+            subtitle = "The game ships Microsoft's, which needs Windows' Gaming Services") { xmb.set(p, key, if (it) "1" else "0") }
+    }
+
     // Sync (esync / ntsync / fsync / wineserver): same extra and rules as the pop-up editor —
     // "Container default" clears the per-game override; greyed against the container's layer. The
     // layer probe reads ntdll.so, so a first visit starts it off-main and refreshes when it lands.

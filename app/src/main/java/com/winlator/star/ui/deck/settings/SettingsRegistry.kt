@@ -463,6 +463,14 @@ internal object SettingsRegistry {
             game = builtIn10("epicOverlay", false),
             visible = { env, _ -> gameScope(env) && env.isEpic && FeatureFlags.EPIC_OVERLAY_ENABLED },
         ),
+        SettingDef(
+            id = "launch.xboxNexusRuntime", category = "launch", group = "Xbox", level = SIMPLE,
+            label = "Use the app's Xbox runtime", hint = "This game ships Microsoft's own Xbox runtime, which needs Windows' Gaming Services. On: the app's runtime is used instead. Turn off only to try the game's own.", tech = "xboxNexusRuntime",
+            help = "Xbox games talk to Xbox services through xgameruntime.dll. This game brings Microsoft's copy in its folder, and Wine would load it before the app's (Xodus Nexus). Microsoft's copy needs Windows' Gaming Services, which Wine doesn't have, so the game usually stops at start (Cyberpunk 2077 did). On: each launch uses the app's copy; the game's files are not changed. Off: the game's own copy is used.",
+            control = { _, _ -> Control.Toggle },
+            game = builtIn10("xboxNexusRuntime", true),
+            visible = { env, _ -> gameScope(env) && env.xboxShipsRuntime },
+        ),
 
         // Display
         SettingDef(

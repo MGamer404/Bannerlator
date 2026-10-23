@@ -176,6 +176,10 @@ internal class SettingsEnv(
     val isAndroid: Boolean = shortcut?.let { AndroidGames.isAndroidEntry(it) } == true
     val isSteam: Boolean = shortcut?.let { s -> runCatching { isSteamOriginShortcut(s) }.getOrDefault(false) } == true
     val isEpic: Boolean = shortcut?.getExtra("storeSource") == "epic"
+    /** An Xbox game whose install ships Microsoft's xgameruntime.dll (the "Xbox runtime" setting applies). */
+    val xboxShipsRuntime: Boolean = shortcut?.takeIf { it.getExtra("storeSource") == "xbox" }?.getExtra("xboxProductId")
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { id -> runCatching { com.winlator.star.store.xbox.XboxRuntime.shipsOwnRuntime(context, id) }.getOrDefault(false) } == true
     val world: World = when {
         isAndroid -> World.ANDROID
         isLinuxEntry -> World.LINUX
