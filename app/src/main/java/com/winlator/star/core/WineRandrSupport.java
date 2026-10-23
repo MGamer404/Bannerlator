@@ -68,7 +68,8 @@ public final class WineRandrSupport {
      * this on 2026-09-01 (b385d4d2, "fixup! HACK: fshack: win32u: Emulate modesetting by default"); before
      * it, "Y" turned emulation OFF like "EmulateModelist" still does. The flip is a one-character change
      * with no string of its own, so we look for the next win32u change in Valve's history, the Intel
-     * "InfPath" = "igd_faux.inf" hack (d324dfed), which the compiler keeps as a UTF-16 literal.
+     * "InfPath" = "igd_faux.inf" hack (d324dfed): its value name stays in win32u.so as the UTF-16 array
+     * L"InfPath" (the ASCII value is inlined, so it can't be searched for). No other win32u code uses it.
      * Proton 10.0-4, 11.0-2 and GE up to 11-7 lack it; GE 11-7.1+, CachyOS 20261005 and DroidDeck 11-9.1 have it.
      */
     public static boolean usesLiteralEmulateModeset(WineInfo wineInfo) {
@@ -80,7 +81,7 @@ public final class WineRandrSupport {
         File win32u = new File(wineInfo.path, "lib/wine/aarch64-unix/win32u.so");
         if (!win32u.isFile()) win32u = new File(wineInfo.path, "lib/wine/x86_64-unix/win32u.so");
         boolean literal = win32u.isFile()
-                && fileContainsAny(win32u, "igd_faux.inf".getBytes(StandardCharsets.UTF_16LE));
+                && fileContainsAny(win32u, "InfPath\0".getBytes(StandardCharsets.UTF_16LE));
         literalModesetCache.put(key, literal);
         return literal;
     }
