@@ -119,6 +119,7 @@ object XboxRuntime {
             val overrides = (DLLS + compat - skip.toSet()).filter { it != "libnghttp2.dll" }.joinToString(";") { it.removeSuffix(".dll") + "=n" }
             // The view's root mirrors the install folder; game.exe is relative to both.
             val viewRoot = File(exe.path.removeSuffix(game.exe).trimEnd('/')).takeIf { exe.path.endsWith(game.exe) }
+            useStagedRuntime(app, directory, exe.parentFile, system32)
             val localAppData = File(system32.parentFile?.parentFile, "users/xuser/AppData/Local")
             val viewFiles = viewRoot?.let { runCatching { XboxViewSaves.prepare(app, it, localAppData) }.getOrDefault(emptySet()) } ?: emptySet()
             val bridge = XboxBridge(socket.path)
@@ -267,6 +268,22 @@ object XboxRuntime {
         }
         XboxDiag.log(app, "Xbox modules staged in the container's system32" + (if (compat.isEmpty()) "" else " (+ ${compat.joinToString()} for this Proton)") +
             (if (skip.isEmpty()) "" else " (this Proton keeps its own ${skip.joinToString()})"))
+    }
+
+    /**
+     * A game that ships Microsoft's xgameruntime.dll beside its exe (Cyberpunk 2077) loads it before the staged one in
+     * system32 (the exe's folder is searched first); Microsoft's needs Windows' Gaming Services and the game stops at
+     * start. The launch view's entry is pointed at the staged copy instead: the install is not touched, and the entry stays
+     * readable for Nexus' chunk check (which reports a chunk unavailable when one of its files can't be opened).
+     */
+    private fun useStagedRuntime(app: Context, view: File, exeDir: File?, system32: File) {
+        if (exeDir == null || !exeDir.canonicalPath.startsWith(view.canonicalPath + File.separator)) return
+        val bundled = exeDir.listFiles()?.firstOrNull { it.name.equals("xgameruntime.dll", ignoreCase = true) } ?: return
+        val staged = File(system32, "xgameruntime.dll")
+        if (!staged.isFile) return
+        java.nio.file.Files.delete(bundled.toPath())
+        java.nio.file.Files.createSymbolicLink(bundled.toPath(), staged.toPath())
+        XboxDiag.log(app, "the game ships its own xgameruntime.dll: this launch uses Xodus Nexus' instead")
     }
 
     /** Puts back the container's own modules that [stageModules] replaced. Safe to call for any container. */
