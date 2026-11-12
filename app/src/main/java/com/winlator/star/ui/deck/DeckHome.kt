@@ -384,7 +384,7 @@ internal fun DeckHome(
         // Steam (Linux) entry, whose settings aren't XMB rows, opens the Deck editor. The XMB Home lists Community configs third.
         xmbGameActions(
             context, s, xmbHost, openSettings = { actions.perform(GameMenuAction.SETTINGS, it) }, settingsAsColumns = true,
-            communityThird = xmbHome,
+            communityThird = xmbHome, editorSections = xmbHome,
         )
     }
     // XMB home: the plain text tabs under the focused game's title are the peek of the tabs page (XmbTabsPage.kt): Down from the covers, or a

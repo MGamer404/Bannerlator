@@ -41,6 +41,9 @@ import com.winlator.star.store.EaSupport
  *
  * [communityThird] puts a Wine game's Community configs right after Settings (the XMB Home's order: Play, Settings, Community configs,
  * Game Details, ...) instead of after the saves actions.
+ *
+ * [editorSections] gives a Wine game's Settings the sections of the container editor's tabs (Game, General, Graphics, ...) with what
+ * this game changed from its container marked, instead of the five older sections (XMB Home only).
  */
 internal fun xmbGameActions(
     context: Context,
@@ -49,6 +52,7 @@ internal fun xmbGameActions(
     openSettings: (Shortcut) -> Unit,
     settingsAsColumns: Boolean = true,
     communityThird: Boolean = false,
+    editorSections: Boolean = false,
 ): List<XmbAction> = buildList {
     // An Android game has no Wine side: no settings, saves, configs, logs or container moves.
     if (AndroidGames.isAndroidEntry(shortcut)) {
@@ -70,7 +74,7 @@ internal fun xmbGameActions(
         return@buildList
     }
     if (settingsAsColumns) {
-        add(XmbAction("Settings", Icons.Filled.Settings, "Display, graphics, controller…", menu = { xmbSettingsMenu(it, shortcut, host) }))
+        add(XmbAction("Settings", Icons.Filled.Settings, "Display, graphics, controller…", menu = { xmbSettingsMenu(it, shortcut, host, editorSections) }))
     } else {
         add(XmbAction("Settings", Icons.Filled.Settings, "Display, graphics, controller…") { openSettings(shortcut) })
     }

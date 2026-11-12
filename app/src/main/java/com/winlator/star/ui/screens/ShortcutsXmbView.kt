@@ -531,6 +531,7 @@ internal fun ShortcutsXmbView(
                             Key.ButtonB, Key.Escape -> XmbKey.B
                             Key.ButtonL1 -> XmbKey.L1
                             Key.ButtonR1 -> XmbKey.R1
+                            Key.ButtonX -> XmbKey.X
                             else -> null
                         } ?: return@onPreviewKeyEvent false
                         return@onPreviewKeyEvent nav.onKey(k, xmbScope)
@@ -644,6 +645,7 @@ internal fun ShortcutsXmbView(
                             if (hi.change) XmbKeyHint("◀ ▶", "Change", hs)
                         }
                         if (hi.sections) XmbKeyHint("L1 R1", "Section", hs)
+                        if (hi.reset) XmbButtonHint("X", Color(0xFF5B9DFF), "Reset", hs)
                     } else if (hasPad) {
                         XmbButtonHint("A", Color(0xFF3DDC84), if (onAll) allLabel else if (centered) "Options" else actions[actIdx].label, hs)
                         XmbButtonHint("B", Color(0xFFFF5252), "Back", hs)

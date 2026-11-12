@@ -162,8 +162,13 @@ private fun XmbScope.set(p: XmbPrefs, key: String, value: String?) { p.put(key, 
 
 private val SECTION_TITLES = listOf("General", "Win Components", "Env Vars", "Advanced", "Controller")
 
-internal fun xmbSettingsMenu(xmb: XmbScope, shortcut: Shortcut, host: XmbGameHost): XmbMenu {
+/**
+ * [editorSections] (the XMB Home only) builds the sections of the container editor's tabs instead (XmbGameSections.kt); the
+ * Classic XMB, Lab and the plain Deck keep the five sections below.
+ */
+internal fun xmbSettingsMenu(xmb: XmbScope, shortcut: Shortcut, host: XmbGameHost, editorSections: Boolean = false): XmbMenu {
     val p = XmbPrefs(xmb.context, shortcut).also { it.loadAsync(xmb) }
+    if (editorSections) return xmbEditorSettingsMenu(xmb, p, host)
     fun section(n: Int): XmbMenu = when (n) {
         0 -> xmbGeneralMenu(xmb, p, host)
         1 -> xmbWinComponentsMenu(xmb, shortcut)
@@ -194,7 +199,7 @@ private var xmbWaylandAutoLoading = false
 // Layers whose Sync capabilities are being probed (SyncSupport caches the answer).
 private val xmbSyncProbing = HashSet<String>()
 
-private fun generalRows(xmb: XmbScope, p: XmbPrefs, host: XmbGameHost): List<XmbRow> {
+internal fun generalRows(xmb: XmbScope, p: XmbPrefs, host: XmbGameHost): List<XmbRow> {
     val s = p.shortcut
     val c = p.c
     val rows = mutableListOf<XmbRow>()
@@ -479,7 +484,8 @@ private fun generalRows(xmb: XmbScope, p: XmbPrefs, host: XmbGameHost): List<Xmb
                 "Used for the game (through the Wayland adapter) and for putting its frames on screen."
             else -> "Used by the Wayland compositor to put frames on screen; the game renders on the Wayland game driver below."
         }
-        rows += XmbRow.Choice("gfxDriver", p.str(R.string.graphics_driver), Icons.Filled.Memory, turnips,
+        // Its own key (not the X11 picker's "gfxDriver"): it writes another setting, which the XMB Home's override dot follows.
+        rows += XmbRow.Choice("gfxCompositorDriver", p.str(R.string.graphics_driver), Icons.Filled.Memory, turnips,
             compositorDriverLabel(compositorVersion, turnips, turnipsLoaded),
             subtitle = gfxSubtitle) { v ->
             xmb.set(p, "graphicsDriverConfig", withGraphicsDriverVersion(gdc, v))
@@ -817,7 +823,7 @@ internal fun xmbApplyIconFile(s: Shortcut, f: File): Boolean = runCatching {
 internal fun xmbControllerMenu(xmb: XmbScope, p: XmbPrefs): XmbMenu =
     XmbMenu("Controller", Icons.Filled.Gamepad) { controllerRows(this, p) }
 
-private fun controllerRows(xmb: XmbScope, p: XmbPrefs): List<XmbRow> {
+internal fun controllerRows(xmb: XmbScope, p: XmbPrefs): List<XmbRow> {
     val s = p.shortcut
     val c = p.c
     val rows = mutableListOf<XmbRow>()
