@@ -25,6 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -42,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.onFocusChanged
@@ -69,10 +72,13 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.winlator.star.core.PeIconExtractor
 import com.winlator.star.core.StringUtils
+import com.winlator.star.ui.LocalXmbHintInset
 import com.winlator.star.ui.deck.xmbCardFill
 import com.winlator.star.ui.deck.xmbCardLine
-import com.winlator.star.ui.deck.xmbOnGlow
+import com.winlator.star.ui.deck.xmbOnGlass
 import com.winlator.star.ui.screens.outlinedMenuCard
+import com.winlator.star.ui.screens.xmbMenuBack
+import com.winlator.star.ui.screens.xmbStop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -80,12 +86,12 @@ import java.io.File
 // ── Look ──
 
 /**
- * The file manager's backdrop: two soft glows of the theme colour over the background. On the XMB glow
- * pages the page already has its glow, so nothing is drawn there.
+ * The file manager's backdrop: two soft glows of the theme colour over the background. On the XMB glass
+ * pages the page already has its glass, so nothing is drawn there.
  */
 @Composable
 internal fun Modifier.fmBackdrop(): Modifier {
-    if (xmbOnGlow()) return this
+    if (xmbOnGlass()) return this
     val cs = MaterialTheme.colorScheme
     val bg = cs.background
     val a = cs.primary
@@ -104,7 +110,7 @@ internal fun Modifier.fmBackdrop(): Modifier {
     }
 }
 
-/** A frosted card: glass on the XMB glow, else a see-through surface over the backdrop with a hairline. */
+/** A frosted card: glass on the XMB glass, else a see-through surface over the backdrop with a hairline. */
 @Composable
 internal fun Modifier.fmGlass(
     shape: Shape = RoundedCornerShape(14.dp),
@@ -138,7 +144,7 @@ internal class FmMenuEntry(
 @Composable
 internal fun FmMenu(expanded: Boolean, onDismiss: () -> Unit, entries: List<FmMenuEntry>) {
     val cs = MaterialTheme.colorScheme
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, modifier = Modifier.outlinedMenuCard()) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss, modifier = Modifier.outlinedMenuCard().xmbMenuBack(onDismiss)) {
         entries.forEach { e ->
             DropdownMenuItem(
                 text = { Text(e.label, color = if (e.danger) cs.error else cs.onSurface) },
@@ -384,7 +390,7 @@ internal fun FmParentRow(compact: Boolean, onUp: () -> Unit) {
 
 /** Clickable path segments; the last one is where the pane is. */
 @Composable
-internal fun FmCrumbs(segments: List<Pair<String, () -> Unit>>, modifier: Modifier = Modifier) {
+internal fun FmCrumbs(segments: List<Pair<String, () -> Unit>>, modifier: Modifier = Modifier, vPad: Dp = 4.dp) {
     val cs = MaterialTheme.colorScheme
     val scroll = rememberScrollState()
     LaunchedEffect(segments.size, segments.lastOrNull()?.first) { scroll.scrollTo(scroll.maxValue) }
@@ -400,7 +406,7 @@ internal fun FmCrumbs(segments: List<Pair<String, () -> Unit>>, modifier: Modifi
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable(enabled = !last, onClick = go)
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                    .padding(horizontal = 6.dp, vertical = vPad),
             )
             if (!last) Icon(Icons.Filled.ChevronRight, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
         }
@@ -443,6 +449,46 @@ internal fun FmCapsule(
             } else {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape))
             }
+        }
+    }
+}
+
+/**
+ * The compact toolbar's clipboard, as floating buttons: a round paste button (the Containers tab's "+" look: 56 dp, accent fill)
+ * with a small clear button beside it. Meant for the bottom right of the page (the caller aligns it); it lifts itself above the
+ * shell's floating Back / Search hints ([LocalXmbHintInset]). It names nothing: the icon says paste or move, the description for
+ * accessibility too. [onPaste] null (no folder open, so nothing to paste into) leaves the button dimmed and inert. Both are D-pad
+ * stops (A presses), with the XMB highlight on them.
+ */
+@Composable
+internal fun FmPasteFab(cut: Boolean, onPaste: (() -> Unit)?, onClear: () -> Unit, modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = modifier.padding(20.dp).padding(bottom = LocalXmbHintInset.current),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(40.dp).xmbStop(CircleShape).fmGlass(CircleShape).clickable(onClick = onClear),
+        ) {
+            Icon(Icons.Filled.Close, "Clear the clipboard", tint = cs.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        }
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(56.dp)
+                .alpha(if (onPaste != null) 1f else 0.5f)
+                .xmbStop(CircleShape)
+                .clip(CircleShape)
+                .background(cs.primary)
+                .clickable(enabled = onPaste != null, onClick = { onPaste?.invoke() }),
+        ) {
+            Icon(
+                if (cut) Icons.Filled.DriveFileMove else Icons.Filled.ContentPaste,
+                if (cut) "Move here" else "Paste here",
+                tint = cs.onPrimary,
+            )
         }
     }
 }
