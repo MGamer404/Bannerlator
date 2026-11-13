@@ -82,6 +82,76 @@ class XmbSoundSynthTest {
         }
     }
 
+    // ---- The numbers the sounds are made from ----
+
+    @Test
+    fun theDefaultNumbersAreTheSoundsAsTheyShip() {
+        val d = XmbSoundParams.DEFAULT
+        assertEquals(XmbFocusParams(pitchHz = 1000, lengthMs = 60, attackMs = 4, decayMs = 16, peakPercent = 17), d.focus)
+        assertEquals(
+            XmbSelectParams(
+                note1Hz = 880, note2Hz = 1320, note2StartMs = 45, lengthMs = 130, attackMs = 5, decay1Ms = 45, decay2Ms = 60,
+                harmonicPercent = 20, peakPercent = 45,
+            ),
+            d.select,
+        )
+        assertEquals(
+            XmbBackParams(startHz = 600, glidePercent = -10, lengthMs = 100, attackMs = 5, decayMs = 35, harmonicPercent = 15, peakPercent = 40),
+            d.back,
+        )
+        assertEquals(
+            XmbPageParams(startHz = 520, glidePercent = 20, lengthMs = 120, attackMs = 12, decayMs = 50, harmonicPercent = 8, peakPercent = 22),
+            d.page,
+        )
+    }
+
+    @Test
+    fun noNumbersGiveTheDefaultSounds() {
+        for (kind in XmbSoundKind.entries) {
+            assertArrayEquals("$kind", XmbSoundSynth.render(kind, rate), XmbSoundSynth.render(kind, rate, XmbSoundParams.DEFAULT))
+        }
+    }
+
+    @Test
+    fun aChangedNumberChangesOnlyItsOwnSound() {
+        val changed = XmbSoundParams(focus = XmbFocusParams(pitchHz = 2000))
+        assertFalse(render(XmbSoundKind.FOCUS).contentEquals(XmbSoundSynth.render(XmbSoundKind.FOCUS, rate, changed)))
+        for (kind in listOf(XmbSoundKind.SELECT, XmbSoundKind.BACK, XmbSoundKind.PAGE)) {
+            assertArrayEquals("$kind", render(kind), XmbSoundSynth.render(kind, rate, changed))
+        }
+    }
+
+    @Test
+    fun theLengthAndPeakFollowTheNumbers() {
+        val p = XmbSoundParams(page = XmbPageParams(lengthMs = 250, peakPercent = 30))
+        val s = XmbSoundSynth.render(XmbSoundKind.PAGE, rate, p)
+        assertEquals(250.0, millis(s), 1.0)
+        assertEquals(0.30 * Short.MAX_VALUE, peak(s).toDouble(), 2.0)
+    }
+
+    @Test
+    fun theRateLimitWindowsOfTheDefaultsAreTheShippedOnes() {
+        assertEquals(XmbSoundLimiter.FOCUS_GAP_MS, XmbSoundParams.DEFAULT.focusGapMs)
+        assertEquals(XmbSoundLimiter.ACTION_GAP_MS, XmbSoundParams.DEFAULT.actionGapMs)
+    }
+
+    @Test
+    fun theRateLimitWindowsFollowTheLengths() {
+        val p = XmbSoundParams(focus = XmbFocusParams(lengthMs = 100), select = XmbSelectParams(lengthMs = 300))
+        assertEquals(100L, p.focusGapMs)
+        assertEquals(320L, p.actionGapMs)
+    }
+
+    @Test
+    fun aLimiterUsesTheWindowsItIsGiven() {
+        val limiter = XmbSoundLimiter(focusGapMs = 100L, actionGapMs = 320L)
+        assertTrue(limiter.allow(XmbSoundKind.FOCUS, 1_000L))
+        assertFalse(limiter.allow(XmbSoundKind.FOCUS, 1_099L))
+        assertTrue(limiter.allow(XmbSoundKind.SELECT, 1_100L))
+        assertFalse(limiter.allow(XmbSoundKind.PAGE, 1_419L))
+        assertTrue(limiter.allow(XmbSoundKind.PAGE, 1_420L))
+    }
+
     // ---- The WAV file SoundPool loads ----
 
     @Test

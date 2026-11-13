@@ -103,7 +103,7 @@ internal object AppSettingsRegistry {
 
     // [legacyDefs] plus the rows only the XMB Settings tab has: they sit in "app.x.*" categories that are not in [categories],
     // and AppSettingsLayout files all of them into its tabs. Only the XMB editor is given this list.
-    val defs: List<SettingDef> by lazy { legacyDefs + AppSettingsRows.defs() }
+    val defs: List<SettingDef> by lazy { legacyDefs + AppSettingsRows.defs() + XmbSoundTuningRows.defs() }
 
     private fun prefs(c: Context) = PreferenceManager.getDefaultSharedPreferences(c)
     private fun onOff(b: Boolean) = if (b) "1" else "0"
