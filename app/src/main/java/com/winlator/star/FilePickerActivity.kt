@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import com.winlator.star.ui.deck.isXmbHome
 import com.winlator.star.ui.screens.FileManagerScreen
 import com.winlator.star.ui.theme.AppThemeState
 import com.winlator.star.ui.theme.WinlatorTheme
@@ -43,6 +44,8 @@ class FilePickerActivity : ComponentActivity() {
         // Optional: the chosen container's C: drive, so the picker can offer a "Drive C:" location
         // (add-a-game-from-C: flow). Absent for every other picker → C: option stays hidden.
         val driveCPath = intent.getStringExtra(EXTRA_CONTAINER_DRIVE_C)?.let { File(it) }
+        // XMB mode only: the slim one-row toolbar of Tools > Files, and the dense rows / text / bars (see FileManagerRoot's dense).
+        val xmb = isXmbHome(this)
 
         setContent {
             WinlatorTheme {
@@ -54,6 +57,8 @@ class FilePickerActivity : ComponentActivity() {
                         initialDir = initialDir,
                         pickerTitle = title,
                         driveCPath = driveCPath,
+                        compactToolbar = xmb,
+                        dense = xmb,
                         onPick = { file ->
                             setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_SELECTED_FILE, file.absolutePath))
                             finish()

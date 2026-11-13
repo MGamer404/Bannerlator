@@ -8,16 +8,17 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -38,12 +39,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -80,6 +79,53 @@ internal fun xmbInGameDrawerWidth(screenDp: Float, compact: Boolean): Float =
 internal const val XMB_DRAWER_STACK_BELOW_DP = 560f
 
 internal fun xmbInGameDrawerStacksRows(drawerDp: Float): Boolean = drawerDp < XMB_DRAWER_STACK_BELOW_DP
+
+/** Under this drawer height (dp) the chrome shrinks to its short-screen sizes. */
+internal const val XMB_DRAWER_SHORT_BELOW_DP = 360f
+
+/** Under this drawer width (dp) the footer buttons are icon-only; at or over it they keep their text. */
+internal const val XMB_DRAWER_ICON_ONLY_BELOW_DP = 360f
+
+/**
+ * The drawer's chrome sizes in dp (the header, the page strip, the page title, the footer), so the page keeps the rest of the
+ * height. Header, title and buttons are minimum heights: larger text or font scale grows them rather than clipping.
+ */
+internal class XmbDrawerMetrics(
+    val headerDp: Float,
+    val iconDp: Float,
+    val chipHeightDp: Float,
+    val chipWidthDp: Float,
+    val chipIconDp: Float,
+    val stripPadDp: Float,
+    val titleDp: Float,
+    val buttonDp: Float,
+    val padDp: Float,
+    val gapDp: Float,
+    val bodyPadDp: Float,
+    val footerTopDp: Float,
+    val footerBottomDp: Float,
+) {
+    /** The pill's own height: its chips and the padding around them. */
+    val stripDp: Float get() = chipHeightDp + 2f * stripPadDp
+
+    /** Everything that is not the page, top to bottom. */
+    val chromeDp: Float
+        get() = headerDp + gapDp + stripDp + titleDp + 2f * bodyPadDp + footerTopDp + buttonDp + footerBottomDp
+}
+
+/** The chrome sizes for a drawer [heightDp] tall: roomy from [XMB_DRAWER_SHORT_BELOW_DP] up (186 dp of chrome), tighter under it (152 dp). */
+internal fun xmbInGameDrawerMetrics(heightDp: Float): XmbDrawerMetrics =
+    if (heightDp >= XMB_DRAWER_SHORT_BELOW_DP) {
+        XmbDrawerMetrics(
+            headerDp = 44f, iconDp = 32f, chipHeightDp = 40f, chipWidthDp = 42f, chipIconDp = 20f, stripPadDp = 3f,
+            titleDp = 28f, buttonDp = 44f, padDp = 10f, gapDp = 2f, bodyPadDp = 4f, footerTopDp = 6f, footerBottomDp = 8f,
+        )
+    } else {
+        XmbDrawerMetrics(
+            headerDp = 38f, iconDp = 28f, chipHeightDp = 34f, chipWidthDp = 38f, chipIconDp = 18f, stripPadDp = 2f,
+            titleDp = 24f, buttonDp = 38f, padDp = 8f, gapDp = 0f, bodyPadDp = 2f, footerTopDp = 4f, footerBottomDp = 6f,
+        )
+    }
 
 /** How much of the game's art shows through the glass (it is laid over the opaque glass base), and where the fade to the soft edge starts. */
 private const val XMB_DRAWER_ART_ALPHA = 0.34f
@@ -166,138 +212,163 @@ private fun BoxScope.XmbInGameMenuBody(widthDp: Float, onExit: () -> Unit) {
         LocalIgRaisedAlpha provides 0.6f,
         LocalIgCompact provides (LocalIgCompact.current || stack),
     ) {
-        Column(
-            modifier = Modifier
-                .matchParentSize()
-                .clip(shape)
-                .focusProperties { canFocus = false }
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { }
-                .padding(start = xmbFrame()),
-        ) {
-            // The icon on the left, the logo in the middle (the name on the left when there is no logo), the status on the right.
-            val hasIcon = game != null && LabArt.pick(game, "igicon") != "none"
-            Box(Modifier.fillMaxWidth().height(60.dp).padding(start = 16.dp, end = 16.dp, top = 10.dp)) {
-                val name: @Composable () -> Unit = {
-                    Text(
-                        title.ifEmpty { L("In game") }, color = cs.onSurface, fontFamily = SoraFamily, fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.align(Alignment.CenterStart).padding(start = if (hasIcon && game != null) 52.dp else 0.dp).fillMaxWidth(0.62f),
-                    )
-                }
-                if (hasIcon && game != null) LabInGameIcon(game, Modifier.align(Alignment.CenterStart).size(42.dp))
-                if (logo.isEmpty()) name()
-                else LabPicture(
-                    logo, Modifier.align(Alignment.Center).fillMaxWidth(0.46f).fillMaxHeight(),
-                    contentScale = ContentScale.Fit, alignment = Alignment.Center, onNone = name,
-                )
-                Box(Modifier.align(Alignment.CenterEnd)) { DeviceStatus() }
-            }
-            Spacer(Modifier.height(8.dp))
-            Box(Modifier.padding(horizontal = 16.dp).width(32.dp).height(3.dp).clip(RoundedCornerShape(2.dp)).background(cs.primary))
-            Spacer(Modifier.height(10.dp))
-
-            // The pages: Quick, then the full menu's, as icons on a glass strip between the bumper glyphs (the open one tinted; its
-            // name is the page title just below).
-            val stripShape = RoundedCornerShape(18.dp)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        // The chrome (header, strip, title, footer) is sized from the real height, so the page keeps all the rest.
+        BoxWithConstraints(Modifier.matchParentSize()) {
+            val m = remember(maxHeight) { xmbInGameDrawerMetrics(maxHeight.value) }
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(shape)
+                    .focusProperties { canFocus = false }
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { }
+                    .padding(start = xmbFrame()),
             ) {
-                DeckGlyph("L1", GlyphKind.BUMPER)
+                // One slim row: the game's icon, its logo (else its name) and the status at the right end.
+                val hasIcon = game != null && LabArt.pick(game, "igicon") != "none"
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    modifier = Modifier
-                        .weight(1f, fill = false)
-                        .xmbGlassCard(stripShape)
-                        .border(1.dp, deckLine(), stripShape)
-                        .horizontalScroll(rememberScrollState())
-                        .padding(5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = m.headerDp.dp).padding(start = m.padDp.dp, end = (m.padDp + 4f).dp),
                 ) {
-                    XmbDrawerTabChip(Icons.Outlined.Bolt, L("Quick"), quick, stripFocus, pageFocus) { DeckInGameState.selectLabQuick() }
-                    tabs.forEach { t ->
-                        XmbDrawerTabChip(menuTabIcon(t), menuTabTitle(t), !quick && t == shown, stripFocus, pageFocus) { DeckInGameState.selectMenuTab(t) }
+                    if (hasIcon && game != null) LabInGameIcon(game, Modifier.size(m.iconDp.dp))
+                    val name: @Composable () -> Unit = {
+                        Text(
+                            title.ifEmpty { L("In game") }, color = cs.onSurface, fontFamily = SoraFamily, fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
                     }
+                    if (logo.isEmpty()) name()
+                    else LabPicture(
+                        logo, Modifier.weight(1f).height(m.iconDp.dp),
+                        contentScale = ContentScale.Fit, alignment = Alignment.CenterStart, onNone = name,
+                    )
+                    DeviceStatus()
                 }
-                DeckGlyph("R1", GlyphKind.BUMPER)
-            }
-            Spacer(Modifier.height(10.dp))
-            Box(Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(1.dp).background(glass.frost.line))
+                Spacer(Modifier.height(m.gapDp.dp))
 
-            val pageTitle = if (quick) L("Quick") else menuTabTitle(shown)
-            val pageDesc = if (quick) L("The settings changed most during a game.") else menuTabDesc(shown, kind)
-            val pageHeader: @Composable () -> Unit = {
-                Text(pageTitle, color = cs.onSurface, fontFamily = SoraFamily, fontWeight = FontWeight.ExtraBold, fontSize = 21.sp)
-                Text(pageDesc, color = cs.onSurfaceVariant, fontFamily = NunitoSansFamily, fontSize = 12.5.sp, lineHeight = 16.sp)
-                Spacer(Modifier.height(4.dp))
-            }
-            if (!quick && shown == MenuTab.FRIENDS) {
-                // The roster owns its scrolling (a LazyColumn), so it gets the space without a scroll wrapper.
-                Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).focusRequester(pageFocus)) {
-                    pageHeader()
-                    Spacer(Modifier.height(8.dp))
-                    IgHostedCard { FriendsContent(state) }
-                }
-            } else {
-                // Each page starts at its top rather than at the previous page's scroll offset.
-                val scroll = key(quick, shown) { rememberScrollState() }
-                Column(Modifier.weight(1f).fillMaxWidth().igPageScroll(scroll).padding(horizontal = 12.dp, vertical = 10.dp)) {
-                    pageHeader()
-                    // Inside the scroll container, so the request lands on the page's first control, not the scroll group.
-                    Column(Modifier.fillMaxWidth().focusRequester(pageFocus)) {
-                        if (quick) QuickControls(kind)
-                        else when (shown) {
-                            MenuTab.SCREEN -> ScreenPage(state)
-                            MenuTab.PERFORMANCE -> PerformancePage(state)
-                            MenuTab.EFFECTS -> EffectsPage(state, kind)
-                            MenuTab.OVERLAY -> OverlayPage(state)
-                            MenuTab.CONTROLS -> ControlsPage(state, kind)
-                            MenuTab.AUDIO -> AudioPage(state)
-                            MenuTab.STEAM -> SteamPage(state)
-                            MenuTab.TV -> TvPage(state)
-                            MenuTab.MODS -> ModsPage(state, mods)
-                            MenuTab.TOOLS -> ToolsPage(state, kind)
-                            MenuTab.FRIENDS -> Unit
+                // The pages: Quick, then the full menu's, as icons on a glass strip between the bumper glyphs (the open one tinted; its
+                // name is the page title just below).
+                val stripShape = RoundedCornerShape(16.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = m.padDp.dp),
+                ) {
+                    DeckGlyph("L1", GlyphKind.BUMPER, Modifier.defaultMinSize(minWidth = 24.dp, minHeight = 18.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .xmbGlassCard(stripShape)
+                            .border(1.dp, deckLine(), stripShape)
+                            .horizontalScroll(rememberScrollState())
+                            .padding(m.stripPadDp.dp),
+                    ) {
+                        XmbDrawerTabChip(Icons.Outlined.Bolt, L("Quick"), quick, stripFocus, pageFocus, m) { DeckInGameState.selectLabQuick() }
+                        tabs.forEach { t ->
+                            XmbDrawerTabChip(menuTabIcon(t), menuTabTitle(t), !quick && t == shown, stripFocus, pageFocus, m) { DeckInGameState.selectMenuTab(t) }
                         }
                     }
-                    Spacer(Modifier.height(10.dp))
+                    DeckGlyph("R1", GlyphKind.BUMPER, Modifier.defaultMinSize(minWidth = 24.dp, minHeight = 18.dp))
                 }
-            }
 
-            // Footer: the XMB bar (a veil of the glass with a hairline above it), the pad hints, Pause / Resume and Exit (which asks first).
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .background(glass.frost.bar)
-                    .drawBehind { drawLine(glass.frost.line, Offset.Zero, Offset(size.width, 0f), 1.dp.toPx()) },
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
-                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp),
+                // The open page's name alone; its description is gone to leave the options the room.
+                val pageTitle = if (quick) L("Quick") else menuTabTitle(shown)
+                Box(
+                    contentAlignment = Alignment.CenterStart,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = m.titleDp.dp).padding(horizontal = (m.padDp + 2f).dp),
                 ) {
-                    DeckFloatingHint(
-                        "X", GlyphKind.Y, if (quick) L("Pages") else L("Quick"),
-                        { if (quick) DeckInGameState.selectMenuTab(shown) else DeckInGameState.selectLabQuick() },
-                        compact = true,
+                    Text(
+                        pageTitle, color = cs.onSurface, fontFamily = SoraFamily, fontWeight = FontWeight.ExtraBold,
+                        fontSize = 18.sp, lineHeight = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
-                    DeckFloatingHint("B", GlyphKind.Y, L("Back"), { DeckInGameState.close() }, compact = true)
                 }
+
+                if (!quick && shown == MenuTab.FRIENDS) {
+                    // The roster owns its scrolling (a LazyColumn), so it gets the space without a scroll wrapper.
+                    Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = m.padDp.dp, vertical = m.bodyPadDp.dp).focusRequester(pageFocus)) {
+                        IgHostedCard { FriendsContent(state) }
+                    }
+                } else {
+                    // Each page starts at its top rather than at the previous page's scroll offset.
+                    val scroll = key(quick, shown) { rememberScrollState() }
+                    Column(Modifier.weight(1f).fillMaxWidth().igPageScroll(scroll).padding(horizontal = m.padDp.dp, vertical = m.bodyPadDp.dp)) {
+                        // Inside the scroll container, so the request lands on the page's first control, not the scroll group.
+                        Column(Modifier.fillMaxWidth().focusRequester(pageFocus)) {
+                            if (quick) QuickControls(kind)
+                            else when (shown) {
+                                MenuTab.SCREEN -> ScreenPage(state)
+                                MenuTab.PERFORMANCE -> PerformancePage(state)
+                                MenuTab.EFFECTS -> EffectsPage(state, kind)
+                                MenuTab.OVERLAY -> OverlayPage(state)
+                                MenuTab.CONTROLS -> ControlsPage(state, kind)
+                                MenuTab.AUDIO -> AudioPage(state)
+                                MenuTab.STEAM -> SteamPage(state)
+                                MenuTab.TV -> TvPage(state)
+                                MenuTab.MODS -> ModsPage(state, mods)
+                                MenuTab.TOOLS -> ToolsPage(state, kind)
+                                MenuTab.FRIENDS -> Unit
+                            }
+                        }
+                    }
+                }
+
+                // Footer: Pause / Resume and Exit (which asks first) straight on the glass, no bar of their own. B closes the drawer
+                // through XServerDisplayActivity's key routing and X flips Quick / pages through DeckInGameState, so no hints here.
+                val labels = widthDp >= XMB_DRAWER_ICON_ONLY_BELOW_DP
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = m.padDp.dp, end = (m.padDp + 2f).dp, top = m.footerTopDp.dp, bottom = m.footerBottomDp.dp),
                 ) {
-                    IgButton(if (isPaused) L("Resume") else L("Pause"), if (isPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause, ::pauseAndClose, modifier = Modifier.weight(1f))
-                    IgButton(L("Exit game"), Icons.AutoMirrored.Outlined.Logout, onExit, danger = true, modifier = Modifier.weight(1f))
+                    XmbDrawerButton(
+                        if (isPaused) L("Resume") else L("Pause"), if (isPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
+                        labels, m.buttonDp, ::pauseAndClose, Modifier.weight(1f),
+                    )
+                    XmbDrawerButton(L("Exit game"), Icons.AutoMirrored.Outlined.Logout, labels, m.buttonDp, onExit, Modifier.weight(1f), danger = true)
                 }
             }
         }
     }
 
-    // The glass edge over everything, so the art and the footer bar never cover it.
+    // The glass edge over everything, so the art never covers it.
     Box(Modifier.matchParentSize().border(1.dp, glass.frost.line, shape))
+}
+
+/**
+ * A slim footer button drawn straight on the drawer's glass (the same card fill and hairline as the page cards, so it blends in);
+ * [danger] (Exit) keeps the error border and a faint error tint. Without [showLabel] it is the icon alone.
+ */
+@Composable
+private fun XmbDrawerButton(
+    label: String,
+    icon: ImageVector,
+    showLabel: Boolean,
+    heightDp: Float,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    danger: Boolean = false,
+) {
+    val cs = MaterialTheme.colorScheme
+    val shape = deckShape(14.dp)
+    val ink = if (danger) cs.error else cs.onSurface
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        modifier = modifier
+            .deckFocusRing(shape, scaleTo = 1.04f)
+            .xmbGlassCard(shape)
+            .then(if (danger) Modifier.background(cs.error.copy(alpha = 0.10f)) else Modifier)
+            .border(1.dp, if (danger) cs.error.copy(alpha = 0.7f) else deckLineAt(0.5f), shape)
+            .clickable(onClick = onClick)
+            .heightIn(min = heightDp.dp)
+            .padding(horizontal = 12.dp),
+    ) {
+        Icon(icon, contentDescription = label, tint = ink, modifier = Modifier.size(18.dp))
+        if (showLabel) Text(label, color = ink, fontFamily = NunitoSansFamily, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, maxLines = 1)
+    }
 }
 
 /**
@@ -311,9 +382,10 @@ private fun XmbDrawerTabChip(
     sel: Boolean,
     stripFocus: FocusRequester,
     pageFocus: FocusRequester,
+    m: XmbDrawerMetrics,
     onPick: () -> Unit,
 ) {
-    val shape = deckShape(12.dp)
+    val shape = deckShape(10.dp)
     DeckInk { item, cs ->
         Box(
             contentAlignment = Alignment.Center,
@@ -324,9 +396,9 @@ private fun XmbDrawerTabChip(
                 .clip(shape)
                 .background(if (sel) cs.primary.copy(alpha = 0.22f) else Color.Transparent)
                 .clickable(onClick = onPick)
-                .size(width = 44.dp, height = 40.dp),
+                .size(width = m.chipWidthDp.dp, height = m.chipHeightDp.dp),
         ) {
-            Icon(icon, contentDescription = label, tint = if (sel) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(22.dp))
+            Icon(icon, contentDescription = label, tint = if (sel) cs.primary else cs.onSurfaceVariant, modifier = Modifier.size(m.chipIconDp.dp))
         }
     }
 }

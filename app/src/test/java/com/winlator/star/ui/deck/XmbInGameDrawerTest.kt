@@ -37,4 +37,30 @@ class XmbInGameDrawerTest {
         assertFalse(xmbInGameDrawerStacksRows(XMB_DRAWER_STACK_BELOW_DP))
         assertFalse(xmbInGameDrawerStacksRows(600f))
     }
+
+    @Test
+    fun theChromeLeavesTheOptionsTheirRoomOnAShortLandscapePhone() {
+        // 393 dp tall: the header, strip, title and footer total at most 190 dp, so 200 dp or more is left for the page.
+        val m = xmbInGameDrawerMetrics(393f)
+        assertTrue(m.chromeDp <= 190f)
+        assertTrue(393f - m.chromeDp >= 200f)
+    }
+
+    @Test
+    fun theChromeShrinksUnderTheShortHeight() {
+        val roomy = xmbInGameDrawerMetrics(XMB_DRAWER_SHORT_BELOW_DP)
+        val tight = xmbInGameDrawerMetrics(XMB_DRAWER_SHORT_BELOW_DP - 1f)
+        assertTrue(tight.chromeDp < roomy.chromeDp)
+        assertTrue(tight.chromeDp <= 160f)
+    }
+
+    @Test
+    fun theRoomyChromeSizesAreTheSlimOnes() {
+        val m = xmbInGameDrawerMetrics(393f)
+        assertEquals(44f, m.headerDp, 0.001f)
+        assertEquals(40f, m.chipHeightDp, 0.001f)
+        assertEquals(46f, m.stripDp, 0.001f)
+        assertEquals(44f, m.buttonDp, 0.001f)
+        assertEquals(186f, m.chromeDp, 0.001f)
+    }
 }
