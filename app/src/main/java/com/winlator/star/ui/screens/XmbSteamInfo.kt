@@ -110,24 +110,24 @@ internal fun XmbSteamInfo(
         ) {
             storeBadges(s)
             // A chip is a little lower than a store tag: the same padding above and below lines them up.
-            chips.forEach { (text, color) -> Box(Modifier.padding(vertical = 1.5.dp)) { CompChip(text, color) } }
+            chips.forEach { (text, color) -> Box(Modifier.padding(vertical = 1.5.dp)) { CompChip(text, color, textColor = Color.White) } }
         }
         if (plan.dots) FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp),
             modifier = Modifier.fillMaxWidth().padding(top = 5.dp),
         ) {
-            dots.forEach { (text, color) -> SecondarySpec(text, color) }
+            dots.forEach { (text, color) -> SecondarySpec(text, color, textColor = Color.White) }
         }
         if (plan.facts) {
-            val factColor = Color(0xFFD0D0D0)
+            val factColor = Color.White
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Schedule, contentDescription = null, tint = Color(0xFFBBBBBB), modifier = Modifier.size(13.dp))
+                    Icon(Icons.Filled.Schedule, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(played, color = factColor, fontSize = 12.sp, maxLines = 1)
                 }
@@ -143,7 +143,7 @@ internal fun XmbSteamInfo(
         }
         if (desc != null && plan.descLines > 0) {
             Text(
-                desc, color = Color(0xFFABABAB), fontSize = 12.sp, lineHeight = 15.sp,
+                desc, color = Color.White, fontSize = 12.sp, lineHeight = 15.sp,
                 maxLines = plan.descLines, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp),
             )
         }

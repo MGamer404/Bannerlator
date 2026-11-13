@@ -795,7 +795,8 @@ internal fun ShortcutsXmbView(
                             val d = i - actIdx
                             val vis = d in 0 until nVis
                             val y by animateFloatAsState(d * rowH + if (d > 0) m.extra else 0f, spring(dampingRatio = 0.9f, stiffness = 500f), label = "xmbRowY")
-                            val a2 by animateFloatAsState(if (!vis) 0f else if (d == 0) 1f else max(0.35f, 1f - d * 0.13f), tween(220), label = "xmbRowA")
+                            // The Steam home shows every row that fits at full strength (the unselected ones are dimmer by their text colour); the rest fade with distance.
+                            val a2 by animateFloatAsState(if (!vis) 0f else if (d == 0 || steam) 1f else max(0.35f, 1f - d * 0.13f), tween(220), label = "xmbRowA")
                             val src = remember { MutableInteractionSource() }
                             XmbActionRow(
                                 action = a, selected = d == 0, accent = accent, iconBox = m.iconBox,

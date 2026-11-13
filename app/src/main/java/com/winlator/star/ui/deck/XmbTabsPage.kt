@@ -82,7 +82,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -412,12 +415,15 @@ private fun XmbTabsBar(
 }
 
 /** The height of a tab's badge (the ring's size, the count pill's height): under the label's line, so it can never make a tab taller. */
-private fun xmbBadgeH(ss: ScreenScale): Dp = ss.dp(14f)
+private fun xmbBadgeH(tab: XmbSteamTab?, ss: ScreenScale): Dp = ss.dp(if (tab == XmbSteamTab.DOWNLOADS) 17f else 16f)
+
+/** A tab's badge's base size (dp on a 412 dp phone): the ring's, or the count pill's height. */
+private fun xmbBadgeBase(tab: XmbSteamTab?): Float = if (tab == XmbSteamTab.DOWNLOADS) 17f else 16f
 
 /** The width of a tab's badge: the ring's size, or the count pill's (one digit as wide as it is high, a little more for each more). */
 private fun xmbBadgeW(tab: XmbSteamTab?, count: Int, ss: ScreenScale): Dp {
     val digits = if (tab == XmbSteamTab.FRIENDS) count.toString().length.coerceAtLeast(1) else 1
-    return ss.dp(14f + 6f * (digits - 1))
+    return ss.dp(xmbBadgeBase(tab) + 6f * (digits - 1))
 }
 
 /**
@@ -487,7 +493,7 @@ internal fun XmbTabPill(
     }
     val shown = animateFloatAsState(if (wanted) 1f else 0f, tween(180), label = "xmbTabBadge")
     val bw = xmbBadgeW(tab, hold.count, ss)
-    val bh = xmbBadgeH(ss)
+    val bh = xmbBadgeH(tab, ss)
     val reach = xmbBadgeReach(bw, padEnd, ss)
     Box(Modifier.xmbTabHighlight(fill, outline, outlineWidth) { reach * shown.value }) {
         label()
@@ -504,7 +510,15 @@ internal fun XmbTabPill(
                 at.size(width = bw, height = bh).clip(CircleShape).background(XMB_TABS_BADGE),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(hold.count.toString(), color = Color.Black, fontSize = ss.sp(9f), fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                // No font padding and a line as tall as the digits, centred: the number sits in the middle of the pill, never cut at its foot.
+                Text(
+                    hold.count.toString(), color = Color.Black, fontSize = ss.sp(10f), fontWeight = FontWeight.ExtraBold, maxLines = 1,
+                    style = TextStyle(
+                        lineHeight = ss.sp(10f),
+                        platformStyle = PlatformTextStyle(includeFontPadding = false),
+                        lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both),
+                    ),
+                )
             }
         }
     }

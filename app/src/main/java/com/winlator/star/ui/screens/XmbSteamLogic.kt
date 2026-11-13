@@ -27,11 +27,17 @@ internal const val XMB_STEAM_EDGE = 56f
 /** The text tabs are this tall (dp): the touch target. */
 internal const val XMB_STEAM_TABS_H = 48f
 
-/** The title and the subtitle under it, together (dp, on a 412 dp phone): the title, a 2 dp gap and the subtitle, boxes hugging their glyphs. */
-internal const val XMB_STEAM_TITLE_H = 29f
+/** The title and the subtitle under it, together (dp, on a 412 dp phone): the title and the subtitle right under it, boxes hugging their glyphs. */
+internal const val XMB_STEAM_TITLE_H = 27f
 
-/** The covers end this far (dp, on a 412 dp phone) above the title. */
-internal const val XMB_STEAM_TITLE_GAP = 5f
+/** The covers end this far (dp, on a 412 dp phone) above the title's box; the title is nudged up over it ([XMB_STEAM_TITLE_NUDGE]). */
+internal const val XMB_STEAM_TITLE_GAP = 0f
+
+/** The title is drawn this far (dp, on a 412 dp phone) above its box, so its letters sit right under the covers' bottom edge. */
+internal const val XMB_STEAM_TITLE_NUDGE = 3f
+
+/** The options column may run down to this far (dp, on a 412 dp phone) above the screen's bottom edge: the hints are on the right, not under it. */
+internal const val XMB_STEAM_COL_BOTTOM = 12f
 
 /** The title block ends this far (dp, on a 412 dp phone) above the tabs' text. */
 internal const val XMB_STEAM_TABS_GAP = 4f
@@ -208,7 +214,9 @@ internal class XmbSteamLayout(
 
     /** The options column starts right under the lifted focused card. */
     val colTop = cardBottom - lift + 12f * k
-    val nVis = ((h - bottomClear - colTop - extra) / rowH).toInt().coerceIn(2, 8)
+    // Wide screens: the column runs down to the screen's foot (the hints are at the right). A narrow one keeps the room under the hints: its details pane sits under the column.
+    val colBottom = if (w >= 640f) h - XMB_STEAM_COL_BOTTOM * k else h - bottomClear
+    val nVis = ((colBottom - colTop - extra) / rowH).toInt().coerceIn(2, 8)
 
     /** The row for a library of [games] (all of them: there is no All Games card here). */
     fun row(games: Int): XmbSteamRow = XmbSteamRow(games, if (games > 0) wideW else fW, fW, gap, w, edge)

@@ -411,7 +411,7 @@ private fun XmbSteamTitle(
         transitionSpec = { xmbTitleTransition() },
         label = "xmbSteamTitle",
         modifier = Modifier
-            .offset(0.dp, sl.titleY.dp)
+            .offset(0.dp, sl.titleY.dp - ss.dp(XMB_STEAM_TITLE_NUDGE))
             .width(sl.titleW.dp)
             .graphicsLayer {
                 translationX = sl.titleX(row, target, pos.floatValue).dp.toPx()
@@ -426,8 +426,8 @@ private fun XmbSteamTitle(
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = XMB_STEAM_TEXT.copy(lineHeight = ss.sp(15f), lineHeightStyle = XMB_STEAM_TOP),
                 )
-                // 2 dp under the title's line box (its descenders hang over it): the two nearly touch.
-                Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Right under the title's line box (its descenders hang over it): the two nearly touch.
+                Row(Modifier.padding(top = 0.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (meta.isNotEmpty()) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = ink.copy(alpha = 0.9f), modifier = Modifier.size(11.dp))
                         Spacer(Modifier.width(2.dp))
