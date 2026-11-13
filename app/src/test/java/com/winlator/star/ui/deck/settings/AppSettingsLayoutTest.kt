@@ -14,10 +14,16 @@ class AppSettingsLayoutTest {
     private fun tab(id: String) = AppSettingsLayout.tabFor(id)
 
     @Test
-    fun generalHoldsTheStartUpScreenAndTheUpdateSwitches() {
-        for (id in listOf("app.general.landing", "app.general.updateNotify", "app.general.updatePrerelease")) {
+    fun generalHoldsTheSoundsTheStartUpScreenAndTheUpdateSwitches() {
+        for (id in listOf("app.general.sounds", "app.general.soundVolume", "app.general.landing", "app.general.updateNotify", "app.general.updatePrerelease")) {
             assertEquals(id, EditorTabs.APP_GENERAL, tab(id))
         }
+    }
+
+    @Test
+    fun theSoundRowsComeBeforeTheStartUpRow() {
+        assertTrue(AppSettingsLayout.rankOf("app.general.sounds") < AppSettingsLayout.rankOf("app.general.landing"))
+        assertTrue(AppSettingsLayout.rankOf("app.general.soundVolume") < AppSettingsLayout.rankOf("app.general.landing"))
     }
 
     @Test
@@ -28,7 +34,7 @@ class AppSettingsLayoutTest {
 
     @Test
     fun appearanceHoldsTheNewAppearanceRows() {
-        for (id in listOf("app.appearance.style", "app.appearance.labLook", "app.appearance.orientation", "app.appearance.uiScale", "app.appearance.fontScale", "app.appearance.showStores", "app.appearance.showInternal", "app.appearance.showSd", "app.appearance.sounds", "app.appearance.soundVolume")) {
+        for (id in listOf("app.appearance.style", "app.appearance.labLook", "app.appearance.orientation", "app.appearance.uiScale", "app.appearance.fontScale", "app.appearance.showStores", "app.appearance.showInternal", "app.appearance.showSd")) {
             assertEquals(id, EditorTabs.APP_APPEARANCE, tab(id))
         }
     }

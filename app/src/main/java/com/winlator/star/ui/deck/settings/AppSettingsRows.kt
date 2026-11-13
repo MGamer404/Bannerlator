@@ -25,6 +25,7 @@ import kotlin.math.roundToInt
 
 internal object AppSettingsRows {
 
+    const val CAT_GENERAL = "app.x.general"
     const val CAT_APPEARANCE = "app.x.appearance"
     const val CAT_STEAM = "app.x.steam"
     const val CAT_DOWNLOADS = "app.x.downloads"
@@ -36,8 +37,8 @@ internal object AppSettingsRows {
     const val STYLE_LAB = "lab"
 
     const val ID_STYLE = "app.appearance.style"
-    const val ID_SOUNDS = "app.appearance.sounds"
-    const val ID_SOUND_VOLUME = "app.appearance.soundVolume"
+    const val ID_SOUNDS = "app.general.sounds"
+    const val ID_SOUND_VOLUME = "app.general.soundVolume"
 
     private fun prefs(c: Context) = PreferenceManager.getDefaultSharedPreferences(c)
     private fun onOff(b: Boolean) = if (b) "1" else "0"
@@ -173,10 +174,10 @@ internal object AppSettingsRows {
             control = { Control.Toggle },
             binding = AppBinding({ _ -> onOff(AppThemeState.showSdStorage.value) }, { _, v -> AppThemeState.setShowSdStorage(v == "1") }),
         ),
-        switch(ID_SOUNDS, CAT_APPEARANCE, T("Sounds"), T("Interface sounds"), SIMPLE, XmbSounds.PREF_ENABLED, XmbSounds.DEFAULT_ENABLED,
+        switch(ID_SOUNDS, CAT_GENERAL, T("Sounds"), T("Interface sounds"), SIMPLE, XmbSounds.PREF_ENABLED, XmbSounds.DEFAULT_ENABLED,
             hint = T("Soft sounds in the XMB when the highlight moves, on select, back and page changes. Games keep their own audio.")),
         row(
-            ID_SOUND_VOLUME, CAT_APPEARANCE, T("Sounds"), T("Interface sound volume"), SIMPLE,
+            ID_SOUND_VOLUME, CAT_GENERAL, T("Sounds"), T("Interface sound volume"), SIMPLE,
             hint = T("How loud the interface sounds are. The sound you hear while moving the slider is the select sound."),
             tech = XmbSounds.PREF_VOLUME,
             control = { Control.Slider(0f, 100f, 5f, { "${it.toInt()}%" }, { "${it.toInt()}" }) },

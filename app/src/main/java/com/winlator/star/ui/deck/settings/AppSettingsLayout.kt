@@ -8,8 +8,8 @@ import com.winlator.star.ui.simple.T
 // AppSettingsRows, into the tabs by id. Every legacy hand-off is dropped (each is a real row or action here, or removed), and
 // the page items of AppSettingsExtras are keyed by tab id.
 //
-//   app.t.general      General           landing, updateNotify, updatePrerelease + (extras) Updates block, About / Help / Account / Run setup again
-//   app.t.appearance   Appearance        style, labLook, orientation, uiScale, fontScale, showStores / Internal / Sd, sounds, soundVolume + (extras) theme preset line + popup (first), accent colour picker
+//   app.t.general      General           sounds, soundVolume, landing, updateNotify, updatePrerelease + (extras) Updates block, About / Help / Account / Run setup again
+//   app.t.appearance   Appearance        style, labLook, orientation, uiScale, fontScale, showStores / Internal / Sd + (extras) theme preset line + popup (first), accent colour picker
 //   app.t.library      Games & library   steamGridKey, steam.* (4), contents.* (2), steam.region + (extras) Steam library locations (first), region / network tests
 //   app.t.performance  Performance       sustained, threadBoost, bigCores, gpuClockLock, saveSessionFps + (extras) Root controls dialog, Lossless.dll
 //   app.t.storage      Storage & data    downloads.* (5), saves.* (8) + (extras) space used, folders, sound banks, backup / restore
@@ -49,6 +49,8 @@ internal object AppSettingsLayout {
 
     /** The order of rows inside their tab (stable: rows of one rank keep the registry's order). */
     fun rankOf(id: String): Int = when {
+        // General: the interface sounds come first, above Start-up.
+        id == AppSettingsRows.ID_SOUNDS || id == AppSettingsRows.ID_SOUND_VOLUME -> -1
         // Library: cover art, friends, component downloads, then the Steam region (its test actions come right after it).
         id == "app.steam.region" -> 3
         id.startsWith("app.contents.") -> 2
