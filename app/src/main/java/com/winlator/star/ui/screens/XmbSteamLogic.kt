@@ -33,8 +33,11 @@ internal const val XMB_STEAM_TITLE_H = 27f
 /** The covers end this far (dp, on a 412 dp phone) above the title's box; the title is nudged up over it ([XMB_STEAM_TITLE_NUDGE]). */
 internal const val XMB_STEAM_TITLE_GAP = 0f
 
-/** The title is drawn this far (dp, on a 412 dp phone) above its box, so its letters sit right under the covers' bottom edge. */
+/** The title's box sits this far (dp, on a 412 dp phone) above where the covers end, and its letters are drawn the same distance lower inside it: the subtitle stays put. */
 internal const val XMB_STEAM_TITLE_NUDGE = 3f
+
+/** The title and the subtitle start this far (dp, on a 412 dp phone) to the right of the focused card's left edge. */
+internal const val XMB_STEAM_TITLE_INSET = 12f
 
 /** The options column may run down to this far (dp, on a 412 dp phone) above the screen's bottom edge: the hints are on the right, not under it. */
 internal const val XMB_STEAM_COL_BOTTOM = 12f

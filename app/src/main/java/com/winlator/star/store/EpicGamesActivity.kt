@@ -414,6 +414,7 @@ class EpicGamesActivity : ComponentActivity() {
         // CANCEL: install() polls this flag across manifest/verify/chunk/assemble, so cancel stops
         // the download promptly. Keep/delete of the partial is decided via EpicCancelPolicy below.
         EpicCancelPolicy.clear(appName)   // fresh download → keep-on-cancel until a dialog says otherwise
+        EpicDownloadControl.onFreshStart(applicationContext, appName)   // supersedes any earlier pause of this game
         val cancelled = AtomicBoolean(false)
         cancelRunnables[appName] = Runnable { cancelled.set(true) }
 
@@ -423,8 +424,9 @@ class EpicGamesActivity : ComponentActivity() {
             id = appName,
             name = game.title,
             cover = game.artCover.ifEmpty { game.artSquare },
-            supportsPause = false,
+            supportsPause = true,
             installTotal = prefs!!.getLong("epic_size_$appName", 0L),
+            pause = { EpicDownloadControl.pause(appName) },
             cancel = { cancelled.set(true) },
         )
 
@@ -495,6 +497,16 @@ class EpicGamesActivity : ComponentActivity() {
                 )
 
                 if (cancelled.get()) {
+                    // A pause (Download Manager) stops the transfer the same way: keep everything and park the row as PAUSED.
+                    if (EpicDownloadControl.consumePause(appName)) {
+                        EpicDownloadControl.parkPaused(appCtx, appName, installDir.absolutePath, game.title,
+                            game.artCover.ifEmpty { game.artSquare })
+                        withContext(Dispatchers.Main) {
+                            cancelRunnables.remove(appName)
+                            downloadStates[appName] = GameDownloadState()
+                        }
+                        return@launch
+                    }
                     // Delete the partial if the user chose "Delete files" on any Cancel dialog.
                     if (EpicCancelPolicy.consumeDeleteOnCancel(appName)) {
                         try { EpicDownloadManager.deleteDir(installDir) } catch (_: Exception) {}

@@ -105,6 +105,8 @@ object StoreDownloadHooks {
         speedBps: Long = 0L,
         etaSeconds: Long = -1L,
     ) {
+        // A paused row is never revived by a late tick of the run that was stopped; a resume registers the download afresh.
+        if (DownloadRegistry.get(key(store, id))?.state == DownloadState.PAUSED) return
         DownloadRegistry.update(key(store, id)) {
             it.copy(
                 state = DownloadState.DOWNLOADING,
@@ -118,6 +120,27 @@ object StoreDownloadHooks {
             )
         }
         pushNotification(store, id)
+    }
+
+    /**
+     * The user paused a download whose transfer has stopped (files and progress kept): the row stays, as PAUSED, with its bytes and
+     * percent as they were, no speed / ETA. [pause] / [cancel] are the handles of a paused row (Resume / Cancel). Drops the shade line
+     * (a paused download needs no foreground service). Only for stores that support pause.
+     */
+    fun markPaused(store: Store, id: String, pause: (() -> Unit)?, cancel: (() -> Unit)?) {
+        val k = key(store, id)
+        DownloadRegistry.update(k) {
+            it.copy(
+                state = DownloadState.PAUSED,
+                speedBps = 0L,
+                etaSeconds = -1L,
+                queuePosition = 0,
+                supportsPause = true,
+                pause = pause,
+                cancel = cancel,
+            )
+        }
+        DownloadForegroundService.finish(k)
     }
 
     /**

@@ -253,7 +253,8 @@ class EpicGameDetailActivity : ComponentActivity() {
                     // Live "45%  ·  1.2 GB / 4.5 GB  ·  12 MB/s" label from the registry entry (matches the DL
                     // card + notification, and the local onProgress below, so a list-started/reopened DL
                     // reads identically). Bare "$pct%" until the first bytes are in.
-                    progressLabelText = epicProgressLabel(e.pct, e.installDone, e.installTotal, e.speedBps, e.etaSeconds)
+                    progressLabelText = epicProgressLabel(e.pct, e.installDone, e.installTotal, e.speedBps, e.etaSeconds,
+                        lead = if (e.state == DownloadState.PAUSED) "Paused" else "Downloading…")
                     progressLabelVisible = true
                     installBtnVisible = true
                     installBtnText = "Cancel"
@@ -342,6 +343,7 @@ class EpicGameDetailActivity : ComponentActivity() {
     private fun startInstallInternal() {
         val an = appName ?: return
         EpicCancelPolicy.clear(an)   // fresh download → default to keep-on-cancel until the dialog says otherwise
+        EpicDownloadControl.onFreshStart(applicationContext, an)   // supersedes any earlier pause of this game
         installBtnText = "Cancel"
             installBtnColor = 0xFFCC3333.toInt()
         progressVisible = true
@@ -363,8 +365,9 @@ class EpicGameDetailActivity : ComponentActivity() {
             id = an,
             name = title ?: an,
             cover = artCover,
-            supportsPause = false,
+            supportsPause = true,
             installTotal = prefs!!.getLong("epic_size_$an", 0L),
+            pause = { EpicDownloadControl.pause(an) },
             cancel = { cancelled.set(true) },
         )
 
@@ -420,6 +423,12 @@ class EpicGameDetailActivity : ComponentActivity() {
                 )
 
                 if (cancelled.get()) {
+                    // A pause (Download Manager) stops the transfer the same way: keep everything and park the row as PAUSED.
+                    if (EpicDownloadControl.consumePause(an)) {
+                        cancelDownload = null
+                        EpicDownloadControl.parkPaused(appCtx, an, installDir.absolutePath, title ?: an, artCover)
+                        return@launch
+                    }
                     // Delete the partial download if the user chose "Delete files" on any Cancel dialog.
                     if (EpicCancelPolicy.consumeDeleteOnCancel(an)) {
                         try { deleteDir(installDir) } catch (_: Exception) {}

@@ -437,7 +437,7 @@ private fun xmbBadgeReach(w: Dp, padEnd: Dp, ss: ScreenScale): Dp = maxOf(ss.dp(
  * The room a row of tabs keeps clear at each of its ends (the same at both, so the row stays centred), for the badge and the highlight
  * of the last tab to reach into: a scrolling row clips at its ends.
  */
-internal fun xmbBadgeEndRoom(ss: ScreenScale): Dp = ss.dp(12f)
+internal fun xmbBadgeEndRoom(ss: ScreenScale): Dp = ss.dp(30f)
 
 /**
  * The selected tab's highlight, drawn behind the tab without a say in its size: a see-through pill over the tab's own bounds, with the

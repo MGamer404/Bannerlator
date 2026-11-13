@@ -331,14 +331,21 @@ internal class DownloadActions(private val activity: Activity, private val inlin
                 }
                 .setNeutralButton("Keep downloading", null)
                 .show()
+        } else if (entry.store == Store.STEAM) {
+            // By appId through the queue, not the row's handles (those die with the run that attached them).
+            SteamDownloadControl.cancel(activity.applicationContext, entry)
         } else {
             entry.cancel?.invoke()
         }
     }
 
-    /** Pause a running download, or resume a paused one (the store's own handle toggles). */
+    /** Pause a running download, or resume a paused one. */
     fun pauseResume(entry: DownloadEntry) {
-        entry.pause?.invoke()
+        when (entry.store) {
+            Store.STEAM -> SteamDownloadControl.pauseResume(activity.applicationContext, entry)
+            Store.EPIC -> EpicDownloadControl.pauseResume(entry)
+            else -> entry.pause?.invoke()   // the store's own handle toggles
+        }
     }
 
     /** Drop a failed / cancelled row. */
@@ -348,10 +355,12 @@ internal class DownloadActions(private val activity: Activity, private val inlin
 
     /** Queue reorder (Steam-only; a no-op for any id that isn't a live queued Steam appId). */
     fun moveUp(entry: DownloadEntry) {
+        if (entry.store != Store.STEAM) return   // GOG ids are numeric too
         entry.id.toIntOrNull()?.let { id -> DownloadQueue.moveUp(id) }
     }
 
     fun moveToTop(entry: DownloadEntry) {
+        if (entry.store != Store.STEAM) return
         entry.id.toIntOrNull()?.let { id -> DownloadQueue.moveToTop(id) }
     }
 
@@ -365,6 +374,8 @@ internal class DownloadActions(private val activity: Activity, private val inlin
             SteamPrefs.init(context)
             SteamRepository.getInstance().initialize(context)
             DownloadRegistry.init(context)
+            // Steam downloads the app was interrupted in come back as paused rows (the registry is memory only).
+            SteamDownloadControl.seedInterrupted()
             AmazonLibrarySync.seed(context)
             GogLibrarySync.seed(context)
             EpicLibrarySync.seed(context)

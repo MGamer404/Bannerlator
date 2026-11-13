@@ -928,7 +928,7 @@ private fun DeckShellContent(
                         .align(Alignment.BottomEnd)
                         .padding(
                             // Home's place on every page (not the page's camera frame), so the hints never move between pages.
-                            end = hintSs.dp(16f) + cutout.calculateEndPadding(dir),
+                            end = hintSs.dp(44f) + cutout.calculateEndPadding(dir),
                             bottom = hintSs.dp(HINT_BOTTOM_GAP) + cutout.calculateBottomPadding(),
                         ),
                 ) {

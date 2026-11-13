@@ -414,7 +414,8 @@ private fun XmbSteamTitle(
             .offset(0.dp, sl.titleY.dp - ss.dp(XMB_STEAM_TITLE_NUDGE))
             .width(sl.titleW.dp)
             .graphicsLayer {
-                translationX = sl.titleX(row, target, pos.floatValue).dp.toPx()
+                // A little to the right of the focused card's left edge: the text doesn't start flush with the cover.
+                translationX = sl.titleX(row, target, pos.floatValue).dp.toPx() + ss.dp(XMB_STEAM_TITLE_INSET).toPx()
                 alpha = 1f - lift()
             },
     ) { s ->
@@ -422,8 +423,10 @@ private fun XmbSteamTitle(
             val meta = remember(s) { AndroidGames.packageOf(s) ?: buildLaunchSpec(s, context).meta }
             Column {
                 Text(
-                    s.name, color = Color.White, fontSize = ss.sp(16f), fontWeight = FontWeight.Bold,
+                    s.name, color = Color.White, fontSize = ss.sp(16f), fontWeight = FontWeight.Black,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    // Drawn a little lower than its box (the free space above the subtitle): the subtitle stays where it is.
+                    modifier = Modifier.offset(y = ss.dp(XMB_STEAM_TITLE_NUDGE)),
                     style = XMB_STEAM_TEXT.copy(lineHeight = ss.sp(15f), lineHeightStyle = XMB_STEAM_TOP),
                 )
                 // Right under the title's line box (its descenders hang over it): the two nearly touch.
@@ -432,7 +435,7 @@ private fun XmbSteamTitle(
                         Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = ink.copy(alpha = 0.9f), modifier = Modifier.size(11.dp))
                         Spacer(Modifier.width(2.dp))
                         Text(
-                            meta.uppercase(), color = XMB_STEAM_MUTED, fontSize = ss.sp(10f), letterSpacing = 0.8.sp, maxLines = 1,
+                            meta.uppercase(), color = XMB_STEAM_MUTED, fontSize = ss.sp(10f), fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp, maxLines = 1,
                             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                             style = XMB_STEAM_TEXT.copy(lineHeight = ss.sp(10f), lineHeightStyle = XMB_STEAM_TIGHT),
                         )
