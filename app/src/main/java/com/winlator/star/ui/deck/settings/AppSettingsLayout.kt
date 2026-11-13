@@ -9,7 +9,7 @@ import com.winlator.star.ui.simple.T
 // the page items of AppSettingsExtras are keyed by tab id.
 //
 //   app.t.general      General           landing, updateNotify, updatePrerelease + (extras) Updates block, About / Help / Account / Run setup again
-//   app.t.appearance   Appearance        style, labLook, orientation, uiScale, fontScale, showStores / Internal / Sd + (extras) theme preset line + popup (first), accent colour picker
+//   app.t.appearance   Appearance        style, labLook, orientation, uiScale, fontScale, showStores / Internal / Sd, sounds, soundVolume + (extras) theme preset line + popup (first), accent colour picker
 //   app.t.library      Games & library   steamGridKey, steam.* (4), contents.* (2), steam.region + (extras) Steam library locations (first), region / network tests
 //   app.t.performance  Performance       sustained, threadBoost, bigCores, gpuClockLock, saveSessionFps + (extras) Root controls dialog, Lossless.dll
 //   app.t.storage      Storage & data    downloads.* (5), saves.* (8) + (extras) space used, folders, sound banks, backup / restore

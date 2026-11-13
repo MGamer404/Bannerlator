@@ -158,6 +158,7 @@ internal fun XmbTabsPageHost(
     home: @Composable () -> Unit,
 ) {
     val progress = animateFloatAsState(if (open) 1f else 0f, tween(XMB_TABS_SLIDE_MS, easing = FastOutSlowInEasing), label = "xmbTabsPage")
+    XmbSoundOnChange(XmbSoundKind.PAGE, open)
     val openNow by rememberUpdatedState(open)
     // The page is composed while it is up or still sliding away; derived, so the animation does not recompose this per frame.
     val shown by remember { derivedStateOf { openNow || progress.value > 0.001f } }
@@ -198,6 +199,7 @@ private fun XmbTabsPageBody(
     val onCloseNow by rememberUpdatedState(onClose)
     val onAddNow by rememberUpdatedState(onAddGame)
     val onStores = current == XmbSteamTab.STORES
+    XmbSoundOnChange(XmbSoundKind.PAGE, sel)
 
     // The phone layout has no floating header nor hints (the shell keeps its bars there), so it needs no room for them, and shows the
     // Add Game hint itself.
@@ -271,7 +273,13 @@ private fun XmbTabsPageBody(
             return@keys true
         }
         if (focus.contentFocused) {
-            if (focus.onKey?.invoke(e) == true) return@keys true
+            if (focus.onKey?.invoke(e) == true) {
+                // The page's own cursor moved (these pages take no Android focus, so the highlight host never sees it).
+                when (e.key) {
+                    Key.DirectionUp, Key.DirectionDown, Key.DirectionLeft, Key.DirectionRight -> XmbSounds.play(XmbSoundKind.FOCUS)
+                }
+                return@keys true
+            }
             return@keys when (e.key) {
                 Key.DirectionUp -> { focus.toBar(); true }
                 Key.ButtonB, Key.Escape -> { if (first) onCloseNow(); true }

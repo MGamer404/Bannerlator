@@ -129,6 +129,8 @@ import com.winlator.star.inputcontrols.ExternalController
 import com.winlator.star.ui.LocalTopBarOverlayInset
 import com.winlator.star.ui.LocalXmbHintInset
 import com.winlator.star.ui.deck.LocalDeckActions
+import com.winlator.star.ui.deck.XmbSoundKind
+import com.winlator.star.ui.deck.XmbSoundOnChange
 import com.winlator.star.ui.deck.XmbStoreMark
 import com.winlator.star.ui.deck.rememberScreenScale
 import com.winlator.star.ui.deck.storeMarkOf
@@ -312,6 +314,7 @@ internal fun ShortcutsXmbView(
 
     // Nested XMB menus (Settings, Game Details, tools…): model in XmbModel.kt, drawing in XmbMenuHost.kt.
     val nav = remember { XmbNavState() }
+    XmbCursorSound(target, actIdx, nav)
     val nested = nav.depth > 0
     val reload by rememberUpdatedState(onReloadGames)
     val appCtx = context
@@ -867,6 +870,15 @@ private class XmbMetrics(val w: Float, val h: Float) {
     val titleH = fH - sH - 8f
     val titleLines = if (titleH > 58f) 2 else 1
     val titleSize = (if (titleLines == 2) (titleH - 18f) / 2.4f else titleH - 22f).coerceIn(15f, 26f)
+}
+
+/**
+ * The highlight tick for this view's own cursor (a cover, an option, a row or choice of a nested menu): its one Android focus target
+ * never moves, so the highlight host does not hear it. Reads the nested state here, so a step recomposes only this.
+ */
+@Composable
+private fun XmbCursorSound(game: Int, option: Int, nav: XmbNavState) {
+    XmbSoundOnChange(XmbSoundKind.FOCUS, game, option, nav.depth, nav.top?.selKey, nav.picker?.sel)
 }
 
 @Composable

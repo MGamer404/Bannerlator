@@ -413,6 +413,8 @@ private fun DeckShellContent(
         exitPillTick = 0
         exitPillShown = false
     }
+    // XMB: a tab or a page coming up or going away makes the page sound (outside the XMB no host is attached, so it stays silent).
+    XmbSoundOnChange(XmbSoundKind.PAGE, currentRoute)
 
     // Registered before the NavHost, so a screen's own BackHandler (unsaved changes, nested menus) still wins.
     // At a sub-page pop it; at a tab root go Home; at Home this is off (system default), except in the XMB mode, where Back at

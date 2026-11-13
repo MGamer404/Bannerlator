@@ -8,6 +8,8 @@ import com.winlator.star.store.SteamRegion
 import com.winlator.star.store.StoreDownloadTier
 import com.winlator.star.store.blsteam.BlSteamEngineFlag
 import com.winlator.star.store.blsteam.BlStoreEngineFlag
+import com.winlator.star.ui.deck.XmbSoundKind
+import com.winlator.star.ui.deck.XmbSounds
 import com.winlator.star.ui.deck.settings.SettingLevel.ADVANCED
 import com.winlator.star.ui.deck.settings.SettingLevel.SIMPLE
 import com.winlator.star.ui.screens.LogCopy
@@ -34,6 +36,8 @@ internal object AppSettingsRows {
     const val STYLE_LAB = "lab"
 
     const val ID_STYLE = "app.appearance.style"
+    const val ID_SOUNDS = "app.appearance.sounds"
+    const val ID_SOUND_VOLUME = "app.appearance.soundVolume"
 
     private fun prefs(c: Context) = PreferenceManager.getDefaultSharedPreferences(c)
     private fun onOff(b: Boolean) = if (b) "1" else "0"
@@ -168,6 +172,24 @@ internal object AppSettingsRows {
             hint = T("Only appears when a card is in the device."),
             control = { Control.Toggle },
             binding = AppBinding({ _ -> onOff(AppThemeState.showSdStorage.value) }, { _, v -> AppThemeState.setShowSdStorage(v == "1") }),
+        ),
+        switch(ID_SOUNDS, CAT_APPEARANCE, T("Sounds"), T("Interface sounds"), SIMPLE, XmbSounds.PREF_ENABLED, XmbSounds.DEFAULT_ENABLED,
+            hint = T("Soft sounds in the XMB when the highlight moves, on select, back and page changes. Games keep their own audio.")),
+        row(
+            ID_SOUND_VOLUME, CAT_APPEARANCE, T("Sounds"), T("Interface sound volume"), SIMPLE,
+            hint = T("How loud the interface sounds are. The sound you hear while moving the slider is the select sound."),
+            tech = XmbSounds.PREF_VOLUME,
+            control = { Control.Slider(0f, 100f, 5f, { "${it.toInt()}%" }, { "${it.toInt()}" }) },
+            binding = AppBinding(
+                get = { c -> prefs(c).getInt(XmbSounds.PREF_VOLUME, XmbSounds.DEFAULT_VOLUME).toString() },
+                set = { c, v ->
+                    v.toFloatOrNull()?.let {
+                        prefs(c).edit().putInt(XmbSounds.PREF_VOLUME, it.roundToInt()).apply()
+                        XmbSounds.play(XmbSoundKind.SELECT)
+                    }
+                },
+            ),
+            disabled = { _, values -> if (values(ID_SOUNDS) == "1") null else T("Needs Interface sounds on.") },
         ),
 
         // ── Steam connection region (the test actions are page extras: AppSettingsExtras) ──

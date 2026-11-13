@@ -43,13 +43,18 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.isSpecified
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -335,6 +340,17 @@ internal class XmbHighlightHost internal constructor(internal val view: View) {
         focused.remove(item)
         focused.add(item)
         refresh()
+        if (!touchMode) XmbSounds.play(XmbSoundKind.FOCUS)
+    }
+
+    /** A key went down in this window: A confirms and B goes back, each with its sound (the focus tick is [claim]'s). */
+    internal fun onKeyDown(e: KeyEvent) {
+        if (e.type != KeyEventType.KeyDown || e.nativeKeyEvent.repeatCount != 0) return
+        when (xmbGroupKeyOf(e.key)) {
+            XmbGroupKey.ACTIVATE -> XmbSounds.play(XmbSoundKind.SELECT)
+            XmbGroupKey.BACK -> XmbSounds.play(XmbSoundKind.BACK)
+            null -> Unit
+        }
     }
 
     internal fun release(item: XmbHighlightItem) {
@@ -564,10 +580,16 @@ internal fun Modifier.xmbHighlightOverlay(host: XmbHighlightHost): Modifier {
     host.accent = accent
     SideEffect { host.density = density }
     LaunchedEffect(host) { host.run() }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(host, lifecycle) {
+        XmbSounds.attach(host.view.context, lifecycle)
+        onDispose { XmbSounds.detach(lifecycle) }
+    }
     return this
         .onGloballyPositioned { host.onLayerPositioned(it) }
         .onPreviewKeyEvent {
             host.setTouch(false)
+            host.onKeyDown(it)
             false
         }
         .pointerInput(host) {
