@@ -185,6 +185,10 @@ private fun Modifier.xmbDialogBack(dismissible: Boolean, onDismiss: () -> Unit):
  * @param onDismiss Back, B and a tap outside call it (unless [dismissible] is false).
  * @param wide a list / review dialog: may be [XMB_DIALOG_MAX_WIDTH_WIDE] wide instead of [XMB_DIALOG_MAX_WIDTH].
  * @param dismissible false while something runs that must not be interrupted: Back, B and a tap outside do nothing.
+ * @param dismissOnClickOutside false: a tap outside does nothing, though Back and B still close a [dismissible] dialog (a
+ *   pre-flight that a stray tap must not cancel). Default true.
+ * @param keepSubtitleCompact true: the [subtitle] stays on a short screen too (it carries something the dialog needs, not a
+ *   hint). Default false: it is dropped there.
  * @param scrollBody true (the default): [body] is a column the frame scrolls. false: the body scrolls itself (a LazyColumn
  *   with `Modifier.weight(1f, fill = false)`), the frame only hands it the room that is left between header and footer.
  * @param footer the buttons; null for a dialog with none (a progress card that cannot be cancelled).
@@ -199,6 +203,8 @@ internal fun XmbDialogFrame(
     wide: Boolean = false,
     dismissible: Boolean = true,
     scrollBody: Boolean = true,
+    dismissOnClickOutside: Boolean = true,
+    keepSubtitleCompact: Boolean = false,
     footer: (@Composable RowScope.() -> Unit)? = null,
     body: @Composable ColumnScope.() -> Unit,
 ) {
@@ -207,7 +213,7 @@ internal fun XmbDialogFrame(
         onDismissRequest = { if (dismissible) onDismissNow() },
         properties = DialogProperties(
             dismissOnBackPress = dismissible,
-            dismissOnClickOutside = dismissible,
+            dismissOnClickOutside = dismissible && dismissOnClickOutside,
             usePlatformDefaultWidth = false,
         ),
     ) {
@@ -226,6 +232,7 @@ internal fun XmbDialogFrame(
                         subtitle = subtitle,
                         dismissible = dismissible,
                         scrollBody = scrollBody,
+                        keepSubtitleCompact = keepSubtitleCompact,
                         onDismiss = { onDismissNow() },
                         modifier = modifier,
                         footer = footer,
@@ -244,6 +251,7 @@ private fun XmbDialogPanel(
     subtitle: String?,
     dismissible: Boolean,
     scrollBody: Boolean,
+    keepSubtitleCompact: Boolean,
     onDismiss: () -> Unit,
     modifier: Modifier,
     footer: (@Composable RowScope.() -> Unit)?,
@@ -278,7 +286,7 @@ private fun XmbDialogPanel(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (subtitle != null && !compact) {
+                if (subtitle != null && (!compact || keepSubtitleCompact)) {
                     Text(
                         subtitle,
                         color = cs.onSurfaceVariant,

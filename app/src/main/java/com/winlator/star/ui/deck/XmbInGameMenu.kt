@@ -1,5 +1,6 @@
 package com.winlator.star.ui.deck
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -93,15 +94,19 @@ internal const val XMB_DRAWER_ICON_ONLY_BELOW_DP = 360f
 internal class XmbDrawerMetrics(
     val headerDp: Float,
     val iconDp: Float,
+    val nameSp: Float,
     val chipHeightDp: Float,
     val chipWidthDp: Float,
     val chipIconDp: Float,
     val stripPadDp: Float,
     val titleDp: Float,
+    val titleSp: Float,
     val buttonDp: Float,
+    val buttonSp: Float,
     val padDp: Float,
     val gapDp: Float,
-    val bodyPadDp: Float,
+    /** How far the scrolling page fades into the chrome above and below it; also the page's own padding at those edges (not chrome). */
+    val fadeDp: Float,
     val footerTopDp: Float,
     val footerBottomDp: Float,
 ) {
@@ -110,22 +115,50 @@ internal class XmbDrawerMetrics(
 
     /** Everything that is not the page, top to bottom. */
     val chromeDp: Float
-        get() = headerDp + gapDp + stripDp + titleDp + 2f * bodyPadDp + footerTopDp + buttonDp + footerBottomDp
+        get() = headerDp + gapDp + stripDp + titleDp + footerTopDp + buttonDp + footerBottomDp
 }
 
-/** The chrome sizes for a drawer [heightDp] tall: roomy from [XMB_DRAWER_SHORT_BELOW_DP] up (186 dp of chrome), tighter under it (152 dp). */
+/** The chrome sizes for a drawer [heightDp] tall: slim from [XMB_DRAWER_SHORT_BELOW_DP] up (122 dp of chrome), slimmer under it (97 dp). */
 internal fun xmbInGameDrawerMetrics(heightDp: Float): XmbDrawerMetrics =
     if (heightDp >= XMB_DRAWER_SHORT_BELOW_DP) {
         XmbDrawerMetrics(
-            headerDp = 44f, iconDp = 32f, chipHeightDp = 40f, chipWidthDp = 42f, chipIconDp = 20f, stripPadDp = 3f,
-            titleDp = 28f, buttonDp = 44f, padDp = 10f, gapDp = 2f, bodyPadDp = 4f, footerTopDp = 6f, footerBottomDp = 8f,
+            headerDp = 28f, iconDp = 24f, nameSp = 15f, chipHeightDp = 30f, chipWidthDp = 36f, chipIconDp = 18f, stripPadDp = 2f,
+            titleDp = 20f, titleSp = 16f, buttonDp = 34f, buttonSp = 13f, padDp = 10f, gapDp = 0f, fadeDp = 18f,
+            footerTopDp = 2f, footerBottomDp = 4f,
         )
     } else {
         XmbDrawerMetrics(
-            headerDp = 38f, iconDp = 28f, chipHeightDp = 34f, chipWidthDp = 38f, chipIconDp = 18f, stripPadDp = 2f,
-            titleDp = 24f, buttonDp = 38f, padDp = 8f, gapDp = 0f, bodyPadDp = 2f, footerTopDp = 4f, footerBottomDp = 6f,
+            headerDp = 24f, iconDp = 20f, nameSp = 13f, chipHeightDp = 24f, chipWidthDp = 32f, chipIconDp = 16f, stripPadDp = 1f,
+            titleDp = 16f, titleSp = 14f, buttonDp = 28f, buttonSp = 12f, padDp = 8f, gapDp = 0f, fadeDp = 10f,
+            footerTopDp = 1f, footerBottomDp = 2f,
         )
     }
+
+/**
+ * Fades the top and bottom [fadeDp] of the viewport out (an offscreen layer masked with a gradient). [top] and [bottom] are 0..1,
+ * read while drawing, so the fade animates without recomposing; 0 leaves that edge untouched.
+ */
+private fun Modifier.xmbEdgeFade(fadeDp: Float, top: () -> Float, bottom: () -> Float): Modifier =
+    this
+        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val t = top()
+            val b = bottom()
+            val len = minOf(fadeDp.dp.toPx(), size.height / 2f)
+            if ((t > 0f || b > 0f) && len > 0f) {
+                val f = len / size.height
+                drawRect(
+                    Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = 1f - t),
+                        f to Color.Black,
+                        1f - f to Color.Black,
+                        1f to Color.Black.copy(alpha = 1f - b),
+                    ),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+        }
 
 /** How much of the game's art shows through the glass (it is laid over the opaque glass base), and where the fade to the soft edge starts. */
 private const val XMB_DRAWER_ART_ALPHA = 0.34f
@@ -234,7 +267,7 @@ private fun BoxScope.XmbInGameMenuBody(widthDp: Float, onExit: () -> Unit) {
                     val name: @Composable () -> Unit = {
                         Text(
                             title.ifEmpty { L("In game") }, color = cs.onSurface, fontFamily = SoraFamily, fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            fontSize = m.nameSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -249,13 +282,13 @@ private fun BoxScope.XmbInGameMenuBody(widthDp: Float, onExit: () -> Unit) {
 
                 // The pages: Quick, then the full menu's, as icons on a glass strip between the bumper glyphs (the open one tinted; its
                 // name is the page title just below).
-                val stripShape = RoundedCornerShape(16.dp)
+                val stripShape = RoundedCornerShape(14.dp)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxWidth().padding(horizontal = m.padDp.dp),
                 ) {
-                    DeckGlyph("L1", GlyphKind.BUMPER, Modifier.defaultMinSize(minWidth = 24.dp, minHeight = 18.dp))
+                    DeckGlyph("L1", GlyphKind.BUMPER, Modifier.defaultMinSize(minWidth = 22.dp, minHeight = 16.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -271,7 +304,7 @@ private fun BoxScope.XmbInGameMenuBody(widthDp: Float, onExit: () -> Unit) {
                             XmbDrawerTabChip(menuTabIcon(t), menuTabTitle(t), !quick && t == shown, stripFocus, pageFocus, m) { DeckInGameState.selectMenuTab(t) }
                         }
                     }
-                    DeckGlyph("R1", GlyphKind.BUMPER, Modifier.defaultMinSize(minWidth = 24.dp, minHeight = 18.dp))
+                    DeckGlyph("R1", GlyphKind.BUMPER, Modifier.defaultMinSize(minWidth = 22.dp, minHeight = 16.dp))
                 }
 
                 // The open page's name alone; its description is gone to leave the options the room.
@@ -282,19 +315,31 @@ private fun BoxScope.XmbInGameMenuBody(widthDp: Float, onExit: () -> Unit) {
                 ) {
                     Text(
                         pageTitle, color = cs.onSurface, fontFamily = SoraFamily, fontWeight = FontWeight.ExtraBold,
-                        fontSize = 18.sp, lineHeight = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontSize = m.titleSp.sp, lineHeight = (m.titleSp + 2f).sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
 
                 if (!quick && shown == MenuTab.FRIENDS) {
                     // The roster owns its scrolling (a LazyColumn), so it gets the space without a scroll wrapper.
-                    Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = m.padDp.dp, vertical = m.bodyPadDp.dp).focusRequester(pageFocus)) {
+                    Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = m.padDp.dp, vertical = 4.dp).focusRequester(pageFocus)) {
                         IgHostedCard { FriendsContent(state) }
                     }
                 } else {
                     // Each page starts at its top rather than at the previous page's scroll offset.
                     val scroll = key(quick, shown) { rememberScrollState() }
-                    Column(Modifier.weight(1f).fillMaxWidth().igPageScroll(scroll).padding(horizontal = m.padDp.dp, vertical = m.bodyPadDp.dp)) {
+                    // The page fades into the title above and the footer below, only on an edge with more page beyond it. The fade is
+                    // on the viewport (before the scroll), and the padding at both ends is as long as the fade, so the first and
+                    // last rows rest clear of it.
+                    val topFade = animateFloatAsState(if (scroll.canScrollBackward) 1f else 0f, label = "xmbDrawerTopFade")
+                    val bottomFade = animateFloatAsState(if (scroll.canScrollForward) 1f else 0f, label = "xmbDrawerBottomFade")
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .xmbEdgeFade(m.fadeDp, { topFade.value }, { bottomFade.value })
+                            .igPageScroll(scroll)
+                            .padding(horizontal = m.padDp.dp, vertical = m.fadeDp.dp),
+                    ) {
                         // Inside the scroll container, so the request lands on the page's first control, not the scroll group.
                         Column(Modifier.fillMaxWidth().focusRequester(pageFocus)) {
                             if (quick) QuickControls(kind)
@@ -325,9 +370,9 @@ private fun BoxScope.XmbInGameMenuBody(widthDp: Float, onExit: () -> Unit) {
                 ) {
                     XmbDrawerButton(
                         if (isPaused) L("Resume") else L("Pause"), if (isPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
-                        labels, m.buttonDp, ::pauseAndClose, Modifier.weight(1f),
+                        labels, m.buttonDp, m.buttonSp, ::pauseAndClose, Modifier.weight(1f),
                     )
-                    XmbDrawerButton(L("Exit game"), Icons.AutoMirrored.Outlined.Logout, labels, m.buttonDp, onExit, Modifier.weight(1f), danger = true)
+                    XmbDrawerButton(L("Exit game"), Icons.AutoMirrored.Outlined.Logout, labels, m.buttonDp, m.buttonSp, onExit, Modifier.weight(1f), danger = true)
                 }
             }
         }
@@ -347,6 +392,7 @@ private fun XmbDrawerButton(
     icon: ImageVector,
     showLabel: Boolean,
     heightDp: Float,
+    textSp: Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     danger: Boolean = false,
@@ -364,10 +410,10 @@ private fun XmbDrawerButton(
             .border(1.dp, if (danger) cs.error.copy(alpha = 0.7f) else deckLineAt(0.5f), shape)
             .clickable(onClick = onClick)
             .heightIn(min = heightDp.dp)
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 10.dp),
     ) {
-        Icon(icon, contentDescription = label, tint = ink, modifier = Modifier.size(18.dp))
-        if (showLabel) Text(label, color = ink, fontFamily = NunitoSansFamily, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, maxLines = 1)
+        Icon(icon, contentDescription = label, tint = ink, modifier = Modifier.size(16.dp))
+        if (showLabel) Text(label, color = ink, fontFamily = NunitoSansFamily, fontWeight = FontWeight.ExtraBold, fontSize = textSp.sp, maxLines = 1)
     }
 }
 

@@ -40,10 +40,10 @@ class XmbInGameDrawerTest {
 
     @Test
     fun theChromeLeavesTheOptionsTheirRoomOnAShortLandscapePhone() {
-        // 393 dp tall: the header, strip, title and footer total at most 190 dp, so 200 dp or more is left for the page.
+        // 393 dp tall: the header, strip, title and footer total at most 125 dp, so 265 dp or more is left for the page.
         val m = xmbInGameDrawerMetrics(393f)
-        assertTrue(m.chromeDp <= 190f)
-        assertTrue(393f - m.chromeDp >= 200f)
+        assertTrue(m.chromeDp <= 125f)
+        assertTrue(393f - m.chromeDp >= 265f)
     }
 
     @Test
@@ -51,16 +51,29 @@ class XmbInGameDrawerTest {
         val roomy = xmbInGameDrawerMetrics(XMB_DRAWER_SHORT_BELOW_DP)
         val tight = xmbInGameDrawerMetrics(XMB_DRAWER_SHORT_BELOW_DP - 1f)
         assertTrue(tight.chromeDp < roomy.chromeDp)
-        assertTrue(tight.chromeDp <= 160f)
+        assertTrue(tight.chromeDp <= 100f)
+        assertTrue(tight.fadeDp < roomy.fadeDp)
     }
 
     @Test
     fun theRoomyChromeSizesAreTheSlimOnes() {
         val m = xmbInGameDrawerMetrics(393f)
-        assertEquals(44f, m.headerDp, 0.001f)
-        assertEquals(40f, m.chipHeightDp, 0.001f)
-        assertEquals(46f, m.stripDp, 0.001f)
-        assertEquals(44f, m.buttonDp, 0.001f)
-        assertEquals(186f, m.chromeDp, 0.001f)
+        assertEquals(28f, m.headerDp, 0.001f)
+        assertEquals(30f, m.chipHeightDp, 0.001f)
+        assertEquals(34f, m.stripDp, 0.001f)
+        assertEquals(34f, m.buttonDp, 0.001f)
+        assertEquals(122f, m.chromeDp, 0.001f)
+    }
+
+    @Test
+    fun theShortChromeSizesAreSlimmerStill() {
+        assertEquals(97f, xmbInGameDrawerMetrics(340f).chromeDp, 0.001f)
+    }
+
+    @Test
+    fun thePageFadeIsShorterThanHalfTheRoomItGets() {
+        // The fade doubles as the page's padding at both ends; it never eats the whole viewport of even a short page.
+        assertTrue(xmbInGameDrawerMetrics(393f).fadeDp * 2f < 393f - xmbInGameDrawerMetrics(393f).chromeDp)
+        assertTrue(xmbInGameDrawerMetrics(300f).fadeDp * 2f < 300f - xmbInGameDrawerMetrics(300f).chromeDp)
     }
 }
