@@ -288,4 +288,79 @@ class XmbDownloadsLogicTest {
         assertTrue(both, both.contains("/s") && both.contains(" · ") && both.endsWith("~10 min left"))
         assertNotNull(both)
     }
+
+    @Test fun ring_noActiveDownloadIsNull() {
+        assertNull(xmbRingOf(emptyList()))
+        assertNull(
+            xmbRingOf(
+                listOf(
+                    entry("i", DownloadState.INSTALLED),
+                    entry("f", DownloadState.FAILED),
+                    entry("c", DownloadState.CANCELLED),
+                ),
+            ),
+        )
+    }
+
+    @Test fun ring_runningWinsOverPausedAndQueued() {
+        val ring = xmbRingOf(
+            listOf(
+                entry("p", DownloadState.PAUSED, name = "A").copy(pct = 80),
+                entry("q", DownloadState.QUEUED, queuePosition = 1).copy(pct = 70),
+                entry("d", DownloadState.DOWNLOADING, name = "Z").copy(pct = 25),
+            ),
+        )
+        assertEquals(XmbDownloadRing(0.25f, running = true), ring)
+    }
+
+    @Test fun ring_severalRunning_theTopOfThePagesListWins() {
+        val ring = xmbRingOf(
+            listOf(
+                entry("b", DownloadState.DOWNLOADING, name = "Bravo").copy(pct = 90),
+                entry("a", DownloadState.DOWNLOADING, name = "Alpha").copy(pct = 10),
+            ),
+        )
+        assertEquals(XmbDownloadRing(0.1f, running = true), ring)
+    }
+
+    @Test fun ring_nothingRunning_theTopPausedShowsTheWaitingSymbol() {
+        val ring = xmbRingOf(
+            listOf(
+                entry("q", DownloadState.QUEUED, queuePosition = 1).copy(pct = 70),
+                entry("z", DownloadState.PAUSED, name = "Zulu").copy(pct = 40),
+                entry("a", DownloadState.PAUSED, name = "Alpha").copy(pct = 60),
+            ),
+        )
+        assertEquals(XmbDownloadRing(0.6f, running = false), ring)
+    }
+
+    @Test fun ring_onlyQueued_theFirstInTheQueue() {
+        val ring = xmbRingOf(
+            listOf(
+                entry("second", DownloadState.QUEUED, queuePosition = 2).copy(pct = 50),
+                entry("first", DownloadState.QUEUED, queuePosition = 1).copy(pct = 5),
+            ),
+        )
+        assertEquals(XmbDownloadRing(0.05f, running = false), ring)
+    }
+
+    @Test fun ring_progressFromBytes_elseTheRoundedPercent_clampedAndEmptyWhenUnknown() {
+        val bytes = entry("d", DownloadState.DOWNLOADING).copy(installDone = 250, installTotal = 1000, pct = 99)
+        assertEquals(0.25f, xmbRingOf(listOf(bytes))!!.progress, 0.001f)
+        assertEquals(0.4f, xmbRingOf(listOf(entry("d", DownloadState.DOWNLOADING).copy(pct = 40)))!!.progress, 0.001f)
+        assertEquals(1f, xmbRingOf(listOf(entry("d", DownloadState.DOWNLOADING).copy(installDone = 2000, installTotal = 1000)))!!.progress, 0.001f)
+        assertEquals(0f, xmbRingOf(listOf(entry("d", DownloadState.DOWNLOADING).copy(pct = -5)))!!.progress, 0.001f)
+        assertEquals(0f, xmbRingOf(listOf(entry("d", DownloadState.DOWNLOADING)))!!.progress, 0.001f)
+    }
+
+    @Test fun ring_failedAndInstalledDoNotShadowAPausedOne() {
+        val ring = xmbRingOf(
+            listOf(
+                entry("f", DownloadState.FAILED).copy(pct = 90),
+                entry("i", DownloadState.INSTALLED),
+                entry("p", DownloadState.PAUSED).copy(pct = 30),
+            ),
+        )
+        assertEquals(XmbDownloadRing(0.3f, running = false), ring)
+    }
 }

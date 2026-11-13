@@ -66,6 +66,7 @@ import com.winlator.star.ui.screens.XMB_TWO_COL_GAP_DP
 import com.winlator.star.ui.screens.XMB_TWO_COL_MAX_WIDTH_DP
 import com.winlator.star.ui.screens.XMB_TWO_COL_TO_BAR
 import com.winlator.star.ui.screens.XmbDlAction
+import com.winlator.star.ui.screens.XmbDownloadRing
 import com.winlator.star.ui.screens.XmbDlSection
 import com.winlator.star.ui.screens.xmbClick
 import com.winlator.star.ui.screens.xmbDlActions
@@ -80,12 +81,14 @@ import com.winlator.star.ui.screens.xmbDlQuickAction
 import com.winlator.star.ui.screens.xmbDlSizeText
 import com.winlator.star.ui.screens.xmbDlSlot
 import com.winlator.star.ui.screens.xmbDlSpeedText
+import com.winlator.star.ui.screens.xmbRingOf
 import com.winlator.star.ui.screens.xmbTwoColCol
 import com.winlator.star.ui.screens.xmbTwoColColumns
 import com.winlator.star.ui.screens.xmbTwoColSide
 import com.winlator.star.ui.screens.xmbTwoColVertical
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 /** The thin light outline of the card (and the button) under the cursor, as on the Steam Home's covers. */
 private val XMB_DL_OUTLINE = Color.White.copy(alpha = 0.92f)
@@ -102,11 +105,20 @@ private val XMB_DL_GREEN = Color(0xFF3DDC84)
 private val XMB_DL_AMBER = Color(0xFFFFAA00)
 private val XMB_DL_RED = Color(0xFFFF8A80)
 
-/** The number of downloads under way or waiting (queued, downloading, paused), for a badge on the tab. */
-internal fun xmbDownloadsActiveCount(): Int = DownloadRegistry.activeCount.value
-
-/** The same count as a live flow: collect it for the tab's badge ([XmbTabsPageHost]'s `badges`). */
-internal fun xmbDownloadsActiveFlow(): StateFlow<Int> = DownloadRegistry.activeCount
+/**
+ * The ring of the Downloads tab (see [xmbRingOf]), live: null while no download is running, paused or queued. The progress moves in whole
+ * percents, so the Home does not recompose on every byte the registry reports; the ring itself animates between them.
+ */
+@Composable
+internal fun rememberXmbDownloadRing(): XmbDownloadRing? {
+    val flow = remember {
+        DownloadRegistry.entries
+            .map { list -> xmbRingOf(list)?.let { r -> r.copy(progress = (r.progress * 100f).toInt() / 100f) } }
+            .distinctUntilChanged()
+    }
+    val ring by flow.collectAsStateWithLifecycle(initialValue = xmbRingOf(DownloadRegistry.entries.value))
+    return ring
+}
 
 /**
  * The Downloads tab of the XMB Home's tabs page: the cross-store Download Manager as a page of the Home rather than a window of its own.

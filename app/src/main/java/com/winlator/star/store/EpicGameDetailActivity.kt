@@ -73,7 +73,7 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 class EpicGameDetailActivity : ComponentActivity() {
-    // English and left-to-right whatever the phone's language (see AppLocale).
+    // Left-to-right layout whatever the phone's language (see AppLocale).
     override fun attachBaseContext(newBase: android.content.Context) {
         super.attachBaseContext(com.winlator.star.AppLocale.wrap(newBase))
     }
@@ -250,9 +250,10 @@ class EpicGameDetailActivity : ComponentActivity() {
                 if (e != null && (e.state == DownloadState.DOWNLOADING || e.state == DownloadState.PAUSED)) {
                     progressVisible = true
                     progressValue = e.pct
-                    // Epic is pct-only → live "$pct%" label (matches the DL card + notification, and
-                    // the local onProgress below, so a list-started/reopened DL reads identically).
-                    progressLabelText = "Downloading… ${e.pct}%"
+                    // Live "45%  ·  1.2 GB / 4.5 GB  ·  12 MB/s" label from the registry entry (matches the DL
+                    // card + notification, and the local onProgress below, so a list-started/reopened DL
+                    // reads identically). Bare "$pct%" until the first bytes are in.
+                    progressLabelText = epicProgressLabel(e.pct, e.installDone, e.installTotal, e.speedBps, e.etaSeconds)
                     progressLabelVisible = true
                     installBtnVisible = true
                     installBtnText = "Cancel"
@@ -388,6 +389,8 @@ class EpicGameDetailActivity : ComponentActivity() {
                 // Feature #2 — download required(base) + the container language's files only.
                 val installTags = EpicInstallTags.tagsForCurrentContainer(appCtx)
 
+                // Carries the manager's byte counter + speed into every registry tick and label.
+                val tracker = EpicProgressTracker(an)
                 val ok = EpicDownloadManager.install(
                     appCtx,
                     manifestJson,
@@ -395,18 +398,26 @@ class EpicGameDetailActivity : ComponentActivity() {
                     installDir.absolutePath,
                     installTags,
                     cancelled,
-                ) { _, pct ->
-                    // Freeze the card/label the moment the user hits Cancel; install() also polls
-                    // `cancelled` internally and returns false promptly.
-                    if (!cancelled.get()) {
-                        StoreDownloadHooks.tick(Store.EPIC, an, pct)
-                        if (!isDestroyed && !isFinishing) runOnUiThread {
-                            if (isDestroyed || isFinishing) return@runOnUiThread
-                            progressValue = pct
-                            progressLabelText = "Downloading\u2026 $pct%"
+                    object : EpicDownloadManager.ProgressCallback {
+                        override fun onBytes(bytesDone: Long, bytesTotal: Long, speedBps: Long, etaSeconds: Long) {
+                            tracker.onBytes(bytesDone, bytesTotal, speedBps, etaSeconds)
                         }
-                    }
-                }
+
+                        override fun onProgress(message: String?, pct: Int) {
+                            // Freeze the card/label the moment the user hits Cancel; install() also polls
+                            // `cancelled` internally and returns false promptly.
+                            if (!cancelled.get()) {
+                                val p = tracker.tick(pct)
+                                val label = tracker.label(p)
+                                if (!isDestroyed && !isFinishing) runOnUiThread {
+                                    if (isDestroyed || isFinishing) return@runOnUiThread
+                                    progressValue = p
+                                    progressLabelText = label
+                                }
+                            }
+                        }
+                    },
+                )
 
                 if (cancelled.get()) {
                     // Delete the partial download if the user chose "Delete files" on any Cancel dialog.
@@ -673,9 +684,18 @@ class EpicGameDetailActivity : ComponentActivity() {
                 }
                 val damaged = result.corrupt + result.missing
                 runOnUiThread { verifyStatusText = "Repairing $damaged file(s)…" }
-                val ok = EpicDownloadManager.install(appCtx, manifestJson, token, dir, installTags) { _, pct ->
-                    if (!isDestroyed && !isFinishing) runOnUiThread { verifyStatusText = "Repairing… $pct%" }
-                }
+                val repairTracker = EpicProgressTracker(an)
+                val ok = EpicDownloadManager.install(appCtx, manifestJson, token, dir, installTags,
+                    object : EpicDownloadManager.ProgressCallback {
+                        override fun onBytes(bytesDone: Long, bytesTotal: Long, speedBps: Long, etaSeconds: Long) {
+                            repairTracker.onBytes(bytesDone, bytesTotal, speedBps, etaSeconds)
+                        }
+
+                        override fun onProgress(message: String?, pct: Int) {
+                            val label = repairTracker.label(repairTracker.percent(pct), lead = "Repairing…")
+                            if (!isDestroyed && !isFinishing) runOnUiThread { verifyStatusText = label }
+                        }
+                    })
                 if (ok) EpicInstallState.rememberVersion(appCtx, an, manifestJson)
                 runOnUiThread {
                     verifyEnabled = true

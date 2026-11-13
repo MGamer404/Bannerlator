@@ -79,6 +79,16 @@ public class EpicDownloadManager {
 
     public interface ProgressCallback {
         void onProgress(String message, int pct);
+
+        /**
+         * Byte-level progress of the chunk download: {@code bytesDone}/{@code bytesTotal} = chunk bytes
+         * fetched / to fetch, {@code speedBps} = smoothed network speed (0 = unknown), {@code etaSeconds}
+         * = time left (-1 = unknown). Called right before the matching {@link #onProgress}, at the same
+         * cadence, so implementations should only store the values. Never called for phases without a
+         * byte count (manifest, verifying files). Once every chunk is in, a single (total, total, 0, -1)
+         * call marks the file-writing phase. Optional: the default ignores it.
+         */
+        default void onBytes(long bytesDone, long bytesTotal, long speedBps, long etaSeconds) {}
     }
 
     // ── Data classes (public for EpicApiClient size calc) ─────────────────────
@@ -500,6 +510,11 @@ public class EpicDownloadManager {
             final AtomicLong lastSpeedMs       = new AtomicLong(System.currentTimeMillis());
             final AtomicLong lastSpeedBytes    = new AtomicLong(0);
             final AtomicLong currentSpeedBps   = new AtomicLong(0);
+            // Speed/ETA reported through ProgressCallback.onBytes: sliding window + EMA over the bytes
+            // actually fetched (netBytes excludes chunks already in the resume cache, which would
+            // otherwise show up as a burst of speed).
+            final EpicSpeedMeter speedMeter    = new EpicSpeedMeter();
+            final AtomicLong netBytes          = new AtomicLong(0);
             final java.util.concurrent.ConcurrentLinkedQueue<String> chunkLog =
                     new java.util.concurrent.ConcurrentLinkedQueue<>();
 
@@ -525,7 +540,8 @@ public class EpicDownloadManager {
             if (tryRust) {
                 RustPoolResult rr = runRustChunkPool(ctx, dbg, manifestBytes, manifest, pendingFiles,
                         neededChunks, fTotalBytes, installDirPath, cdnUrls, cancelFlag, progressCallback,
-                        completedBytes, completedCount, lastSpeedMs, lastSpeedBytes, currentSpeedBps);
+                        completedBytes, completedCount, lastSpeedMs, lastSpeedBytes, currentSpeedBps,
+                        speedMeter);
                 if (rr.started) {
                     useJavaPool = false;
                     if (rr.cancelled) {
@@ -569,6 +585,7 @@ public class EpicDownloadManager {
                         // Cancel: don't start new chunk work once the user has cancelled.
                         if (cancelFlag != null && cancelFlag.get()) return;
                         File cachedFile = new File(chunkCacheDir, fc.guidStr());
+                        boolean fetched = false;
                         if (!cachedFile.exists()) {
                             if (!downloadChunkStreaming(fc, manifest.chunkDir, cdnUrls, cachedFile,
                                     chunkStatuses, encryptedChunks)) {
@@ -577,7 +594,9 @@ public class EpicDownloadManager {
                                 failCount.incrementAndGet();
                                 return;
                             }
+                            fetched = true;
                         }
+                        long net  = fetched ? netBytes.addAndGet(Math.max(fc.fileSize, 1)) : netBytes.get();
                         long done = completedBytes.addAndGet(Math.max(fc.fileSize, 1));
                         int  cnt  = completedCount.incrementAndGet();
                         int  pct  = (int)(done * 80L / fTotalBytes);
@@ -593,7 +612,7 @@ public class EpicDownloadManager {
 
                         String mb    = String.format("%.1f / %.1f MB", done / 1048576.0, fTotalBytes / 1048576.0);
                         String speed = formatSpeed(currentSpeedBps.get());
-                        progress(progressCallback,
+                        downloadProgress(progressCallback, speedMeter, net, done, fTotalBytes,
                                 "Downloading chunks (" + cnt + "/" + totalChunks + ")  " + mb
                                 + (speed.isEmpty() ? "" : "  " + speed), pct);
                     });
@@ -645,6 +664,8 @@ public class EpicDownloadManager {
                 return false;
             }
             dbg.append("chunksOK=").append(completedCount.get()).append("\n");
+            // All bytes are in: the rest is writing files out (no network speed any more).
+            if (progressCallback != null) progressCallback.onBytes(fTotalBytes, fTotalBytes, 0L, -1L);
 
             // Assemble files — only the pending set (already-correct files are left untouched).
             int totalFiles = pendingFiles.size();
@@ -738,7 +759,8 @@ public class EpicDownloadManager {
             AtomicInteger completedCount,
             AtomicLong lastSpeedMs,
             AtomicLong lastSpeedBytes,
-            AtomicLong currentSpeedBps) {
+            AtomicLong currentSpeedBps,
+            EpicSpeedMeter speedMeter) {
         RustPoolResult r = new RustPoolResult();
         try {
             // pendingFiles are FileInfo objects out of manifest.files (identity, no equals()).
@@ -797,7 +819,7 @@ public class EpicDownloadManager {
 
                     String mb    = String.format("%.1f / %.1f MB", done / 1048576.0, fTotalBytes / 1048576.0);
                     String speed = formatSpeed(currentSpeedBps.get());
-                    progress(progressCallback,
+                    downloadProgress(progressCallback, speedMeter, bytesDone, done, fTotalBytes,
                             "Downloading chunks (" + cnt + "/" + totalChunks + ")  " + mb
                             + (speed.isEmpty() ? "" : "  " + speed), pct);
                 }
@@ -1803,6 +1825,21 @@ public class EpicDownloadManager {
         if (bps <= 0) return "";
         if (bps >= 1048576) return String.format("%.1f MB/s", bps / 1048576.0);
         return (bps / 1024) + " KB/s";
+    }
+
+    /**
+     * Chunk-download progress: the byte pair, smoothed speed and ETA via {@code onBytes}, then the
+     * usual message / pct via {@code onProgress} (same cadence as before; onBytes only hands over numbers).
+     * {@code netBytes} = bytes actually fetched so far (the speed basis); {@code done}/{@code total} =
+     * chunk bytes completed / to complete (the counter basis).
+     */
+    private static void downloadProgress(ProgressCallback cb, EpicSpeedMeter meter, long netBytes,
+                                         long done, long total, String msg, int pct) {
+        if (cb != null) {
+            long bps = meter.addNow(netBytes);
+            cb.onBytes(done, total, bps, meter.etaSeconds(done, total));
+        }
+        progress(cb, msg, pct);
     }
 
     private static void progress(ProgressCallback cb, String msg, int pct) {

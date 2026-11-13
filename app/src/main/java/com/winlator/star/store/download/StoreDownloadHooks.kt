@@ -45,6 +45,8 @@ object StoreDownloadHooks {
                 append(formatDownloadSize(e.installDone)).append(" / ")
                 append(formatDownloadSize(e.installTotal)).append(')')
             }
+            // Epic's downloader now feeds a smoothed speed; the other stores' shade lines stay as they were.
+            if (e.store == Store.EPIC && e.speedBps > 0L) append("  ·  ").append(formatDownloadSpeed(e.speedBps))
         }
         DownloadForegroundService.setProgress(k, line)
     }

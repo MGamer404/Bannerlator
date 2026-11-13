@@ -54,7 +54,7 @@ import java.net.URL
  * [QrLoginActivity], [SteamLoginActivity] and existing intents still target it directly.
  */
 class SteamGamesActivity : ComponentActivity() {
-    // English and left-to-right whatever the phone's language (see AppLocale).
+    // Left-to-right layout whatever the phone's language (see AppLocale).
     override fun attachBaseContext(newBase: android.content.Context) {
         super.attachBaseContext(com.winlator.star.AppLocale.wrap(newBase))
     }

@@ -189,7 +189,7 @@ import java.util.regex.Pattern;
 import cn.sherlock.com.sun.media.sound.SF2Soundbank;
 
 public class XServerDisplayActivity extends AppCompatActivity {
-    // English and left-to-right whatever the phone's language (see AppLocale).
+    // Left-to-right layout whatever the phone's language (see AppLocale).
     @Override
     protected void attachBaseContext(android.content.Context newBase) {
         super.attachBaseContext(com.winlator.star.AppLocale.wrap(newBase));

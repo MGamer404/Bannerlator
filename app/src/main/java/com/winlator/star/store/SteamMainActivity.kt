@@ -111,7 +111,7 @@ import com.winlator.star.ui.theme.LocalAccentDim
  * naturally (RIGHT = next card, DOWN = that card's action, LEFT back out to the rail).
  */
 class SteamMainActivity : ComponentActivity() {
-    // English and left-to-right whatever the phone's language (see AppLocale).
+    // Left-to-right layout whatever the phone's language (see AppLocale).
     override fun attachBaseContext(newBase: android.content.Context) {
         super.attachBaseContext(com.winlator.star.AppLocale.wrap(newBase))
     }

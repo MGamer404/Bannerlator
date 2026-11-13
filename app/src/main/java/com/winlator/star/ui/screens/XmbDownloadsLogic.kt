@@ -173,6 +173,25 @@ internal fun xmbDlProgress(e: DownloadEntry): XmbDlProgress {
     return XmbDlProgress(fraction, (fraction * 100).toInt(), hasBytes)
 }
 
+/**
+ * What the Downloads tab's ring shows: how far the download it follows has got ([progress], 0..1) and whether it is running now
+ * ([running]: a down arrow in the ring) or nothing runs and it waits (a pause symbol).
+ */
+internal data class XmbDownloadRing(val progress: Float, val running: Boolean)
+
+/**
+ * The ring of the Downloads tab for [entries] (any order), or null when nothing is running, paused or queued. It follows the download at
+ * the top of the page's list: the running one (the first, if several run), else the first of the paused ones, else the first queued.
+ */
+internal fun xmbRingOf(entries: List<DownloadEntry>): XmbDownloadRing? {
+    val groups = xmbDlGroups(entries)
+    val active = groups.firstOrNull { it.section == XmbDlSection.ACTIVE }?.entries.orEmpty()
+    val running = active.firstOrNull { it.state == DownloadState.DOWNLOADING }
+    if (running != null) return XmbDownloadRing(xmbDlProgress(running).fraction, running = true)
+    val waiting = active.firstOrNull() ?: groups.firstOrNull { it.section == XmbDlSection.QUEUED }?.entries?.firstOrNull() ?: return null
+    return XmbDownloadRing(xmbDlProgress(waiting).fraction, running = false)
+}
+
 /** "1.2 GB / 3.4 GB" for a store that feeds bytes, else "" (a percentage-only store has no sizes to show). */
 internal fun xmbDlSizeText(e: DownloadEntry): String =
     if (xmbDlProgress(e).hasBytes) "${formatDownloadSize(e.installDone)} / ${formatDownloadSize(e.installTotal)}" else ""

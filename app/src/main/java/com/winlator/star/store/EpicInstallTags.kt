@@ -151,7 +151,7 @@ object EpicInstallTags {
     }
 
     private fun deviceLocaleTag(): String {
-        val loc = com.winlator.star.AppLocale.deviceLocale()
+        val loc = Locale.getDefault()
         val country = loc.country
         return if (country.isNotEmpty()) "${loc.language}_$country" else loc.language
     }

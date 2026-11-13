@@ -126,7 +126,7 @@ import java.io.File
  * Tapping a row opens that game's detail Cloud Saves section.
  */
 class SteamSaveManagerActivity : ComponentActivity() {
-    // English and left-to-right whatever the phone's language (see AppLocale).
+    // Left-to-right layout whatever the phone's language (see AppLocale).
     override fun attachBaseContext(newBase: android.content.Context) {
         super.attachBaseContext(com.winlator.star.AppLocale.wrap(newBase))
     }

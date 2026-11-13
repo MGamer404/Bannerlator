@@ -75,11 +75,6 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 class EpicGamesActivity : ComponentActivity() {
-    // English and left-to-right whatever the phone's language (see AppLocale).
-    override fun attachBaseContext(newBase: android.content.Context) {
-        super.attachBaseContext(com.winlator.star.AppLocale.wrap(newBase))
-    }
-
     data class GameDownloadState(
         val progress: Int = 0,
         val status: String = "",
@@ -471,6 +466,8 @@ class EpicGamesActivity : ComponentActivity() {
                 // Feature #2 — download required(base) + the container language's files only.
                 val installTags = EpicInstallTags.tagsForCurrentContainer(appCtx)
 
+                // Carries the manager's byte counter + speed into every registry tick and the status line.
+                val tracker = EpicProgressTracker(appName)
                 val ok = EpicDownloadManager.install(
                     appCtx,
                     manifestJson,
@@ -478,13 +475,24 @@ class EpicGamesActivity : ComponentActivity() {
                     installDir.absolutePath,
                     installTags,
                     cancelled,
-                ) { msg, pct ->
-                    if (!cancelled.get()) {
-                        StoreDownloadHooks.tick(Store.EPIC, appName, pct)
-                        downloadStates[appName] = downloadStates[appName]?.copy(progress = pct, status = msg)
-                            ?: GameDownloadState(isActive = true, progress = pct, status = msg, showProgress = true)
-                    }
-                }
+                    object : EpicDownloadManager.ProgressCallback {
+                        override fun onBytes(bytesDone: Long, bytesTotal: Long, speedBps: Long, etaSeconds: Long) {
+                            tracker.onBytes(bytesDone, bytesTotal, speedBps, etaSeconds)
+                        }
+
+                        override fun onProgress(message: String?, pct: Int) {
+                            if (!cancelled.get()) {
+                                val p = tracker.tick(pct)
+                                // "45%  ·  1.2 GB / 4.5 GB  ·  12 MB/s" once bytes flow; the manager's own
+                                // message for the phases without a byte count (manifest, verifying, complete).
+                                val status = if (tracker.total > 0L && tracker.done > 0L) tracker.label(p, includeEta = false)
+                                    else message.orEmpty()
+                                downloadStates[appName] = downloadStates[appName]?.copy(progress = p, status = status)
+                                    ?: GameDownloadState(isActive = true, progress = p, status = status, showProgress = true)
+                            }
+                        }
+                    },
+                )
 
                 if (cancelled.get()) {
                     // Delete the partial if the user chose "Delete files" on any Cancel dialog.

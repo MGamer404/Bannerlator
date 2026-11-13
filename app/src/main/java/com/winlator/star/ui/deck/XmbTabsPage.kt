@@ -12,7 +12,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -35,12 +35,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,9 +60,15 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
@@ -86,6 +93,7 @@ import com.winlator.star.container.Shortcut
 import com.winlator.star.ui.LocalTopBarOverlayInset
 import com.winlator.star.ui.LocalXmbHintInset
 import com.winlator.star.ui.screens.XMB_PAGE_TABS
+import com.winlator.star.ui.screens.XmbDownloadRing
 import com.winlator.star.ui.screens.XmbSteamTab
 import com.winlator.star.ui.screens.xmbClick
 import com.winlator.star.ui.screens.xmbTabStep
@@ -128,7 +136,7 @@ private fun XmbSteamTab.labelRes(): Int = when (this) {
  * The Home with the tabs page over it. [open] slides the Home ([home], kept composed, so its focused game stays) up and out and the page
  * in from the bottom, and false slides them back; [tab] is the shown tab's index in [XMB_PAGE_TABS] (any value: it is kept on the list)
  * and [onTab] / [onClose] are asked to change it / to close the page. The Stores tab shows [signedIn] and [games] and opens a store with
- * [onStore]; Start (or the hint) runs [onAddGame]. [badges] are the counts the pill bar shows on a tab (none for a missing or zero one).
+ * [onStore]; Start (or the hint) runs [onAddGame]. [badges] are the counts the pill bar shows on a tab (none for a missing or zero one); [downloadRing] is the Downloads tab's progress ring (none for null).
  * While the page is up the triggers L2 / R2 step the tab from anywhere (through the shell's DeckActions.subTab, so pads whose triggers
  * are analog work too).
  */
@@ -143,6 +151,7 @@ internal fun XmbTabsPageHost(
     onStore: (DeckStore) -> Unit,
     onAddGame: () -> Unit,
     badges: Map<XmbSteamTab, Int> = emptyMap(),
+    downloadRing: XmbDownloadRing? = null,
     home: @Composable () -> Unit,
 ) {
     val progress = animateFloatAsState(if (open) 1f else 0f, tween(XMB_TABS_SLIDE_MS, easing = FastOutSlowInEasing), label = "xmbTabsPage")
@@ -156,7 +165,7 @@ internal fun XmbTabsPageHost(
             // Under the page and over the Home: while the page rises or sinks, a strip of the Home still shows above it, and a tap on that
             // must not reach the games (a cover would open its options under the page).
             Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { } })
-            XmbTabsPageBody(open, progress, tab, onTab, onClose, signedIn, games, onStore, onAddGame, badges)
+            XmbTabsPageBody(open, progress, tab, onTab, onClose, signedIn, games, onStore, onAddGame, badges, downloadRing)
         }
     }
 }
@@ -173,6 +182,7 @@ private fun XmbTabsPageBody(
     onStore: (DeckStore) -> Unit,
     onAddGame: () -> Unit,
     badges: Map<XmbSteamTab, Int>,
+    downloadRing: XmbDownloadRing?,
 ) {
     val tabs = XMB_PAGE_TABS
     val sel = tab.coerceIn(0, tabs.lastIndex)
@@ -294,6 +304,7 @@ private fun XmbTabsPageBody(
                 sel = sel,
                 barFocused = !focus.contentFocused,
                 badges = badges,
+                downloadRing = downloadRing,
                 ss = ss,
                 modifier = Modifier.padding(start = gutterStart, end = gutterEnd),
                 onSelect = { i -> onTabNow(i) },
@@ -334,7 +345,7 @@ private fun XmbTabsPageBody(
 /**
  * The pill bar: L2, the tabs, R2, centred (a row wider than the screen scrolls, and keeps the selected tab in view). The selected tab is
  * a dark see-through pill with white bold text, ringed in the thin light outline while the bar holds the cursor; the others are bold
- * light text. A tab's [badges] count shows as a small badge after its name (see [XmbTabBadge]).
+ * light text. A tab's [badges] count (Friends) and the [downloadRing] (Downloads) show as a small overlay badge right of its name (see [XmbTabPill]).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -343,12 +354,13 @@ private fun XmbTabsBar(
     sel: Int,
     barFocused: Boolean,
     badges: Map<XmbSteamTab, Int>,
+    downloadRing: XmbDownloadRing?,
     ss: ScreenScale,
     modifier: Modifier,
     onSelect: (Int) -> Unit,
     onStep: (Int) -> Unit,
 ) {
-    val shape = RoundedCornerShape(50)
+    val primary = MaterialTheme.colorScheme.primary
     Row(
         modifier.fillMaxWidth().height(48.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -356,7 +368,7 @@ private fun XmbTabsBar(
     ) {
         XmbBarBumper("L2") { onStep(-1) }
         Row(
-            Modifier.weight(1f, fill = false).horizontalScroll(rememberScrollState()),
+            Modifier.weight(1f, fill = false).horizontalScroll(rememberScrollState()).padding(horizontal = xmbBadgeEndRoom(ss)),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(ss.dp(4f)),
         ) {
@@ -374,14 +386,13 @@ private fun XmbTabsBar(
                         .xmbClick(src) { onSelect(i) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(ss.dp(6f)),
-                        modifier = Modifier
-                            .clip(shape)
-                            .background(if (on) XMB_TABS_PILL else Color.Transparent)
-                            .then(if (on && barFocused) Modifier.border(1.5.dp, XMB_FOCUS_OUTLINE, shape) else Modifier)
-                            .padding(horizontal = ss.dp(14f), vertical = ss.dp(7f)),
+                    // The badge is an overlay and the highlight is drawn behind: the tab is the size of its label with or without it.
+                    XmbTabPill(
+                        tab = t, count = count, ring = downloadRing, ss = ss, padEnd = ss.dp(14f),
+                        fill = if (on) XMB_TABS_PILL else Color.Transparent,
+                        outline = if (on && barFocused) XMB_FOCUS_OUTLINE else null,
+                        outlineWidth = 1.5.dp,
+                        accent = primary,
                     ) {
                         Text(
                             stringResource(t.labelRes()).uppercase(),
@@ -390,8 +401,8 @@ private fun XmbTabsBar(
                             letterSpacing = 1.5.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
+                            modifier = Modifier.padding(horizontal = ss.dp(14f), vertical = ss.dp(7f)),
                         )
-                        XmbTabBadge(t, count, ss)
                     }
                 }
             }
@@ -400,26 +411,135 @@ private fun XmbTabsBar(
     }
 }
 
+/** The height of a tab's badge (the ring's size, the count pill's height): under the label's line, so it can never make a tab taller. */
+private fun xmbBadgeH(ss: ScreenScale): Dp = ss.dp(14f)
+
+/** The width of a tab's badge: the ring's size, or the count pill's (one digit as wide as it is high, a little more for each more). */
+private fun xmbBadgeW(tab: XmbSteamTab?, count: Int, ss: ScreenScale): Dp {
+    val digits = if (tab == XmbSteamTab.FRIENDS) count.toString().length.coerceAtLeast(1) else 1
+    return ss.dp(14f + 6f * (digits - 1))
+}
+
 /**
- * A tab's count badge, a small pill after its name (the pill bar's and the Home peek's): Friends' online count in Steam's green, the
- * other tabs' (active downloads) in the accent. Nothing for a count of zero.
+ * How far the selected tab's highlight reaches past the tab's own right edge to house a badge of width [w]: the badge starts a gap
+ * after the label (which ends [padEnd] in from the edge) and the highlight keeps a margin past it; nothing when the tab's own padding
+ * already has the room.
+ */
+private fun xmbBadgeReach(w: Dp, padEnd: Dp, ss: ScreenScale): Dp = maxOf(ss.dp(4f) + w + ss.dp(4f) - padEnd, 0.dp)
+
+/**
+ * The room a row of tabs keeps clear at each of its ends (the same at both, so the row stays centred), for the badge and the highlight
+ * of the last tab to reach into: a scrolling row clips at its ends.
+ */
+internal fun xmbBadgeEndRoom(ss: ScreenScale): Dp = ss.dp(12f)
+
+/**
+ * The selected tab's highlight, drawn behind the tab without a say in its size: a see-through pill over the tab's own bounds, with the
+ * thin [outline] (of [outlineWidth]) inside it when there is one, and [reach] wider to the right (the room for the badge). Nothing for a
+ * [fill] and an [outline] that are both clear.
+ */
+private fun Modifier.xmbTabHighlight(fill: Color, outline: Color?, outlineWidth: Dp, reach: () -> Dp): Modifier = drawBehind {
+    val w = this.size.width + reach().toPx()
+    val h = this.size.height
+    if (fill.alpha > 0f) drawRoundRect(fill, size = Size(w, h), cornerRadius = CornerRadius(h / 2f, h / 2f))
+    if (outline != null) {
+        val sw = outlineWidth.toPx()
+        drawRoundRect(
+            outline, topLeft = Offset(sw / 2f, sw / 2f), size = Size(w - sw, h - sw),
+            cornerRadius = CornerRadius(h / 2f - sw / 2f, h / 2f - sw / 2f), style = Stroke(sw),
+        )
+    }
+}
+
+/** What a tab's badge last showed, kept so it can fade out in place after the ring or the count has gone. */
+private class XmbBadgeHold {
+    var ring: XmbDownloadRing? = null
+    var count = 0
+}
+
+/**
+ * A tab of the pill bar or of the Home's peek: its [label] (the text with its padding, [padEnd] of it at the right), the selected tab's
+ * highlight ([fill], [outline]) behind it, and the tab's badge, Friends' online [count] in Steam's green or Downloads' [ring] in
+ * [accent]. The badge is an overlay: it sits just right of the label, in the gap before the next tab, and the highlight is drawn a
+ * little wider to cover it, but the tab's own size is that of its label whether the badge shows or not, so nothing moves (and the
+ * highlight is as tall as ever). The badge fades in and out where it is.
  */
 @Composable
-internal fun XmbTabBadge(tab: XmbSteamTab, count: Int, ss: ScreenScale) {
-    if (count <= 0) return
-    val friends = tab == XmbSteamTab.FRIENDS
-    Box(
-        Modifier
-            .defaultMinSize(minWidth = ss.dp(16f), minHeight = ss.dp(16f))
-            .clip(CircleShape)
-            .background(if (friends) XMB_TABS_BADGE else MaterialTheme.colorScheme.primary)
-            .padding(horizontal = ss.dp(4f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            count.toString(), color = if (friends) Color.Black else MaterialTheme.colorScheme.onPrimary,
-            fontSize = ss.sp(9f), fontWeight = FontWeight.ExtraBold, maxLines = 1,
-        )
+internal fun XmbTabPill(
+    tab: XmbSteamTab?,
+    count: Int,
+    ring: XmbDownloadRing?,
+    ss: ScreenScale,
+    padEnd: Dp,
+    fill: Color,
+    outline: Color?,
+    outlineWidth: Dp,
+    accent: Color,
+    label: @Composable () -> Unit,
+) {
+    val hold = remember { XmbBadgeHold() }
+    if (ring != null) hold.ring = ring
+    if (count > 0) hold.count = count
+    val wanted = when (tab) {
+        XmbSteamTab.DOWNLOADS -> ring != null
+        XmbSteamTab.FRIENDS -> count > 0
+        else -> false
+    }
+    val shown = animateFloatAsState(if (wanted) 1f else 0f, tween(180), label = "xmbTabBadge")
+    val bw = xmbBadgeW(tab, hold.count, ss)
+    val bh = xmbBadgeH(ss)
+    val reach = xmbBadgeReach(bw, padEnd, ss)
+    Box(Modifier.xmbTabHighlight(fill, outline, outlineWidth) { reach * shown.value }) {
+        label()
+        // Its right edge is the label's end plus the gap plus its width, measured from the tab's right edge (the label ends padEnd in).
+        val at = Modifier
+            .align(Alignment.CenterEnd)
+            .offset(x = ss.dp(4f) + bw - padEnd)
+            .graphicsLayer { alpha = shown.value }
+        val held = hold.ring
+        if (tab == XmbSteamTab.DOWNLOADS && held != null) {
+            XmbRingGlyph(held, ss, accent, bh, at)
+        } else if (tab == XmbSteamTab.FRIENDS && hold.count > 0) {
+            Box(
+                at.size(width = bw, height = bh).clip(CircleShape).background(XMB_TABS_BADGE),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(hold.count.toString(), color = Color.Black, fontSize = ss.sp(9f), fontWeight = FontWeight.ExtraBold, maxLines = 1)
+            }
+        }
+    }
+}
+
+/**
+ * The Downloads tab's ring, [size] square: a hollow circle with a faint track, whose stroke fills clockwise from the top in [accent] as
+ * far as [ring]'s progress, with a down arrow in it while a download runs and a pause symbol while the ones waiting do.
+ */
+@Composable
+private fun XmbRingGlyph(ring: XmbDownloadRing, ss: ScreenScale, accent: Color, size: Dp, modifier: Modifier) {
+    val sweep by animateFloatAsState(ring.progress, tween(300), label = "xmbRingSweep")
+    val running = ring.running
+    Canvas(modifier.size(size)) {
+        val stroke = ss.dp(2f).toPx()
+        val dia = this.size.minDimension - stroke
+        val topLeft = Offset(stroke / 2f, stroke / 2f)
+        val arc = Size(dia, dia)
+        drawArc(accent.copy(alpha = 0.28f), 0f, 360f, false, topLeft = topLeft, size = arc, style = Stroke(stroke))
+        if (sweep > 0.001f) {
+            drawArc(accent, -90f, 360f * sweep, false, topLeft = topLeft, size = arc, style = Stroke(stroke, cap = StrokeCap.Round))
+        }
+        // The symbol, strokes with round ends: its half-size is a fifth of the ring's inside.
+        val cx = this.size.width / 2f
+        val cy = this.size.height / 2f
+        val h = dia * 0.21f
+        val w = ss.dp(1.5f).toPx()
+        if (running) {
+            drawLine(accent, Offset(cx, cy - h), Offset(cx, cy + h), w, StrokeCap.Round)
+            drawLine(accent, Offset(cx - h, cy), Offset(cx, cy + h), w, StrokeCap.Round)
+            drawLine(accent, Offset(cx + h, cy), Offset(cx, cy + h), w, StrokeCap.Round)
+        } else {
+            drawLine(accent, Offset(cx - h * 0.55f, cy - h), Offset(cx - h * 0.55f, cy + h), w * 1.15f, StrokeCap.Round)
+            drawLine(accent, Offset(cx + h * 0.55f, cy - h), Offset(cx + h * 0.55f, cy + h), w * 1.15f, StrokeCap.Round)
+        }
     }
 }
 

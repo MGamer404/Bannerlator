@@ -67,7 +67,8 @@ import com.winlator.star.androidgames.AndroidGames
 import com.winlator.star.container.Shortcut
 import com.winlator.star.ui.deck.ScreenScale
 import com.winlator.star.ui.deck.XMB_FOCUS_OUTLINE
-import com.winlator.star.ui.deck.XmbTabBadge
+import com.winlator.star.ui.deck.XmbTabPill
+import com.winlator.star.ui.deck.xmbBadgeEndRoom
 import com.winlator.star.ui.deck.XmbStoreMark
 import com.winlator.star.ui.deck.storeMarkOf
 import com.winlator.star.ui.deck.xmbInkColor
@@ -214,7 +215,7 @@ private fun XmbSteamBlurred(lift: () -> Float, blurs: Boolean, content: @Composa
  * the options are open: the card [liftIdx] (the focused one when they opened) glides to the left margin, lifted and larger, with the
  * column opening under it and the other covers continuing in a row to its right (dimmed with an opaque overlay), and the title and
  * tabs fade out. Going back, the row glides to where it rested. [tabsActive] = tab [tabSel], the one the host's tabs page last showed, is
- * highlighted (the tabs are the peek of that page; they never hold the cursor); [tabsEnabled] = they can be tapped; [badges] are the counts shown
+ * highlighted (the tabs are the peek of that page; they never hold the cursor); [tabsEnabled] = they can be tapped; [badges] are the counts and [downloadRing] the Downloads tab's progress ring shown
  * after the tabs. [onCard] / [onTab] are taps.
  */
 @Composable
@@ -234,6 +235,7 @@ internal fun XmbSteamHome(
     tabsActive: Boolean,
     tabsEnabled: Boolean,
     badges: Map<XmbSteamTab, Int>,
+    downloadRing: XmbDownloadRing?,
     onCard: (Int) -> Unit,
     onTab: (Int) -> Unit,
 ) {
@@ -249,7 +251,7 @@ internal fun XmbSteamHome(
             }
         }
         XmbSteamTitle(focused, sdBadge, sl, row, target, pos, accent, ss, lift)
-        if (tabs.isNotEmpty()) XmbSteamTabs(tabs, tabSel, tabsActive, tabsEnabled, badges, sl, accent, ss, lift, onTab)
+        if (tabs.isNotEmpty()) XmbSteamTabs(tabs, tabSel, tabsActive, tabsEnabled, badges, downloadRing, sl, accent, ss, lift, onTab)
     }
 }
 
@@ -444,7 +446,7 @@ private fun XmbSteamTitle(
 
 // The plain text tabs, the peek of the tabs page: small, upper case, letter-spaced, evenly spaced and centred on the screen. The one the
 // page last showed is pure white in a thin white outline pill on a faint accent fill; the rest are bold light grey. A tab's count
-// (active downloads, online friends) shows as a small badge after its name.
+// (a ring for the downloads, the friends online) is drawn as an overlay just right of its name, so it moves nothing.
 @Composable
 private fun XmbSteamTabs(
     tabs: List<XmbAction>,
@@ -452,13 +454,13 @@ private fun XmbSteamTabs(
     active: Boolean,
     enabled: Boolean,
     badges: Map<XmbSteamTab, Int>,
+    downloadRing: XmbDownloadRing?,
     sl: XmbSteamLayout,
     accent: Color,
     ss: ScreenScale,
     lift: () -> Float,
     onTap: (Int) -> Unit,
 ) {
-    val shape = RoundedCornerShape(50)
     val tabScroll = rememberScrollState()
     Box(
         Modifier
@@ -471,7 +473,7 @@ private fun XmbSteamTabs(
         // Wider than the screen (a narrow one), the row scrolls. It takes the horizontal drag only then: a scroll modifier that has
         // nothing to scroll would still swallow a swipe that starts on the tabs, and the games row above could not be swiped from here.
         Row(
-            Modifier.horizontalScroll(tabScroll, enabled = tabScroll.maxValue > 0),
+            Modifier.horizontalScroll(tabScroll, enabled = tabScroll.maxValue > 0).padding(horizontal = xmbBadgeEndRoom(ss)),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -486,15 +488,16 @@ private fun XmbSteamTabs(
                             .then(if (enabled) Modifier.xmbClick(src) { onTap(i) } else Modifier),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier
-                                .clip(shape)
-                                .background(if (on) accent.copy(alpha = 0.22f) else Color.Transparent)
-                                .then(if (on) Modifier.border(1.5.dp, Color.White, shape) else Modifier)
-                                .padding(horizontal = XMB_STEAM_TAB_PAD.dp, vertical = 6.dp),
+                        // The badge is an overlay and the highlight is drawn behind: the tab is the size of its label with or without it.
+                        XmbTabPill(
+                            tab = XMB_PAGE_TABS.getOrNull(i), count = XMB_PAGE_TABS.getOrNull(i)?.let { badges[it] } ?: 0,
+                            ring = downloadRing, ss = ss, padEnd = XMB_STEAM_TAB_PAD.dp,
+                            fill = if (on) accent.copy(alpha = 0.22f) else Color.Transparent,
+                            outline = if (on) Color.White else null,
+                            outlineWidth = 1.5.dp,
+                            accent = accent,
                         ) {
+                            // The tabs are those of XMB_PAGE_TABS, in its order.
                             Text(
                                 tab.label.uppercase(),
                                 color = if (on) Color.White else XMB_STEAM_TAB_INK,
@@ -503,9 +506,8 @@ private fun XmbSteamTabs(
                                 fontWeight = FontWeight.Black,
                                 maxLines = 1,
                                 style = XMB_STEAM_TEXT,
+                                modifier = Modifier.padding(horizontal = XMB_STEAM_TAB_PAD.dp, vertical = 6.dp),
                             )
-                            // The tabs are those of XMB_PAGE_TABS, in its order.
-                            XMB_PAGE_TABS.getOrNull(i)?.let { kind -> XmbTabBadge(kind, badges[kind] ?: 0, ss) }
                         }
                     }
                 }

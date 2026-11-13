@@ -209,6 +209,8 @@ internal fun ShortcutsXmbView(
     homeTabs: List<XmbAction> = emptyList(),
     /** The counts the peek shows after its tabs ([homeTabs] are the tabs of [XMB_PAGE_TABS], in its order; a missing or zero one shows nothing). */
     homeBadges: Map<XmbSteamTab, Int> = emptyMap(),
+    /** The Downloads tab's progress ring on the peek (null: none). */
+    homeDownloadRing: XmbDownloadRing? = null,
     /** The index in [homeTabs] of the tab the host's tabs page last showed (highlighted under the games), or -1 when it has not been used yet. */
     homeTabSel: Int = -1,
     /** Asked before the view takes D-pad focus (entry, resume): false leaves focus where it is. */
@@ -676,7 +678,7 @@ internal fun ShortcutsXmbView(
                     XmbSteamHome(
                         shortcuts = shortcuts, pos = pos, target = target, liftIdx = liftIdx, sl = sl, accent = accent, ss = ss,
                         focused = focused, sdBadge = sdBadge,
-                        lift = { 1f - cT }, tabs = homeTabs, tabSel = tabIdx, tabsActive = tabsActive, tabsEnabled = centered, badges = homeBadges,
+                        lift = { 1f - cT }, tabs = homeTabs, tabSel = tabIdx, tabsActive = tabsActive, tabsEnabled = centered, badges = homeBadges, downloadRing = homeDownloadRing,
                         onCard = { i ->
                             if (nav.depth == 0) {
                                 val s = shortcuts[i]

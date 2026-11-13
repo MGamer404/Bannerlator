@@ -408,12 +408,13 @@ internal fun DeckHome(
             }
         }
     }
-    // The counts on the tabs, shown on the page's pill bar and on the Home's peek: downloads under way or waiting (an accent badge) and
-    // friends online (Steam's green). Nothing shows for a zero. Collected only in the XMB home, so no other mode watches them.
-    val downloadsActive = if (xmbHome) xmbDownloadsActiveFlow().collectAsState().value else 0
+    // What the tabs show, on the page's pill bar and on the Home's peek: a progress ring on Downloads (the running download's, else the
+    // top paused or queued one's; none when nothing is active) and the friends online (Steam's green; nothing for a zero). Collected only
+    // in the XMB home, so no other mode watches them.
+    val downloadRing = if (xmbHome) rememberXmbDownloadRing() else null
     val friendsOnline = if (xmbHome) rememberXmbFriendsBadge() else 0
-    val xmbBadges: Map<XmbSteamTab, Int> = remember(downloadsActive, friendsOnline) {
-        mapOf(XmbSteamTab.DOWNLOADS to downloadsActive, XmbSteamTab.FRIENDS to friendsOnline)
+    val xmbBadges: Map<XmbSteamTab, Int> = remember(friendsOnline) {
+        mapOf(XmbSteamTab.FRIENDS to friendsOnline)
     }
     // The store logos on the covers' marks are big PNGs: decode them now, off the main thread, so the first frame finds them ready.
     LaunchedEffect(xmbHome) {
@@ -557,6 +558,7 @@ internal fun DeckHome(
                 onStore = { store -> launchStore(store.screen) },
                 onAddGame = { addGame() },
                 badges = xmbBadges,
+                downloadRing = downloadRing,
             ) {
                 ShortcutsXmbView(
                     // The XMB home runs the whole library, recent first, in one row with no All Games card.
@@ -583,6 +585,7 @@ internal fun DeckHome(
                     steamHome = xmbHome,
                     homeTabs = xmbTabs,
                     homeBadges = xmbBadges,
+                    homeDownloadRing = downloadRing,
                     centeredHome = xmbHome,
                     takeFocus = { !xmbHome || (!deckActions.navHold.value && !tabsPageOpen) },
                     focusTick = if (xmbHome) deckActions.enterTick.intValue + tabsPageClosed else 0,

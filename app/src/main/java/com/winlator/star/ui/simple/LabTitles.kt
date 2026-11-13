@@ -138,7 +138,7 @@ internal object LabTitles {
     }
 
     private fun xboxTitles(ids: List<String>, languages: String): Map<String, String>? {
-        val market = com.winlator.star.AppLocale.deviceLocale().country.uppercase(Locale.ROOT).takeIf { it.matches(Regex("[A-Z]{2}")) } ?: "US"
+        val market = Locale.getDefault().country.uppercase(Locale.ROOT).takeIf { it.matches(Regex("[A-Z]{2}")) } ?: "US"
         val body = SteamStoreSearch.httpGet(
             "https://displaycatalog.mp.microsoft.com/v7.0/products?bigIds=${ids.joinToString(",")}&market=$market&languages=$languages,neutral",
         ) ?: return null

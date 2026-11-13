@@ -255,6 +255,8 @@ internal class DownloadActions(private val activity: Activity, private val inlin
             // reading "installed" from a record the Manager never touched (device-observed bug).
             DownloadRegistry.removeLibraryEntry(entry.key)
             purgeNativeInstall(entry)
+            // The game's shortcuts go with it (a game kept for another client's sake keeps them: it is still there).
+            if (!imported) removeShortcutsOf(entry)
             uninstallingName = null
             notice = when {
                 imported -> activity.getString(R.string.steam_lib_uninstall_kept, entry.name)
@@ -262,6 +264,33 @@ internal class DownloadActions(private val activity: Activity, private val inlin
                 else -> "Couldn't fully remove ${entry.name}"
             }
         }
+    }
+
+    /**
+     * Deletes the shortcuts of an uninstalled game (see [DownloadShortcutMatch] for which ones belong to it), off the UI thread, the
+     * same way the game's own Remove does (the .desktop file, its .lnk, the launcher pin), then lets every game list reload.
+     */
+    private fun removeShortcutsOf(entry: DownloadEntry) {
+        val ctx = activity.applicationContext
+        val imageFsRoot = File(ctx.filesDir, "imagefs").absolutePath
+        val installPath = entry.installPath
+        Thread {
+            val removed = runCatching {
+                var count = 0
+                for (s in com.winlator.star.container.ContainerManager(ctx).loadShortcuts()) {
+                    val mine = DownloadShortcutMatch.belongs(entry.store, entry.id, installPath, imageFsRoot, s.path) { s.getExtra(it) }
+                    if (!mine) continue
+                    val lnk = File(s.file.path.substringBeforeLast('.') + ".lnk")
+                    if (s.file.delete()) {
+                        if (lnk.exists()) lnk.delete()
+                        com.winlator.star.ui.screens.ShortcutsViewModel.disableOnScreen(ctx, s)
+                        count++
+                    }
+                }
+                count
+            }.getOrDefault(0)
+            if (removed > 0) com.winlator.star.ui.screens.ShortcutsViewModel.notifyContainersChanged()
+        }.start()
     }
 
     /**

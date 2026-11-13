@@ -56,7 +56,7 @@ import com.winlator.star.store.download.DownloadsButton
  * titles open [StoreCatalogDetailActivity], and claims go through [StoreWebActivity].
  */
 class GogMainActivity : ComponentActivity() {
-    // English and left-to-right whatever the phone's language (see AppLocale).
+    // Left-to-right layout whatever the phone's language (see AppLocale).
     override fun attachBaseContext(newBase: android.content.Context) {
         super.attachBaseContext(com.winlator.star.AppLocale.wrap(newBase))
     }
