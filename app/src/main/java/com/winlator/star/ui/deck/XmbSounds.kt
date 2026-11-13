@@ -56,7 +56,7 @@ internal class XmbSoundLimiter {
         const val ACTION_GAP_MS = 150L
 
         /** A tick is about this long: the next one waits for it. */
-        const val FOCUS_GAP_MS = 45L
+        const val FOCUS_GAP_MS = 60L
 
         private const val NEVER = Long.MIN_VALUE / 2
     }

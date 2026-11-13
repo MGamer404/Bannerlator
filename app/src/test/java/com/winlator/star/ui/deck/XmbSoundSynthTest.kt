@@ -22,10 +22,10 @@ class XmbSoundSynthTest {
 
     @Test
     fun eachSoundHasItsLength() {
-        assertEquals(40.0, millis(render(XmbSoundKind.FOCUS)), 5.0)
+        assertEquals(60.0, millis(render(XmbSoundKind.FOCUS)), 5.0)
         assertEquals(130.0, millis(render(XmbSoundKind.SELECT)), 10.0)
         assertEquals(100.0, millis(render(XmbSoundKind.BACK)), 10.0)
-        assertEquals(180.0, millis(render(XmbSoundKind.PAGE)), 10.0)
+        assertEquals(120.0, millis(render(XmbSoundKind.PAGE)), 10.0)
     }
 
     @Test
@@ -43,6 +43,13 @@ class XmbSoundSynthTest {
         for (kind in listOf(XmbSoundKind.SELECT, XmbSoundKind.BACK, XmbSoundKind.PAGE)) {
             assertTrue("$kind", focus < peak(render(kind)))
         }
+    }
+
+    @Test
+    fun thePageSoundIsQuieterThanSelectAndBack() {
+        val page = peak(render(XmbSoundKind.PAGE))
+        assertTrue(page < peak(render(XmbSoundKind.SELECT)))
+        assertTrue(page < peak(render(XmbSoundKind.BACK)))
     }
 
     @Test

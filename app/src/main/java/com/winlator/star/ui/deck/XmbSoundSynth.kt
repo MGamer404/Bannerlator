@@ -10,14 +10,14 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-// The interface sounds of the XMB (XmbSounds.kt plays them): four short, quiet sounds computed here from plain sine tones, decays and
-// filtered noise. Nothing is recorded or loaded: every sample comes out of the formulas below, the same on every call, so the sounds
-// are the same on every device and can be tested without Android.
+// The interface sounds of the XMB (XmbSounds.kt plays them): four short, quiet sounds computed here from plain sine tones and decays.
+// Nothing is recorded or loaded: every sample comes out of the formulas below, the same on every call, so the sounds are the same on
+// every device and can be tested without Android.
 //
-//   FOCUS   a soft glassy tick: a bright sine with a fast decay, a faint inharmonic overtone and a breath of noise at the start.
+//   FOCUS   a barely-there soft, round "tok": one low sine with a slow attack and a smooth decay.
 //   SELECT  a warm two-note chime rising by a fifth, each note a sine with a quiet 2nd harmonic and a soft attack.
 //   BACK    one lower soft note that sinks a little in pitch.
-//   PAGE    a gentle swell: low-passed noise rising and falling over a very soft tone.
+//   PAGE    a short, quiet sine that glides up a little, with a very quiet 2nd harmonic.
 //
 // Each sound is scaled to its own peak, well under full scale, and ends on a short fade, so none of them clips or clicks.
 
@@ -32,31 +32,23 @@ internal object XmbSoundSynth {
     private const val TWO_PI = 2.0 * PI
 
     // Length (s), peak (share of full scale) and closing fade (s) of each sound.
-    private const val FOCUS_SECONDS = 0.040
-    private const val FOCUS_PEAK = 0.25
-    private const val FOCUS_FADE_S = 0.005
+    private const val FOCUS_SECONDS = 0.060
+    private const val FOCUS_PEAK = 0.17
+    private const val FOCUS_FADE_S = 0.010
     private const val SELECT_SECONDS = 0.130
     private const val SELECT_PEAK = 0.45
     private const val SELECT_FADE_S = 0.030
     private const val BACK_SECONDS = 0.100
     private const val BACK_PEAK = 0.40
     private const val BACK_FADE_S = 0.025
-    private const val PAGE_SECONDS = 0.180
-    private const val PAGE_PEAK = 0.35
-    private const val PAGE_FADE_S = 0.010
+    private const val PAGE_SECONDS = 0.120
+    private const val PAGE_PEAK = 0.22
+    private const val PAGE_FADE_S = 0.030
 
-    // FOCUS: a 1.75 kHz sine decaying with a 7 ms time constant, an overtone at 2.76 x (glass is not harmonic), and noise through a
-    // one-pole low-pass that dies away in 1.5 ms.
-    private const val FOCUS_HZ = 1750.0
-    private const val FOCUS_DECAY_S = 0.007
-    private const val FOCUS_OVERTONE_RATIO = 2.76
-    private const val FOCUS_OVERTONE_GAIN = 0.25
-    private const val FOCUS_OVERTONE_DECAY_S = 0.004
-    private const val FOCUS_NOISE_COEF = 0.45
-    private const val FOCUS_NOISE_GAIN = 0.35
-    private const val FOCUS_NOISE_DECAY_S = 0.0015
-    private const val FOCUS_ATTACK_S = 0.001
-    private const val FOCUS_SEED = 0x2F6E2B1
+    // FOCUS: a plain 1 kHz sine, a 4 ms attack, a 16 ms decay time constant.
+    private const val FOCUS_HZ = 1000.0
+    private const val FOCUS_DECAY_S = 0.016
+    private const val FOCUS_ATTACK_S = 0.004
 
     // SELECT: 880 Hz, then 1320 Hz (a perfect fifth up) 45 ms later; each note a sine plus a 2nd harmonic at 0.2, a 5 ms attack, an
     // exponential decay.
@@ -76,12 +68,12 @@ internal object XmbSoundSynth {
     private const val BACK_DECAY_S = 0.035
     private const val BACK_ATTACK_S = 0.005
 
-    // PAGE: noise through two one-pole low-passes at 900 Hz and a 700 Hz sine under it, both under a sin^2 swell that is zero at both ends.
-    private const val PAGE_CUTOFF_HZ = 900.0
-    private const val PAGE_NOISE_GAIN = 3.0
-    private const val PAGE_TONE_HZ = 700.0
-    private const val PAGE_TONE_GAIN = 0.08
-    private const val PAGE_SEED = 0x1B3A7D5
+    // PAGE: 520 Hz gliding up 20 % (to 624 Hz) over the sound, a 2nd harmonic at 0.08, a 12 ms attack, a 50 ms decay.
+    private const val PAGE_HZ = 520.0
+    private const val PAGE_GLIDE = 0.20
+    private const val PAGE_HARMONIC_GAIN = 0.08
+    private const val PAGE_DECAY_S = 0.050
+    private const val PAGE_ATTACK_S = 0.012
 
     /** [kind] as 16-bit mono samples at [sampleRate]. Pure and deterministic: the same arguments give the same samples. */
     fun render(kind: XmbSoundKind, sampleRate: Int): ShortArray {
@@ -114,14 +106,9 @@ internal object XmbSoundSynth {
     }
 
     private fun focus(x: DoubleArray, rate: Double) {
-        val noise = Noise(FOCUS_SEED)
-        var lowPassed = 0.0
         for (i in x.indices) {
             val t = i / rate
-            val glass = sin(TWO_PI * FOCUS_HZ * t) * exp(-t / FOCUS_DECAY_S) +
-                FOCUS_OVERTONE_GAIN * sin(TWO_PI * FOCUS_HZ * FOCUS_OVERTONE_RATIO * t) * exp(-t / FOCUS_OVERTONE_DECAY_S)
-            lowPassed += FOCUS_NOISE_COEF * (noise.next() - lowPassed)
-            x[i] = (glass + FOCUS_NOISE_GAIN * lowPassed * exp(-t / FOCUS_NOISE_DECAY_S)) * attack(t, FOCUS_ATTACK_S)
+            x[i] = sin(TWO_PI * FOCUS_HZ * t) * exp(-t / FOCUS_DECAY_S) * attack(t, FOCUS_ATTACK_S)
         }
     }
 
@@ -150,17 +137,12 @@ internal object XmbSoundSynth {
     }
 
     private fun page(x: DoubleArray, rate: Double) {
-        val noise = Noise(PAGE_SEED)
-        val coef = 1.0 - exp(-TWO_PI * PAGE_CUTOFF_HZ / rate)
         val length = x.size / rate
-        var pole1 = 0.0
-        var pole2 = 0.0
+        var phase = 0.0
         for (i in x.indices) {
             val t = i / rate
-            pole1 += coef * (noise.next() - pole1)
-            pole2 += coef * (pole1 - pole2)
-            val s = sin(PI * t / length)
-            x[i] = s * s * (PAGE_NOISE_GAIN * pole2 + PAGE_TONE_GAIN * sin(TWO_PI * PAGE_TONE_HZ * t))
+            x[i] = (sin(phase) + PAGE_HARMONIC_GAIN * sin(2.0 * phase)) * exp(-t / PAGE_DECAY_S) * attack(t, PAGE_ATTACK_S)
+            phase += TWO_PI * PAGE_HZ * (1.0 + PAGE_GLIDE * t / length) / rate
         }
     }
 
@@ -175,17 +157,5 @@ internal object XmbSoundSynth {
         val loudest = x.maxOf { abs(it) }
         val gain = if (loudest > 0.0) peak / loudest else 0.0
         return ShortArray(n) { (x[it] * gain * FULL_SCALE).roundToInt().toShort() }
-    }
-
-    /** White noise in [-1, 1) from a fixed seed (xorshift), so a sound is the same every time. */
-    private class Noise(seed: Int) {
-        private var state = seed
-
-        fun next(): Double {
-            state = state xor (state shl 13)
-            state = state xor (state ushr 17)
-            state = state xor (state shl 5)
-            return state / 2147483648.0
-        }
     }
 }
